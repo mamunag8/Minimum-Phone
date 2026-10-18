@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Minimum Phone</string>
+    <string name="title_activity_main">Minimum Phone</string>
+    <string name="package_name">com.kasbllc.minimumphone</string>
+    <string name="custom_url_scheme">com.kasbllc.minimumphone</string>
+</resources>

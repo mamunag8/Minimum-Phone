@@ -1,0 +1,21 @@
+# Dependencies & Build Cache
+node_modules/
+dist/
+.vite/
+
+# Android Gradle Build Cache (keep source, manifest & release bundles in play-store-submission/)
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
+
+# iOS Build Cache
+ios/App/Pods/
+ios/App/build/
+ios/DerivedData/
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+*.log
