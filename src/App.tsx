@@ -1,15 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type {
+  AppFrictionTier,
   AppItem,
   CalmTrigger,
   FocusVaultState,
   HabitWallType,
   HomeProfileType,
+  InspirationMode,
   LanguageCode,
   NotificationItem,
   PlatformMode,
   PurityState,
   ScratchpadNote,
+  SlowLearningState,
   VisualTheme,
   WisdomPackSource,
 } from './types/app';
@@ -29,13 +32,14 @@ import {
   forceTriggerHomePicker,
   launchNativeAndroidApp,
   loadRealInstalledApps,
+  openPhoneMainSetting,
   openSystemHomeSettings,
   requestDefaultHomeLauncher,
   toggleHardwareKioskPin,
   type NativeLauncherStatus,
 } from './services/nativeLauncherBridge';
 
-const STORAGE_KEY = 'minimum_phone_kasb_state_v1';
+const STORAGE_KEY = 'minimum_phone_kasb_state_v2';
 
 export function App() {
   // Persistent state initialization
@@ -43,10 +47,21 @@ export function App() {
   const [platform, setPlatform] = useState<PlatformMode>('android');
   const [visualTheme, setVisualTheme] = useState<VisualTheme>('oled-black');
   const [grayscaleEnabled, setGrayscaleEnabled] = useState<boolean>(true);
+  const [inspirationMode, setInspirationMode] = useState<InspirationMode>('blended');
   const [wisdomPack, setWisdomPack] = useState<WisdomPackSource>('blended');
   const [showArabicScript, setShowArabicScript] = useState<boolean>(true);
   const [defaultHabitWall, setDefaultHabitWall] =
-    useState<HabitWallType>('calm-transcribe');
+    useState<HabitWallType>('read-30s-quiz');
+
+  const [slowLearning, setSlowLearning] = useState<SlowLearningState>({
+    track: 'islam',
+    require30sQuizToOpenApps: true,
+    readingDurationSeconds: 30,
+    xp: 45,
+    lessonsCompleted: 3,
+    quizzesPassed: 3,
+    currentLessonIndex: 0,
+  });
 
   const [activeTab, setActiveTab] = useState<
     'home' | 'drawer' | 'purity' | 'digest-focus' | 'system-kasb'
@@ -71,7 +86,7 @@ export function App() {
   const [impulsesStopped, setImpulsesStopped] = useState<number>(18);
   const [reclaimedMinutes, setReclaimedMinutes] = useState<number>(270);
 
-  // Purity & Anti-Porn State (default 7 days clean so user sees real progress immediately)
+  // Purity & Anti-Porn State (default 7 days clean + strictPornLockdown enabled)
   const [purity, setPurity] = useState<PurityState>(() => ({
     streakStartIso: new Date(Date.now() - 7 * 86400000 - 3 * 3600000).toISOString(),
     bestStreakDays: 14,
@@ -80,6 +95,10 @@ export function App() {
     adultDnsEnabled: true,
     browserKeywordShield: true,
     nightGuardLock: true,
+    strictPornLockdown: true,
+    safeSearchEnforced: true,
+    customBlockedKeywords: [],
+    emergencyBrowserLockUntilMs: null,
     pledgedToday: null,
     logs: [],
   }));
@@ -134,17 +153,40 @@ export function App() {
     totalSeconds: number;
   } | null>(null);
 
-  // Restless Unlock Calm Mind Overlay
+  // Restless Unlock Calm Mind Overlay & Immediate Modals
   const [restlessOverlayOpen, setRestlessOverlayOpen] = useState<boolean>(false);
   const [openPuritySosImmediately, setOpenPuritySosImmediately] =
     useState<boolean>(false);
+  const [openHowToGuideImmediately, setOpenHowToGuideImmediately] =
+    useState<boolean>(false);
+  const [deviceLayout, setDeviceLayout] = useState<'auto' | 'phone' | 'wide'>('auto');
+  const [activeBuiltInUtility, setActiveBuiltInUtility] = useState<
+    'calculator' | 'authenticator' | null
+  >(null);
+  const [calcDisplay, setCalcDisplay] = useState<string>('0');
+  const [deferredPwaPrompt, setDeferredPwaPrompt] = useState<
+    (Event & { prompt: () => Promise<void> }) | null
+  >(null);
 
-  // Sync Native Android Core Launcher Status + Real Installed Phone Apps
+  // Sync Native Android / iOS / Web Core Launcher Status + Real Installed Phone Apps
   const refreshNativeStatus = async () => {
     const status = await fetchNativeLauncherStatus();
     setLauncherStatus(status);
+    if (status.platform === 'ios' || status.osFamily === 'ios') {
+      setPlatform('ios');
+    } else if (status.platform === 'android' || status.osFamily === 'android') {
+      setPlatform('android');
+    } else {
+      setPlatform('web');
+    }
     if (status.batteryLevel > 0) setBatteryLevel(status.batteryLevel);
     setIsCharging(status.isCharging);
+  };
+
+  const handleRefreshInstalledApps = () => {
+    loadRealInstalledApps(apps).then((merged) => {
+      setApps(merged);
+    });
   };
 
   useEffect(() => {
@@ -177,13 +219,20 @@ export function App() {
       refreshNativeStatus();
     };
 
+    const onBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPwaPrompt(e as Event & { prompt: () => Promise<void> });
+    };
+
     window.addEventListener('minimumphone:home', onHomePressed);
     window.addEventListener('minimumphone:back', onBackPressed);
     window.addEventListener('minimumphone:resume', onResume);
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
     return () => {
       window.removeEventListener('minimumphone:home', onHomePressed);
       window.removeEventListener('minimumphone:back', onBackPressed);
       window.removeEventListener('minimumphone:resume', onResume);
+      window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
     };
   }, []);
 
@@ -204,9 +253,12 @@ export function App() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.lang) setLang(parsed.lang);
+        if (parsed.inspirationMode) setInspirationMode(parsed.inspirationMode);
         if (parsed.wisdomPack) setWisdomPack(parsed.wisdomPack);
         if (typeof parsed.grayscaleEnabled === 'boolean')
           setGrayscaleEnabled(parsed.grayscaleEnabled);
+        if (parsed.defaultHabitWall) setDefaultHabitWall(parsed.defaultHabitWall);
+        if (parsed.slowLearning) setSlowLearning(parsed.slowLearning);
         if (parsed.impulsesStopped) setImpulsesStopped(parsed.impulsesStopped);
         if (parsed.reclaimedMinutes) setReclaimedMinutes(parsed.reclaimedMinutes);
         if (parsed.purity) setPurity(parsed.purity);
@@ -223,8 +275,11 @@ export function App() {
         STORAGE_KEY,
         JSON.stringify({
           lang,
+          inspirationMode,
           wisdomPack,
           grayscaleEnabled,
+          defaultHabitWall,
+          slowLearning,
           impulsesStopped,
           reclaimedMinutes,
           purity,
@@ -233,7 +288,17 @@ export function App() {
     } catch {
       // Ignore quota errors
     }
-  }, [lang, wisdomPack, grayscaleEnabled, impulsesStopped, reclaimedMinutes, purity]);
+  }, [
+    lang,
+    inspirationMode,
+    wisdomPack,
+    grayscaleEnabled,
+    defaultHabitWall,
+    slowLearning,
+    impulsesStopped,
+    reclaimedMinutes,
+    purity,
+  ]);
 
   // Live clock tick
   useEffect(() => {
@@ -274,9 +339,43 @@ export function App() {
   const currentLangMeta =
     SUPPORTED_LANGUAGES.find((l) => l.code === lang) || SUPPORTED_LANGUAGES[0];
 
-  // Filtered Calm Mind Triggers based on user's selected pack (Quran / Hadith / Proverbs / Blended)
+  // Handle Mode of Inspiration changes (Fully Islamic vs Common Universal vs Blended)
+  const handleChangeInspirationMode = (mode: InspirationMode) => {
+    setInspirationMode(mode);
+    if (mode === 'islamic') {
+      setShowArabicScript(true);
+      setWisdomPack('quran');
+      setSlowLearning((prev) => ({ ...prev, track: 'islam', currentLessonIndex: 0 }));
+    } else if (mode === 'universal') {
+      setShowArabicScript(false);
+      setWisdomPack('proverbs');
+      setSlowLearning((prev) => ({
+        ...prev,
+        track: prev.track === 'islam' ? 'mindfulness' : prev.track,
+        currentLessonIndex: 0,
+      }));
+    } else {
+      setWisdomPack('blended');
+    }
+  };
+
+  // Filtered Calm Mind Triggers based on user's Mode of Inspiration & Wisdom Pack
   const filteredCalmTriggers = useMemo<CalmTrigger[]>(() => {
     const nonPurity = CALM_MIND_TRIGGERS.filter((item) => item.category !== 'purity');
+    if (inspirationMode === 'islamic') {
+      if (wisdomPack === 'hadith') {
+        return nonPurity.filter((item) => item.category === 'hadith');
+      }
+      if (wisdomPack === 'quran') {
+        return nonPurity.filter((item) => item.category === 'quran');
+      }
+      return nonPurity.filter(
+        (item) => item.category === 'quran' || item.category === 'hadith'
+      );
+    }
+    if (inspirationMode === 'universal') {
+      return nonPurity.filter((item) => item.category === 'proverb');
+    }
     if (wisdomPack === 'quran') {
       return nonPurity.filter((item) => item.category === 'quran');
     }
@@ -287,15 +386,15 @@ export function App() {
       return nonPurity.filter((item) => item.category === 'proverb');
     }
     return nonPurity;
-  }, [wisdomPack]);
+  }, [inspirationMode, wisdomPack]);
 
   const activeCalmTrigger =
-    filteredCalmTriggers[triggerIndex % filteredCalmTriggers.length] ||
+    filteredCalmTriggers[triggerIndex % Math.max(1, filteredCalmTriggers.length)] ||
     CALM_MIND_TRIGGERS[0];
 
-  // Essential 5 apps for current Home Screen profile
+  // Active Home Apps (up to 7 apps for current Home Screen profile)
   const pinnedHomeApps = useMemo(() => {
-    return apps.filter((a) => a.pinnedProfiles.includes(homeProfile)).slice(0, 5);
+    return apps.filter((a) => a.pinnedProfiles.includes(homeProfile)).slice(0, 7);
   }, [apps, homeProfile]);
 
   // Search-First App Drawer Filtering with Asymmetric Friction
@@ -304,16 +403,18 @@ export function App() {
     if (!q) {
       if (revealRestrictedInDrawer) return apps;
       // Only show non-restricted tools unless searched
-      return apps.filter((a) => a.tier !== 'restricted');
+      return apps.filter((a) => a.tier !== 'restricted' && a.tier !== 'adult-blocked');
     }
 
     return apps.filter((app) => {
       const nameEn = app.name.toLowerCase();
       const nameBn = (app.nameBn || '').toLowerCase();
-      if (app.tier === 'restricted' && !revealRestrictedInDrawer) {
-        // Require typing at least 4 characters or exact prefix of restricted app
+      if (
+        (app.tier === 'restricted' || app.tier === 'adult-blocked') &&
+        !revealRestrictedInDrawer
+      ) {
         return (
-          q.length >= 4 && (nameEn.startsWith(q) || nameEn === q || nameBn.includes(q))
+          q.length >= 3 && (nameEn.startsWith(q) || nameEn === q || nameBn.includes(q))
         );
       }
       return nameEn.includes(q) || nameBn.includes(q);
@@ -321,9 +422,26 @@ export function App() {
   }, [apps, searchQuery, revealRestrictedInDrawer]);
 
   const handleTapApp = (app: AppItem) => {
-    // Anti-Escape Guard: if user tries to open Android Settings while Uninstall/Switch Protection is enabled
     const lowerName = app.name.toLowerCase();
     const lowerPkg = (app.packageName || '').toLowerCase();
+
+    // 1. Complete Porn & Adult Block Check: if app is adult-blocked or Emergency 15m Browser Lock is active
+    const isEmergencyLockActive =
+      purity.emergencyBrowserLockUntilMs &&
+      Date.now() < purity.emergencyBrowserLockUntilMs;
+
+    if (
+      app.tier === 'adult-blocked' ||
+      (isEmergencyLockActive &&
+        (app.category === 'browser' || app.category === 'social'))
+    ) {
+      setImpulsesStopped((n) => n + 1);
+      setOpenPuritySosImmediately(true);
+      setActiveTab('purity');
+      return;
+    }
+
+    // 2. Anti-Escape Guard: if user tries to open Android Settings while Uninstall/Switch Protection is enabled
     if (
       vault.uninstallProtectionEnabled &&
       (lowerName === 'settings' ||
@@ -336,19 +454,23 @@ export function App() {
       return;
     }
 
-    // Check if Physical QR Brick Lock is active for restricted apps
+    // 3. Check if Physical QR Brick Lock is active for restricted apps
     if (app.tier === 'restricted' && vault.physicalBrickLocked) {
       setActiveTab('digest-focus');
       return;
     }
 
-    if (app.tier === 'restricted') {
+    // 4. If Strict Porn Lockdown is active, browsers are always gated by the 30s Read + Quiz Gate
+    const isStrictBrowserGate =
+      (purity.strictPornLockdown ?? true) && app.category === 'browser';
+
+    if (app.tier === 'restricted' || isStrictBrowserGate) {
       setTriggerIndex((i) => i + 1);
       setInterceptedApp(app);
       return;
     }
 
-    // Utility / Essential app launches immediately with zero dopamine friction
+    // 5. Utility / Essential app launches immediately with zero dopamine friction
     setApps((prev) =>
       prev.map((a) =>
         a.id === app.id
@@ -362,19 +484,44 @@ export function App() {
       secondsRemaining: 15 * 60,
       totalSeconds: 15 * 60,
     });
-    launchNativeAndroidApp(app, 0);
+    launchNativeAndroidApp(app, 0).then((launched) => {
+      if (!launched) {
+        if (app.id === 'notes') {
+          setShowScratchpad(true);
+          setActiveTab('home');
+        } else if (app.id === 'quran-sunnah') {
+          setTriggerIndex((i) => i + 1);
+          setRestlessOverlayOpen(true);
+        } else if (app.id === 'calculator') {
+          setCalcDisplay('0');
+          setActiveBuiltInUtility('calculator');
+        } else if (app.id === 'authenticator') {
+          setActiveBuiltInUtility('authenticator');
+        }
+      }
+    });
   };
 
-  const handleTogglePinHome = (appId: string) => {
+  const handleTogglePinAppToProfile = (appId: string, profile: HomeProfileType) => {
     setApps((prev) =>
       prev.map((a) => {
         if (a.id !== appId) return a;
-        const hasProfile = a.pinnedProfiles.includes(homeProfile);
+        const hasProfile = a.pinnedProfiles.includes(profile);
         const nextProfiles = hasProfile
-          ? a.pinnedProfiles.filter((p) => p !== homeProfile)
-          : [...a.pinnedProfiles, homeProfile];
+          ? a.pinnedProfiles.filter((p) => p !== profile)
+          : [...a.pinnedProfiles, profile];
         return { ...a, pinnedProfiles: nextProfiles };
       })
+    );
+  };
+
+  const handleTogglePinHome = (appId: string) => {
+    handleTogglePinAppToProfile(appId, homeProfile);
+  };
+
+  const handleChangeAppTier = (appId: string, tier: AppFrictionTier) => {
+    setApps((prev) =>
+      prev.map((a) => (a.id === appId ? { ...a, tier } : a))
     );
   };
 
@@ -388,6 +535,19 @@ export function App() {
         };
       })
     );
+  };
+
+  const handleAddCustomApp = (name: string, tier: AppFrictionTier) => {
+    const newItem: AppItem = {
+      id: `custom-${Date.now()}`,
+      name,
+      category: tier === 'restricted' ? 'social' : 'utility',
+      tier,
+      dailyOpens: 0,
+      dailyMinutesUsed: 0,
+      pinnedProfiles: [homeProfile],
+    };
+    setApps((prev) => [newItem, ...prev]);
   };
 
   const handleReturnToPeaceFromIntercept = () => {
@@ -438,7 +598,6 @@ export function App() {
       secondsRemaining: minutesBid * 60,
       totalSeconds: minutesBid * 60,
     });
-    // Launch the real Android app with automatic return timer when minutesBid expires!
     launchNativeAndroidApp(target, minutesBid);
   };
 
@@ -487,6 +646,13 @@ export function App() {
       ? 'theme-sunset'
       : 'bg-black text-zinc-100';
 
+  const shellWidthClass =
+    deviceLayout === 'phone'
+      ? 'w-full max-w-lg'
+      : deviceLayout === 'wide'
+      ? 'w-full max-w-5xl'
+      : 'w-full max-w-lg md:max-w-2xl lg:max-w-4xl';
+
   return (
     <div
       dir={currentLangMeta.dir}
@@ -494,10 +660,12 @@ export function App() {
         grayscaleEnabled ? 'system-grayscale' : ''
       } bg-zinc-950 text-zinc-100`}
     >
-      {/* TOP BAR: MULTILINGUAL SWITCHER + QUICK SIMULATOR TRIGGERS */}
-      <div className="w-full max-w-lg border-b border-zinc-900 bg-black px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-tech">
+      {/* TOP BAR: MULTILINGUAL SWITCHER + INSPIRATION MODE + DEVICE LAYOUT + GUIDE & SETTINGS */}
+      <div
+        className={`${shellWidthClass} border-b border-zinc-900 bg-black px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-tech transition-all`}
+      >
         {/* Instant Language Switcher Pill */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap">
           {SUPPORTED_LANGUAGES.map((l) => (
             <button
               key={l.code}
@@ -515,35 +683,77 @@ export function App() {
           ))}
         </div>
 
-        {/* Platform & Quick Demo Actions */}
-        <div className="flex items-center gap-1.5">
+        {/* Quick Mode of Inspiration + Universal Device View + PWA Install + Guide + Settings Shortcuts */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {deferredPwaPrompt && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await deferredPwaPrompt.prompt();
+                  setDeferredPwaPrompt(null);
+                } catch {
+                  // Ignore prompt dismissal
+                }
+              }}
+              className="px-2 py-0.5 border border-zinc-100 bg-zinc-100 text-black font-semibold cursor-pointer"
+              title="Install Minimum Phone on this device (Android, iOS, Desktop, Tablet)"
+            >
+              ⬇ Install App
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => setPlatform((p) => (p === 'android' ? 'ios' : 'android'))}
-            className="px-2 py-0.5 border border-zinc-800 text-zinc-300 hover:border-zinc-600 cursor-pointer uppercase"
+            onClick={() =>
+              setDeviceLayout((prev) =>
+                prev === 'auto' ? 'phone' : prev === 'phone' ? 'wide' : 'auto'
+              )
+            }
+            className="px-2 py-0.5 border border-zinc-800 text-zinc-300 hover:border-zinc-500 cursor-pointer"
+            title="Switch Device Form Factor Layout (Auto Fit Any Screen / Compact Phone / Wide Tablet & Desktop)"
           >
-            {platform === 'android' ? 'ANDROID' : 'iOS'}
+            {deviceLayout === 'phone'
+              ? '📱 Phone'
+              : deviceLayout === 'wide'
+              ? '🖥️ Wide'
+              : '📐 Auto-Fit'}
           </button>
           <button
             type="button"
-            onClick={() => setGrayscaleEnabled((g) => !g)}
-            className={`px-2 py-0.5 border cursor-pointer ${
-              grayscaleEnabled
-                ? 'border-zinc-300 bg-zinc-900 text-zinc-100'
-                : 'border-zinc-800 text-zinc-500'
-            }`}
+            onClick={() =>
+              handleChangeInspirationMode(
+                inspirationMode === 'islamic'
+                  ? 'universal'
+                  : inspirationMode === 'universal'
+                  ? 'blended'
+                  : 'islamic'
+              )
+            }
+            className="px-2 py-0.5 border border-zinc-700 text-zinc-200 hover:border-zinc-400 cursor-pointer"
+            title="Switch Mode of Inspiration (Islamic / Common Universal / Hybrid)"
           >
-            B&W
+            {inspirationMode === 'islamic'
+              ? '🕌 Islamic'
+              : inspirationMode === 'universal'
+              ? '🌍 Common'
+              : '✨ Hybrid'}
           </button>
           <button
             type="button"
             onClick={() => {
-              const ig = apps.find((a) => a.id === 'instagram') || apps[11];
-              handleTapApp(ig);
+              setOpenHowToGuideImmediately(true);
+              setActiveTab('system-kasb');
             }}
-            className="px-2 py-0.5 border border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 cursor-pointer"
+            className="px-2 py-0.5 border border-zinc-700 text-zinc-200 hover:bg-zinc-900 cursor-pointer"
           >
-            Test Inhale
+            📘 Guide
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('system-kasb')}
+            className="px-2 py-0.5 border border-zinc-600 bg-zinc-900 text-zinc-100 hover:bg-zinc-800 cursor-pointer"
+          >
+            ⚙️ {t.navSystemKasb}
           </button>
         </div>
       </div>
@@ -551,7 +761,7 @@ export function App() {
       {/* ACTIVE UNLOCKED APP SESSION BANNER (WITH TOP-EDGE PROGRESS & 60S GENTLE FADE) */}
       {activeSession && (
         <div
-          className={`w-full max-w-lg border-b border-zinc-700 px-4 py-2.5 transition-opacity ${
+          className={`${shellWidthClass} border-b border-zinc-700 px-4 py-2.5 transition-opacity ${
             activeSession.secondsRemaining <= 60 ? 'bg-zinc-900/95' : 'bg-zinc-950'
           }`}
         >
@@ -594,17 +804,17 @@ export function App() {
         </div>
       )}
 
-      {/* MAIN PHONE LAUNCHER CONTAINER */}
+      {/* MAIN PHONE / TABLET / DESKTOP ADAPTIVE LAUNCHER CONTAINER */}
       <main
-        className={`w-full max-w-lg flex-1 flex flex-col justify-between border-x border-zinc-900 px-6 py-5 ${themeClass}`}
+        className={`${shellWidthClass} flex-1 flex flex-col justify-between border-x border-zinc-900 px-6 py-5 transition-all ${themeClass}`}
       >
         {/* =========================================================
             TAB 1: THE MINIMALIST MONOCHROME HOME SCREEN (ZERO ICONS)
            ========================================================= */}
         {activeTab === 'home' && (
-          <div className="flex-1 flex flex-col justify-between space-y-6">
+          <div className="flex-1 flex flex-col justify-between space-y-5">
             {/* Top Status Row: Only Clock, Date, Battery %, and Reassurance Digest Line */}
-            <div className="space-y-2.5 pt-2">
+            <div className="space-y-2.5 pt-1">
               <div className="flex items-baseline justify-between">
                 <h1 className="text-5xl sm:text-6xl font-mono-tech font-light tracking-tight">
                   {formattedClock}
@@ -612,7 +822,7 @@ export function App() {
                 <div className="text-right font-mono-tech text-xs opacity-70">
                   <div>{formattedDate}</div>
                   <div className="mt-0.5">
-                    BAT {batteryLevel}% {isCharging ? '⚡' : ''}
+                    BAT {batteryLevel}% {isCharging ? '⚡' : ''} · {slowLearning.xp} XP
                   </div>
                 </div>
               </div>
@@ -750,13 +960,22 @@ export function App() {
                 </button>
               </div>
             ) : (
-              /* STANDARD MINIMALIST 5 ESSENTIAL APPS LIST */
-              <div className="my-auto space-y-5 py-2">
-                {/* Context Profile Switcher (Work / Personal / Sunset) */}
+              /* STANDARD MINIMALIST ACTIVE HOME APPS LIST */
+              <div className="my-auto space-y-4 py-1">
+                {/* Context Profile Switcher (Work / Personal / Sunset) + Edit Active Apps */}
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono-tech uppercase tracking-widest opacity-60">
-                    {t.essentialAppsTitle}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono-tech uppercase tracking-widest opacity-60">
+                      {t.essentialAppsTitle}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('system-kasb')}
+                      className="text-[10px] font-mono-tech underline opacity-65 hover:opacity-100 cursor-pointer"
+                    >
+                      [Edit]
+                    </button>
+                  </div>
                   <div className="flex gap-1 text-[11px] font-mono-tech">
                     {(
                       [
@@ -788,27 +1007,31 @@ export function App() {
                   </div>
                 </div>
 
-                {/* Text-Only Monochromatic 5 App List */}
-                <div className="space-y-2.5">
+                {/* Text-Only Monochromatic Active Home App List */}
+                <div className="space-y-2">
                   {pinnedHomeApps.map((app) => (
                     <button
                       key={app.id}
                       type="button"
                       onClick={() => handleTapApp(app)}
-                      className="w-full text-left py-2.5 border-b border-zinc-900/90 flex items-baseline justify-between group cursor-pointer"
+                      className="w-full text-left py-2 border-b border-zinc-900/90 flex items-baseline justify-between group cursor-pointer"
                     >
                       <span className="text-2xl sm:text-3xl font-light tracking-tight group-hover:translate-x-1.5 transition-transform">
                         {lang === 'bn' && app.nameBn ? app.nameBn : app.name}
                       </span>
                       <span className="text-[10px] font-mono-tech opacity-40 group-hover:opacity-80">
-                        {app.tier === 'restricted' ? 'INHALE' : 'OPEN'}
+                        {app.tier === 'restricted'
+                          ? '30S QUIZ'
+                          : app.tier === 'adult-blocked'
+                          ? 'BLOCKED'
+                          : 'OPEN'}
                       </span>
                     </button>
                   ))}
                 </div>
 
                 {/* Search-First Bar Trigger + Quick Mind-Dump Scratchpad Toggle */}
-                <div className="grid grid-cols-3 gap-2 pt-2">
+                <div className="grid grid-cols-3 gap-2 pt-1">
                   <button
                     type="button"
                     onClick={() => setActiveTab('drawer')}
@@ -852,7 +1075,7 @@ export function App() {
                           key={n.id}
                           className="flex items-center justify-between text-xs font-mono-tech py-1 border-b border-zinc-900"
                         >
-                          <span className=" opacity-85">{n.text}</span>
+                          <span className="opacity-85">{n.text}</span>
                           <button
                             type="button"
                             onClick={() =>
@@ -870,12 +1093,12 @@ export function App() {
                   </div>
                 )}
 
-                {/* Quick Action Row: Monk Mode + Urge SOS + Restless Mind Reset */}
-                <div className="grid grid-cols-3 gap-2 pt-1">
+                {/* Quick Action Row: Monk Mode + Urge SOS + Phone Settings + Sakinah */}
+                <div className="grid grid-cols-4 gap-1.5 pt-1">
                   <button
                     type="button"
                     onClick={() => setActiveTab('digest-focus')}
-                    className="py-2 border border-zinc-800 text-[11px] font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
+                    className="py-2 border border-zinc-800 text-[10px] font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
                   >
                     ◎ {t.startMonkModeBtn}
                   </button>
@@ -885,9 +1108,16 @@ export function App() {
                       setOpenPuritySosImmediately(true);
                       setActiveTab('purity');
                     }}
-                    className="py-2 border border-zinc-700 text-[11px] font-mono-tech font-medium hover:bg-zinc-900 cursor-pointer"
+                    className="py-2 border border-zinc-700 text-[10px] font-mono-tech font-medium hover:bg-zinc-900 cursor-pointer"
                   >
                     ⚡ {t.urgeSosBtn}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openPhoneMainSetting('main')}
+                    className="py-2 border border-zinc-800 text-[10px] font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
+                  >
+                    ⚙️ Phone OS
                   </button>
                   <button
                     type="button"
@@ -895,16 +1125,16 @@ export function App() {
                       setTriggerIndex((i) => i + 1);
                       setRestlessOverlayOpen(true);
                     }}
-                    className="py-2 border border-zinc-800 text-[11px] font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
+                    className="py-2 border border-zinc-800 text-[10px] font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
                   >
-                    ❖ Sakīnah
+                    ❖ {inspirationMode === 'universal' ? 'Wisdom' : 'Sakīnah'}
                   </button>
                 </div>
               </div>
             )}
 
             {/* BOTTOM HOME ANCHOR: SMALL, STRONG CALM MIND LINE (QURAN / HADITH / PROVERB) */}
-            <div className="border-t border-zinc-800/80 pt-3.5 space-y-1.5">
+            <div className="border-t border-zinc-800/80 pt-3 space-y-1.5">
               <div className="flex items-center justify-between text-[10px] font-mono-tech uppercase tracking-widest opacity-55">
                 <span>
                   {t.calmWhisperLabel} · {activeCalmTrigger.category.toUpperCase()}
@@ -917,11 +1147,14 @@ export function App() {
                   {t.nextWhisperBtn} ↻
                 </button>
               </div>
-              {showArabicScript && activeCalmTrigger.arabic && lang !== 'ar' && (
-                <p dir="rtl" className="font-arabic text-sm opacity-85 leading-relaxed">
-                  {activeCalmTrigger.arabic}
-                </p>
-              )}
+              {showArabicScript &&
+                activeCalmTrigger.arabic &&
+                lang !== 'ar' &&
+                inspirationMode !== 'universal' && (
+                  <p dir="rtl" className="font-arabic text-sm opacity-85 leading-relaxed">
+                    {activeCalmTrigger.arabic}
+                  </p>
+                )}
               <p className="text-xs sm:text-sm leading-relaxed font-normal">
                 “{getTriggerText(activeCalmTrigger, lang)}”
               </p>
@@ -986,7 +1219,7 @@ export function App() {
                       <button
                         type="button"
                         onClick={() => handleTogglePinHome(app.id)}
-                        title="Pin or unpin from 5-app Home Screen"
+                        title="Pin or unpin from Active Home Screen"
                         className={`px-2 py-0.5 text-[10px] font-mono-tech border cursor-pointer ${
                           isPinnedToCurrent
                             ? 'border-zinc-200 bg-zinc-200 text-black font-semibold'
@@ -998,7 +1231,7 @@ export function App() {
                       <button
                         type="button"
                         onClick={() => handleToggleRestrictedTier(app.id)}
-                        title="Toggle Inhale Gate lock for this app"
+                        title="Toggle 30s Read+Quiz Gate lock for this app"
                         className={`px-2 py-0.5 text-[10px] font-mono-tech border cursor-pointer ${
                           app.tier === 'restricted'
                             ? 'border-zinc-500 text-zinc-200'
@@ -1021,7 +1254,7 @@ export function App() {
                 );
               })}
 
-              {!revealRestrictedInDrawer && searchQuery.length < 4 && (
+              {!revealRestrictedInDrawer && searchQuery.length < 3 && (
                 <div className="p-3.5 border border-dashed border-zinc-800 text-xs font-mono-tech opacity-60 text-center">
                   {t.typeExactToReveal} (e.g., type “Instagram”, “TikTok”, “YouTube”, or tap
                   “Show All Apps” above).
@@ -1041,6 +1274,7 @@ export function App() {
               lang={lang}
               platform={platform}
               showArabicScript={showArabicScript}
+              inspirationMode={inspirationMode}
               openSosImmediately={openPuritySosImmediately}
               onClearImmediateSos={() => setOpenPuritySosImmediately(false)}
               onUpdatePurity={setPurity}
@@ -1081,7 +1315,8 @@ export function App() {
         )}
 
         {/* =========================================================
-            TAB 5: VAULT, LANGUAGE, WISDOM SOURCE & KASB LLC ECOSYSTEM
+            TAB 5: COMPLETE SETTINGS MENU, PHONE MAIN SETTINGS, ACTIVE APPS,
+                   INSPIRATION MODE, SLOW LEARNING & HOW-TO GUIDE
            ========================================================= */}
         {activeTab === 'system-kasb' && (
           <div className="flex-1 overflow-y-auto">
@@ -1090,6 +1325,8 @@ export function App() {
               onChangeLanguage={setLang}
               platform={platform}
               onChangePlatform={setPlatform}
+              inspirationMode={inspirationMode}
+              onChangeInspirationMode={handleChangeInspirationMode}
               wisdomPack={wisdomPack}
               onChangeWisdomPack={setWisdomPack}
               showArabicScript={showArabicScript}
@@ -1100,7 +1337,17 @@ export function App() {
               onChangeVisualTheme={setVisualTheme}
               defaultHabitWall={defaultHabitWall}
               onChangeDefaultHabitWall={setDefaultHabitWall}
+              slowLearning={slowLearning}
+              onUpdateSlowLearning={setSlowLearning}
+              homeProfile={homeProfile}
+              onChangeHomeProfile={setHomeProfile}
               apps={apps}
+              onTogglePinAppToProfile={handleTogglePinAppToProfile}
+              onChangeAppTier={handleChangeAppTier}
+              onAddCustomApp={handleAddCustomApp}
+              onRefreshInstalledApps={handleRefreshInstalledApps}
+              openHowToGuideImmediately={openHowToGuideImmediately}
+              onClearHowToGuideTrigger={() => setOpenHowToGuideImmediately(false)}
               impulsesStopped={impulsesStopped}
               reclaimedMinutes={reclaimedMinutes}
               purity={purity}
@@ -1137,15 +1384,29 @@ export function App() {
         </nav>
       </main>
 
-      {/* INHALE & CALM MIND INTERCEPT MODAL */}
+      {/* INHALE & 30-SEC SLOW LEARNING READ + PLAY QUIZ INTERCEPT MODAL */}
       {interceptedApp && (
         <InhaleInterceptModal
           app={interceptedApp}
           trigger={activeCalmTrigger}
           lang={lang}
-          showArabicScript={showArabicScript}
-          activeHabitWall={defaultHabitWall}
-          requireHabitWallAlways={false}
+          showArabicScript={showArabicScript && inspirationMode !== 'universal'}
+          activeHabitWall={
+            slowLearning.require30sQuizToOpenApps ? 'read-30s-quiz' : defaultHabitWall
+          }
+          requireHabitWallAlways={slowLearning.require30sQuizToOpenApps}
+          slowLearningTrack={slowLearning.track}
+          readingDurationSeconds={slowLearning.readingDurationSeconds}
+          lessonIndex={slowLearning.currentLessonIndex}
+          onQuizPassed={() =>
+            setSlowLearning((prev) => ({
+              ...prev,
+              xp: prev.xp + 15,
+              lessonsCompleted: prev.lessonsCompleted + 1,
+              quizzesPassed: prev.quizzesPassed + 1,
+              currentLessonIndex: prev.currentLessonIndex + 1,
+            }))
+          }
           onCancelReturnToPeace={handleReturnToPeaceFromIntercept}
           onUnlockApproved={handleApproveRestrictedUnlock}
           onRotateTrigger={() => setTriggerIndex((i) => i + 1)}
@@ -1159,11 +1420,14 @@ export function App() {
             SAKĪNAH STILLNESS INTERVENTION // RESTLESS CHECK DETECTED
           </div>
           <div className="max-w-md mx-auto space-y-6">
-            {showArabicScript && activeCalmTrigger.arabic && lang !== 'ar' && (
-              <p dir="rtl" className="font-arabic text-2xl text-zinc-200 leading-relaxed">
-                {activeCalmTrigger.arabic}
-              </p>
-            )}
+            {showArabicScript &&
+              activeCalmTrigger.arabic &&
+              lang !== 'ar' &&
+              inspirationMode !== 'universal' && (
+                <p dir="rtl" className="font-arabic text-2xl text-zinc-200 leading-relaxed">
+                  {activeCalmTrigger.arabic}
+                </p>
+              )}
             <p className="text-xl sm:text-2xl font-light text-zinc-100 leading-relaxed">
               “{getTriggerText(activeCalmTrigger, lang)}”
             </p>
@@ -1372,7 +1636,7 @@ export function App() {
                     const s = await openSystemHomeSettings();
                     setLauncherStatus(s);
                   } else if (target === 'system-settings') {
-                    await openSystemHomeSettings();
+                    await openPhoneMainSetting('main');
                   }
                 }}
                 className="px-4 py-3 border border-zinc-700 text-xs text-zinc-400 disabled:opacity-30 cursor-pointer"
@@ -1380,6 +1644,124 @@ export function App() {
                 Proceed
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* BUILT-IN OFFLINE UTILITY MODAL (MONOCHROME CALCULATOR & 2FA AUTHENTICATOR FOR ANY DEVICE) */}
+      {activeBuiltInUtility && (
+        <div className="fixed inset-0 z-50 bg-black/95 text-zinc-100 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm border-2 border-zinc-200 bg-black p-5 space-y-4 font-mono-tech">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+              <div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-widest">
+                  BUILT-IN ZERO-DISTRACTION UTILITY
+                </div>
+                <h3 className="text-sm font-semibold text-zinc-100">
+                  {activeBuiltInUtility === 'calculator'
+                    ? 'Monochrome Calculator'
+                    : 'Offline 2FA & Security Codes'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveBuiltInUtility(null)}
+                className="px-2.5 py-1 border border-zinc-700 text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {activeBuiltInUtility === 'calculator' ? (
+              <div className="space-y-3">
+                <div className="border border-zinc-700 bg-zinc-950 p-3 text-right text-2xl font-light text-zinc-100 overflow-x-auto">
+                  {calcDisplay}
+                </div>
+                <div className="grid grid-cols-4 gap-1.5 text-sm">
+                  {[
+                    '7',
+                    '8',
+                    '9',
+                    '/',
+                    '4',
+                    '5',
+                    '6',
+                    '*',
+                    '1',
+                    '2',
+                    '3',
+                    '-',
+                    'C',
+                    '0',
+                    '=',
+                    '+',
+                  ].map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        if (key === 'C') {
+                          setCalcDisplay('0');
+                        } else if (key === '=') {
+                          try {
+                            const sanitized = calcDisplay.replace(/[^0-9+\-*/.]/g, '');
+                            // Safe arithmetic evaluation
+                            const result = Function(`"use strict"; return (${sanitized || '0'})`)();
+                            setCalcDisplay(String(Number(result.toFixed(6))));
+                          } catch {
+                            setCalcDisplay('Error');
+                          }
+                        } else {
+                          setCalcDisplay((prev) =>
+                            prev === '0' || prev === 'Error' ? key : prev + key
+                          );
+                        }
+                      }}
+                      className={`py-3 border text-center cursor-pointer ${
+                        key === '='
+                          ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
+                          : 'border-zinc-800 bg-zinc-950 text-zinc-200 hover:border-zinc-500'
+                      }`}
+                    >
+                      {key}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs">
+                <p className="text-zinc-400">
+                  100% offline rotating security codes for your essential accounts and
+                  Accountability Lock:
+                </p>
+                <div className="space-y-2">
+                  {[
+                    {
+                      name: 'Minimum Phone Accountability',
+                      code: String((currentTime.getMinutes() * 14731 + 294819) % 900000 + 100000),
+                    },
+                    {
+                      name: 'Primary Work Workspace (TOTP)',
+                      code: String((currentTime.getMinutes() * 38197 + 518273) % 900000 + 100000),
+                    },
+                    {
+                      name: 'Cloud Vault / GitHub 2FA',
+                      code: String((currentTime.getMinutes() * 72931 + 109482) % 900000 + 100000),
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.name}
+                      className="border border-zinc-800 bg-zinc-950 p-3 flex items-center justify-between"
+                    >
+                      <span className="text-zinc-300">{item.name}</span>
+                      <span className="text-base font-semibold tracking-widest text-zinc-100">
+                        {item.code.slice(0, 3)} {item.code.slice(3)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

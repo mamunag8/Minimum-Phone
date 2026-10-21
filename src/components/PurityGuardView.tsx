@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import type { LanguageCode, PlatformMode, PurityState } from '../types/app';
+import type {
+  InspirationMode,
+  LanguageCode,
+  PlatformMode,
+  PurityState,
+} from '../types/app';
 import {
   CALM_MIND_TRIGGERS,
   getTriggerSource,
@@ -7,16 +12,33 @@ import {
 } from '../data/calmTriggers';
 import { TRANSLATIONS } from '../i18n/translations';
 import { NativeBridge } from '../services/nativeBridge';
+import { openPhoneMainSetting } from '../services/nativeLauncherBridge';
 
 interface PurityGuardViewProps {
   purity: PurityState;
   lang: LanguageCode;
   platform: PlatformMode;
   showArabicScript: boolean;
+  inspirationMode?: InspirationMode;
   openSosImmediately?: boolean;
   onClearImmediateSos?: () => void;
   onUpdatePurity: (updater: (prev: PurityState) => PurityState) => void;
 }
+
+const DEFAULT_ADULT_KEYWORDS = [
+  'pornhub',
+  'xvideos',
+  'xnxx',
+  'onlyfans',
+  'nsfw',
+  'xxx',
+  'chaturbate',
+  'stripchat',
+  'hentai',
+  'redgifs',
+  'erotic',
+  'rule34',
+];
 
 const REWIRING_MILESTONES = [
   {
@@ -61,12 +83,22 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
   lang,
   platform,
   showArabicScript,
+  inspirationMode = 'blended',
   openSosImmediately,
   onClearImmediateSos,
   onUpdatePurity,
 }) => {
   const t = TRANSLATIONS[lang];
-  const purityTriggers = CALM_MIND_TRIGGERS.filter((item) => item.category === 'purity');
+
+  const purityTriggers = CALM_MIND_TRIGGERS.filter((item) => {
+    if (inspirationMode === 'islamic') {
+      return item.subType === 'quran' || item.subType === 'hadith' || !!item.arabic;
+    }
+    if (inspirationMode === 'universal') {
+      return item.subType === 'proverb' || !item.arabic;
+    }
+    return item.category === 'purity';
+  });
 
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [sosModalOpen, setSosModalOpen] = useState<boolean>(false);
@@ -80,6 +112,8 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
   const [dnsStatusMessage, setDnsStatusMessage] = useState<string | null>(null);
   const [testSearchUrl, setTestSearchUrl] = useState<string>('');
   const [interceptedAlert, setInterceptedAlert] = useState<boolean>(false);
+  const [newKeywordInput, setNewKeywordInput] = useState<string>('');
+  const [copiedHost, setCopiedHost] = useState<string | null>(null);
 
   useEffect(() => {
     if (openSosImmediately) {
@@ -90,7 +124,7 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
   }, [openSosImmediately, onClearImmediateSos]);
 
   useEffect(() => {
-    const interval = setInterval(() => setNowMs(Date.now()), 30000);
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -112,7 +146,16 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
   const todayKey = new Date().toISOString().slice(0, 10);
   const hasPledgedToday = purity.pledgedToday === todayKey;
 
-  const activePurityTrigger = purityTriggers[sosTriggerIndex % purityTriggers.length];
+  const activePurityTrigger =
+    purityTriggers[sosTriggerIndex % Math.max(1, purityTriggers.length)] ||
+    CALM_MIND_TRIGGERS[0];
+
+  const emergencyLockRemainingSec = purity.emergencyBrowserLockUntilMs
+    ? Math.max(0, Math.ceil((purity.emergencyBrowserLockUntilMs - nowMs) / 1000))
+    : 0;
+
+  const customKeywords = purity.customBlockedKeywords || [];
+  const allBlockedKeywords = [...DEFAULT_ADULT_KEYWORDS, ...customKeywords];
 
   const handleTakeMorningPledge = () => {
     onUpdatePurity((prev) => ({
@@ -128,6 +171,26 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
         ...prev.logs.slice(0, 19),
       ],
     }));
+  };
+
+  const handleActivate15mEmergencyLock = () => {
+    const lockUntil = Date.now() + 15 * 60 * 1000;
+    onUpdatePurity((prev) => ({
+      ...prev,
+      strictPornLockdown: true,
+      emergencyBrowserLockUntilMs: lockUntil,
+      logs: [
+        {
+          id: `lock15-${Date.now()}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'urge-overcome',
+          note: 'Activated 15-Minute Emergency Browser & Social Lockdown.',
+        },
+        ...prev.logs.slice(0, 19),
+      ],
+    }));
+    setSosModalOpen(true);
+    setSosTimer(60);
   };
 
   const handleUrgeDefeated = () => {
@@ -154,6 +217,7 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
       ...prev,
       streakStartIso: newNow,
       bestStreakDays: Math.max(prev.bestStreakDays, daysClean),
+      strictPornLockdown: true,
       nightGuardLock:
         selectedTriggerCause === 'Late Night in Bed' ? true : prev.nightGuardLock,
       logs: [
@@ -180,6 +244,38 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
     }));
   };
 
+  const handleCopyAndOpenPrivateDns = async (hostname: string) => {
+    try {
+      await navigator.clipboard?.writeText(hostname);
+    } catch {
+      // ignore clipboard errors
+    }
+    setCopiedHost(hostname);
+    await openPhoneMainSetting('dns');
+  };
+
+  const handleAddCustomKeyword = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = newKeywordInput.trim().toLowerCase();
+    if (!cleaned) return;
+    onUpdatePurity((prev) => {
+      const existing = prev.customBlockedKeywords || [];
+      if (existing.includes(cleaned)) return prev;
+      return {
+        ...prev,
+        customBlockedKeywords: [...existing, cleaned],
+      };
+    });
+    setNewKeywordInput('');
+  };
+
+  const handleRemoveCustomKeyword = (kw: string) => {
+    onUpdatePurity((prev) => ({
+      ...prev,
+      customBlockedKeywords: (prev.customBlockedKeywords || []).filter((item) => item !== kw),
+    }));
+  };
+
   const handleTestBrowserGuard = (e: React.FormEvent) => {
     e.preventDefault();
     if (!testSearchUrl.trim()) return;
@@ -193,7 +289,7 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
       <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
         <div>
           <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
-            SELF-MASTERY & DOPAMINE PROTECTION
+            COMPLETE SELF-MASTERY & ANTI-PORN FORTRESS
           </span>
           <h2 className="text-base font-mono-tech font-semibold tracking-wide text-zinc-100">
             {purity.discreetMode ? t.purityDiscreetTitle : t.purityHeaderTitle}
@@ -210,12 +306,31 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
         </button>
       </div>
 
+      {/* Live 15-Minute Emergency Browser Lockdown Active Banner */}
+      {emergencyLockRemainingSec > 0 && (
+        <div className="border-2 border-zinc-100 bg-zinc-950 p-4 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-300">
+              🔒 EMERGENCY BROWSER & SOCIAL LOCKDOWN ACTIVE
+            </div>
+            <div className="text-xs text-zinc-400 mt-1">
+              All browsers and social media apps are completely locked until the urge wave passes.
+            </div>
+          </div>
+          <div className="text-xl font-mono-tech font-semibold text-zinc-100 pl-3">
+            {Math.floor(emergencyLockRemainingSec / 60)}:
+            {String(emergencyLockRemainingSec % 60).padStart(2, '0')}
+          </div>
+        </div>
+      )}
+
       {/* Live Clean Streak Counter Card */}
       <div className="border border-zinc-800 bg-zinc-950/60 p-5">
         <div className="flex items-center justify-between text-xs font-mono-tech text-zinc-400 mb-3">
           <span>{t.cleanStreakLabel}</span>
           <span>
-            {t.urgesDefeatedLabel}: <strong className="text-zinc-100">{purity.urgesDefeatedCount}</strong>
+            {t.urgesDefeatedLabel}:{' '}
+            <strong className="text-zinc-100">{purity.urgesDefeatedCount}</strong>
           </span>
         </div>
 
@@ -250,7 +365,9 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
         <div className="space-y-1.5 mt-4">
           <div className="flex justify-between text-xs font-mono-tech text-zinc-400">
             <span>{t.brainRewiringProgress}</span>
-            <span>{progress90Percent}% (Day {daysClean}/90)</span>
+            <span>
+              {progress90Percent}% (Day {daysClean}/90)
+            </span>
           </div>
           <div className="w-full h-2 bg-zinc-900 overflow-hidden">
             <div
@@ -260,17 +377,31 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           </div>
         </div>
 
-        {/* Emergency URGE SOS Panic Button */}
-        <button
-          type="button"
-          onClick={() => {
-            setSosModalOpen(true);
-            setSosTimer(60);
-          }}
-          className="w-full mt-5 py-4 bg-zinc-100 text-black font-mono-tech text-xs sm:text-sm font-semibold uppercase tracking-widest hover:bg-white transition cursor-pointer"
-        >
-          ⚡ {t.panicSosButton}
-        </button>
+        {/* Emergency URGE SOS + 15-Minute Browser Lockdown Buttons */}
+        <div className="space-y-2 mt-5">
+          <button
+            type="button"
+            onClick={handleActivate15mEmergencyLock}
+            className="w-full py-4 bg-zinc-100 text-black font-mono-tech text-xs sm:text-sm font-semibold uppercase tracking-widest hover:bg-white transition cursor-pointer"
+          >
+            ⚡ {t.panicSosButton}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const lockUntil = Date.now() + 15 * 60 * 1000;
+              onUpdatePurity((prev) => ({
+                ...prev,
+                strictPornLockdown: true,
+                emergencyBrowserLockUntilMs: lockUntil,
+              }));
+            }}
+            className="w-full py-2.5 border border-zinc-500 bg-zinc-900 text-zinc-100 font-mono-tech text-xs uppercase tracking-wider hover:bg-zinc-800 cursor-pointer"
+          >
+            {t.emergencyLock15mBtn}
+          </button>
+        </div>
 
         {/* Daily Morning Pledge */}
         <div className="mt-3">
@@ -302,11 +433,14 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
             {t.nextWhisperBtn}
           </button>
         </div>
-        {showArabicScript && activePurityTrigger.arabic && lang !== 'ar' && (
-          <p dir="rtl" className="font-arabic text-base text-zinc-300 mb-2 leading-relaxed">
-            {activePurityTrigger.arabic}
-          </p>
-        )}
+        {showArabicScript &&
+          activePurityTrigger.arabic &&
+          lang !== 'ar' &&
+          inspirationMode !== 'universal' && (
+            <p dir="rtl" className="font-arabic text-base text-zinc-300 mb-2 leading-relaxed">
+              {activePurityTrigger.arabic}
+            </p>
+          )}
         <p className="text-sm sm:text-base text-zinc-100 leading-relaxed">
           “{getTriggerText(activePurityTrigger, lang)}”
         </p>
@@ -315,31 +449,100 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
         </p>
       </div>
 
-      {/* 3-Layer Anti-Porn Technical Shield (Android Play Store + iOS ScreenTime) */}
-      <div className="border border-zinc-800 p-4 space-y-3 bg-zinc-950/40">
-        <div className="text-xs font-mono-tech uppercase tracking-wider text-zinc-400">
-          3-LAYER TECHNICAL CONTENT SHIELD ({platform.toUpperCase()})
+      {/* 4-LAYER COMPLETE PORN ADDICTION RESTRICTION & SYSTEM SHIELD */}
+      <div className="border border-zinc-800 p-4 space-y-4 bg-zinc-950/40">
+        <div className="text-xs font-mono-tech uppercase tracking-wider text-zinc-300">
+          4-LAYER COMPLETE PORN RESTRICTION & OS SHIELD ({platform.toUpperCase()})
         </div>
 
-        {/* Layer 1: System Adult DNS Filter */}
-        <div className="flex items-center justify-between py-2 border-b border-zinc-900">
+        {/* Layer 0: Strict Porn & Browser Lockdown Master Switch */}
+        <div className="flex items-center justify-between py-2.5 border-b border-zinc-900">
           <div className="pr-3">
-            <div className="text-xs font-medium text-zinc-200">{t.adultDnsShieldLabel}</div>
-            <div className="text-[11px] text-zinc-500 font-mono-tech">
-              Blocks adult domains system-wide via `family.cloudflare-dns.com`
+            <div className="text-xs font-semibold text-zinc-100">
+              {t.strictPornLockdownTitle}
+            </div>
+            <div className="text-[11px] text-zinc-400 font-mono-tech mt-0.5">
+              {t.strictPornLockdownDesc}
             </div>
           </div>
           <button
             type="button"
-            onClick={handleToggleAdultDns}
+            onClick={() =>
+              onUpdatePurity((prev) => ({
+                ...prev,
+                strictPornLockdown: !(prev.strictPornLockdown ?? true),
+              }))
+            }
             className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
-              purity.adultDnsEnabled
-                ? 'border-zinc-200 bg-zinc-100 text-black font-semibold'
+              purity.strictPornLockdown ?? true
+                ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                 : 'border-zinc-700 text-zinc-400'
             }`}
           >
-            {purity.adultDnsEnabled ? 'ACTIVE' : 'OFF'}
+            {purity.strictPornLockdown ?? true ? 'LOCKED ON' : 'OFF'}
           </button>
+        </div>
+
+        {/* Layer 1: System Adult DNS Filter + 1-Tap Android Private DNS Opener */}
+        <div className="py-2.5 border-b border-zinc-900 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="pr-3">
+              <div className="text-xs font-medium text-zinc-200">{t.adultDnsShieldLabel}</div>
+              <div className="text-[11px] text-zinc-500 font-mono-tech">
+                Blocks 100% of adult & porn domains across all browsers on your phone
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleAdultDns}
+              className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+                purity.adultDnsEnabled
+                  ? 'border-zinc-200 bg-zinc-100 text-black font-semibold'
+                  : 'border-zinc-700 text-zinc-400'
+              }`}
+            >
+              {purity.adultDnsEnabled ? 'ACTIVE' : 'OFF'}
+            </button>
+          </div>
+
+          {/* 1-Tap Copy & Open Android Private DNS Settings */}
+          <div className="bg-black border border-zinc-800 p-3 space-y-2">
+            <div className="text-[10px] font-mono-tech uppercase text-zinc-400">
+              1-TAP ANDROID PRIVATE SAFE DNS SETUP (BLOCKS ALL PORN WEBSITES OS-WIDE):
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleCopyAndOpenPrivateDns('family.cloudflare-dns.com')}
+                className="p-2.5 border border-zinc-700 hover:border-zinc-400 text-left text-[11px] font-mono-tech text-zinc-200 cursor-pointer"
+              >
+                <div className="font-semibold text-zinc-100">1. Cloudflare Family DNS</div>
+                <div className="text-zinc-400 mt-0.5">family.cloudflare-dns.com</div>
+                <div className="text-[10px] text-zinc-500 mt-1">
+                  [Tap to Copy & Open DNS Settings]
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleCopyAndOpenPrivateDns('adult-filter-dns.cleanbrowsing.org')
+                }
+                className="p-2.5 border border-zinc-700 hover:border-zinc-400 text-left text-[11px] font-mono-tech text-zinc-200 cursor-pointer"
+              >
+                <div className="font-semibold text-zinc-100">2. CleanBrowsing Adult Filter</div>
+                <div className="text-zinc-400 mt-0.5">adult-filter-dns.cleanbrowsing.org</div>
+                <div className="text-[10px] text-zinc-500 mt-1">
+                  [Tap to Copy & Open DNS Settings]
+                </div>
+              </button>
+            </div>
+            {copiedHost && (
+              <div className="text-[11px] font-mono-tech text-zinc-200 pt-1">
+                ✓ Copied <span className="underline">{copiedHost}</span>! In Android Network
+                Settings → Private DNS → select "Private DNS provider hostname" and paste it.
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Layer 2: Browser & Incognito Keyword Blocker */}
@@ -347,9 +550,7 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           <div className="pr-3">
             <div className="text-xs font-medium text-zinc-200">{t.keywordBlockerLabel}</div>
             <div className="text-[11px] text-zinc-500 font-mono-tech">
-              {platform === 'android'
-                ? 'AccessibilityService URL & Incognito tab interceptor'
-                : 'iOS ManagedSettings WebContentFilter.autoFilter'}
+              Blocks {allBlockedKeywords.length} adult keywords, URLs & incognito triggers
             </div>
           </div>
           <button
@@ -370,12 +571,12 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           </button>
         </div>
 
-        {/* Layer 3: High-Risk Night Guard (11 PM - 6 AM) */}
-        <div className="flex items-center justify-between py-2">
+        {/* Layer 3: High-Risk Night Guard (10 PM - 6 AM) */}
+        <div className="flex items-center justify-between py-2 border-b border-zinc-900">
           <div className="pr-3">
             <div className="text-xs font-medium text-zinc-200">{t.nightGuardLabel}</div>
             <div className="text-[11px] text-zinc-500 font-mono-tech">
-              Prevents late-night bed scrolling in browsers & social feeds
+              Automatically locks browsers & social feeds during late-night hours
             </div>
           </div>
           <button
@@ -391,6 +592,48 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           >
             {purity.nightGuardLock ? 'LOCKED' : 'OFF'}
           </button>
+        </div>
+
+        {/* Custom Trigger Keyword / Website Blocklist Manager */}
+        <div className="space-y-2 pt-1">
+          <div className="text-[11px] font-mono-tech text-zinc-400">
+            CUSTOM BLOCKED TRIGGERS & DOMAINS ({allBlockedKeywords.length} active rules):
+          </div>
+          <form onSubmit={handleAddCustomKeyword} className="flex gap-2">
+            <input
+              type="text"
+              value={newKeywordInput}
+              onChange={(e) => setNewKeywordInput(e.target.value)}
+              placeholder="Add custom keyword or website to block..."
+              className="flex-1 bg-black border border-zinc-800 px-3 py-2 text-xs text-zinc-200 font-mono-tech focus:outline-none focus:border-zinc-500"
+            />
+            <button
+              type="submit"
+              className="px-3 py-2 border border-zinc-600 bg-zinc-900 text-xs font-mono-tech text-zinc-100 hover:bg-zinc-800 cursor-pointer"
+            >
+              + Block
+            </button>
+          </form>
+
+          {customKeywords.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {customKeywords.map((kw) => (
+                <span
+                  key={kw}
+                  className="inline-flex items-center gap-1.5 px-2 py-1 border border-zinc-700 bg-black text-[11px] font-mono-tech text-zinc-300"
+                >
+                  <span>🚫 {kw}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCustomKeyword(kw)}
+                    className="text-zinc-500 hover:text-zinc-200 cursor-pointer"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {dnsStatusMessage && (
@@ -574,14 +817,17 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
 
             {/* Piercing Quran / Hadith / Self-Mastery Line */}
             <div className="border border-zinc-700 bg-zinc-950 p-5 text-left">
-              {showArabicScript && activePurityTrigger.arabic && lang !== 'ar' && (
-                <p
-                  dir="rtl"
-                  className="font-arabic text-lg text-zinc-200 mb-3 leading-relaxed"
-                >
-                  {activePurityTrigger.arabic}
-                </p>
-              )}
+              {showArabicScript &&
+                activePurityTrigger.arabic &&
+                lang !== 'ar' &&
+                inspirationMode !== 'universal' && (
+                  <p
+                    dir="rtl"
+                    className="font-arabic text-lg text-zinc-200 mb-3 leading-relaxed"
+                  >
+                    {activePurityTrigger.arabic}
+                  </p>
+                )}
               <p className="text-base sm:text-lg text-zinc-100 leading-relaxed">
                 “{getTriggerText(activePurityTrigger, lang)}”
               </p>

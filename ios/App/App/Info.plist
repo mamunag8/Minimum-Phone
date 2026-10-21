@@ -45,5 +45,25 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSMotionUsageDescription</key>
+	<string>Minimum Phone uses the motion sensor locally on your device to count 20 physical steps when unlocking restricted apps.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tel</string>
+		<string>sms</string>
+		<string>mailto</string>
+		<string>calshow</string>
+		<string>maps</string>
+		<string>mobilenotes</string>
+		<string>shortcuts</string>
+		<string>whatsapp</string>
+		<string>instagram</string>
+		<string>youtube</string>
+		<string>tiktok</string>
+		<string>twitter</string>
+		<string>reddit</string>
+		<string>App-Prefs</string>
+		<string>prefs</string>
+	</array>
 </dict>
 </plist>

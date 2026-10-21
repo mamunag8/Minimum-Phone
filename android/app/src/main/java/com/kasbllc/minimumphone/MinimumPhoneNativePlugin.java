@@ -210,6 +210,76 @@ public class MinimumPhoneNativePlugin extends Plugin {
         call.resolve(buildStatusObject(ctx));
     }
 
+    /**
+     * Opens specific Android Phone Main Settings directly from Minimum Phone's Settings Menu
+     * (main, wifi, bluetooth, display, sound, apps, dns, battery, accessibility, usage, home).
+     */
+    @PluginMethod
+    public void openPhoneSystemSetting(PluginCall call) {
+        Context ctx = getContext();
+        String target = call.getString("target", "main");
+        if (target == null) target = "main";
+        String action;
+
+        switch (target.toLowerCase(Locale.ROOT)) {
+            case "wifi":
+                action = Settings.ACTION_WIFI_SETTINGS;
+                break;
+            case "bluetooth":
+                action = Settings.ACTION_BLUETOOTH_SETTINGS;
+                break;
+            case "display":
+                action = Settings.ACTION_DISPLAY_SETTINGS;
+                break;
+            case "sound":
+                action = Settings.ACTION_SOUND_SETTINGS;
+                break;
+            case "apps":
+                action = Settings.ACTION_APPLICATION_SETTINGS;
+                break;
+            case "dns":
+            case "network":
+                action = Settings.ACTION_WIRELESS_SETTINGS;
+                break;
+            case "battery":
+                action = Intent.ACTION_POWER_USAGE_SUMMARY;
+                break;
+            case "accessibility":
+                action = Settings.ACTION_ACCESSIBILITY_SETTINGS;
+                break;
+            case "usage":
+                action = Settings.ACTION_USAGE_ACCESS_SETTINGS;
+                break;
+            case "home":
+                action = Settings.ACTION_HOME_SETTINGS;
+                break;
+            case "main":
+            default:
+                action = Settings.ACTION_SETTINGS;
+                break;
+        }
+
+        boolean opened = false;
+        try {
+            Intent intent = new Intent(action);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(intent);
+            opened = true;
+        } catch (Exception e) {
+            try {
+                Intent fallback = new Intent(Settings.ACTION_SETTINGS);
+                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(fallback);
+                opened = true;
+            } catch (Exception ignored) {}
+        }
+
+        JSObject ret = buildStatusObject(ctx);
+        ret.put("opened", opened);
+        ret.put("target", target);
+        call.resolve(ret);
+    }
+
     public static void triggerHomeChooserOrSettings(Activity activity, Context ctx) {
         try {
             PackageManager pm = ctx.getPackageManager();

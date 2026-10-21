@@ -66,6 +66,19 @@ Instant 1-tap switching across:
 
 ---
 
+### ⚙️ 6. Complete Settings & Phone Main Settings Command Center (v1.2.0)
+- **Phone Main Settings Bridge:** Open Android's native **Main Settings**, **Wi-Fi & Internet**, **Bluetooth**, **Display**, **Sound**, **Installed Apps**, **Private Safe DNS**, and **Default Home Launcher** directly from inside Minimum Phone without ever needing the stock OEM launcher.
+- **Active Apps & Home Screen Manager:** Pin up to 7 essential apps to the Home Screen (`Work`, `Personal`, and `Sunset` profiles), add custom installed apps, and set each app's protection tier (`Instant Tool`, `30s Quiz Gate`, or `Blocked`).
+- **Mode of Inspiration Selector:**
+  - **🕌 Fully Islamic Mode:** Quran, Sahih Hadith, Arabic script & Islamic Slow Learning.
+  - **🌍 Common / Universal for All:** Universal proverbs, Stoic philosophy & neuroscience focus (zero religious terminology).
+  - **✨ Hybrid Mode:** Combines both Islamic wisdom and universal mindfulness.
+- **Slow Learning Mode & "30-Second Read + Play Quiz" App Unlock Gate:** Require reading a 30-second micro-lesson (`Islamic Knowledge`, `Language & Vocabulary Mastery`, or `Mindfulness & Focus Science`) and passing a comprehension quiz (`+15 XP`) before restricted apps can open.
+- **Complete Porn Addiction Lockdown:** Strict Lockdown toggle (forces all browsers behind the 30s Purity Quiz Gate), 15-Minute Emergency Browser & Social Lockdown, 1-Tap Android Private Safe DNS configurator (`family.cloudflare-dns.com` / `adult-filter-dns.cleanbrowsing.org`), and Custom Blocked Keywords & Domains manager.
+- **Built-in Multilingual "How to Use" Documentation:** Complete step-by-step interactive user guide translated 100% into **English (`en`)**, **বাংলা (`bn`)**, **العربية (`ar`)**, **اردو (`ur`)**, and **Bahasa Indonesia (`id`)**.
+
+---
+
 ## 🛠️ Project Structure & Cross-Platform Architecture
 
 ```text

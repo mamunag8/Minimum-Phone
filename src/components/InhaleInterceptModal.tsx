@@ -4,12 +4,17 @@ import type {
   CalmTrigger,
   HabitWallType,
   LanguageCode,
+  SlowLearningTrack,
 } from '../types/app';
 import {
   FOCUS_READER_PASSAGES,
   getTriggerSource,
   getTriggerText,
 } from '../data/calmTriggers';
+import {
+  getLessonsForTrack,
+  type SlowLearningLesson,
+} from '../data/slowLearningCurriculum';
 import { TRANSLATIONS } from '../i18n/translations';
 import { NativeBridge } from '../services/nativeBridge';
 
@@ -20,6 +25,10 @@ interface InhaleInterceptModalProps {
   showArabicScript: boolean;
   activeHabitWall: HabitWallType;
   requireHabitWallAlways: boolean;
+  slowLearningTrack?: SlowLearningTrack;
+  readingDurationSeconds?: number;
+  lessonIndex?: number;
+  onQuizPassed?: () => void;
   onCancelReturnToPeace: () => void;
   onUnlockApproved: (minutesBid: number, intentReason: string, journalEntry?: string) => void;
   onRotateTrigger: () => void;
@@ -32,13 +41,17 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
   showArabicScript,
   activeHabitWall,
   requireHabitWallAlways,
+  slowLearningTrack = 'islam',
+  readingDurationSeconds = 30,
+  lessonIndex = 0,
+  onQuizPassed,
   onCancelReturnToPeace,
   onUnlockApproved,
   onRotateTrigger,
 }) => {
   const t = TRANSLATIONS[lang];
 
-  // Escalating friction based on daily opens (5s -> 10s -> 15s)
+  // Escalating friction based on daily opens (5s -> 8s -> 12s -> 15s)
   const initialDelaySeconds =
     app.dailyOpens === 0 ? 5 : app.dailyOpens === 1 ? 8 : app.dailyOpens === 2 ? 12 : 15;
 
@@ -48,7 +61,7 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
 
   // Micro-Intent state
   const [selectedIntent, setSelectedIntent] = useState<string>(t.intentReplyDm);
-  const [selectedMinutes, setSelectedMinutes] = useState<number>(3);
+  const [selectedMinutes, setSelectedMinutes] = useState<number>(5);
 
   // Habit Wall states
   const [activeWallTab, setActiveWallTab] = useState<HabitWallType>(activeHabitWall);
@@ -58,6 +71,17 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
   const [uploadedDocName, setUploadedDocName] = useState<string | null>(null);
   const [uploadedPages, setUploadedPages] = useState<string[] | null>(null);
   const [stepsCounted, setStepsCounted] = useState<number>(0);
+
+  // 30-Second Slow Learning Read + Quiz Gate State
+  const trackLessons = getLessonsForTrack(slowLearningTrack);
+  const [localLessonIdx, setLocalLessonIdx] = useState<number>(lessonIndex);
+  const currentLesson: SlowLearningLesson =
+    trackLessons[localLessonIdx % trackLessons.length];
+
+  const [readSecondsLeft, setReadSecondsLeft] = useState<number>(readingDurationSeconds);
+  const [selectedQuizOption, setSelectedQuizOption] = useState<number | null>(null);
+  const [quizPassed, setQuizPassed] = useState<boolean>(false);
+  const [quizErrorFeedback, setQuizErrorFeedback] = useState<string | null>(null);
 
   // Countdown timer for the Inhale screen
   useEffect(() => {
@@ -70,6 +94,18 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
 
     return () => clearInterval(timer);
   }, [secondsLeft, step]);
+
+  // Countdown timer for the 30-second Slow Learning Reading Gate
+  useEffect(() => {
+    if (step !== 'habit-wall' || activeWallTab !== 'read-30s-quiz') return;
+    if (readSecondsLeft <= 0) return;
+
+    const timer = setInterval(() => {
+      setReadSecondsLeft((prev) => Math.max(0, prev - 1));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [step, activeWallTab, readSecondsLeft]);
 
   // Breathing phase cadence
   useEffect(() => {
@@ -98,7 +134,7 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
     .trim()
     .split(/\s+/)
     .filter(Boolean).length;
-  const requiredWords = 25; // Configurable 25-50 words for smooth testing & deep reflection
+  const requiredWords = 25;
 
   const normalizedTarget = targetTriggerText
     .toLowerCase()
@@ -112,17 +148,53 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
     normalizedTyped.length >= Math.min(18, Math.floor(normalizedTarget.length * 0.65));
 
   const isHabitComplete =
+    (activeWallTab === 'read-30s-quiz' && readSecondsLeft === 0 && quizPassed) ||
     (activeWallTab === 'calm-transcribe' && isTranscriptionComplete) ||
     (activeWallTab === 'journal-50' && journalWordCount >= requiredWords) ||
     (activeWallTab === 'read-pages' && readerPage >= 3) ||
     (activeWallTab === 'steps-20' && stepsCounted >= 20);
+
+  const handleSelectQuizOption = (idx: number) => {
+    if (readSecondsLeft > 0) return;
+    setSelectedQuizOption(idx);
+    if (idx === currentLesson.correctOptionIndex) {
+      if (!quizPassed) {
+        setQuizPassed(true);
+        setQuizErrorFeedback(null);
+        onQuizPassed?.();
+      }
+    } else {
+      setQuizPassed(false);
+      setQuizErrorFeedback(
+        lang === 'bn'
+          ? 'উত্তরটি সঠিক নয়। অনুচ্ছেদটি আরও ১০ সেকেন্ড মনোযোগ দিয়ে পড়ে সঠিক উত্তর দিন।'
+          : lang === 'ar'
+          ? 'الإجابة غير صحيحة. أعد قراءة النص لمدة ١٠ ثوانٍ ثم اختر الإجابة الصحيحة.'
+          : lang === 'ur'
+          ? 'جواب درست نہیں ہے۔ عبارت کو مزید 10 سیکنڈ غور سے پڑھ کر درست جواب دیں۔'
+          : lang === 'id'
+          ? 'Jawaban belum tepat. Baca kembali teks selama 10 detik lalu pilih jawaban yang benar.'
+          : 'Not quite right. Re-read the passage for 10 seconds and choose the correct answer.'
+      );
+      setReadSecondsLeft(10);
+    }
+  };
+
+  const handleSwitchLesson = () => {
+    setLocalLessonIdx((i) => i + 1);
+    setReadSecondsLeft(readingDurationSeconds);
+    setSelectedQuizOption(null);
+    setQuizPassed(false);
+    setQuizErrorFeedback(null);
+  };
 
   const handleProceedFromBreathing = () => {
     setStep('intent-bid');
   };
 
   const handleProceedFromIntent = () => {
-    const needsHabitWall = requireHabitWallAlways || app.dailyOpens >= 1;
+    const needsHabitWall =
+      requireHabitWallAlways || activeHabitWall === 'read-30s-quiz' || app.dailyOpens >= 1;
     if (needsHabitWall) {
       setStep('habit-wall');
     } else {
@@ -151,15 +223,20 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
     reader.readAsText(file);
   };
 
+  const readProgressPct = Math.min(
+    100,
+    Math.round(((readingDurationSeconds - readSecondsLeft) / Math.max(1, readingDurationSeconds)) * 100)
+  );
+
   return (
-    <div className="fixed inset-0 z-50 bg-black text-zinc-100 flex flex-col justify-between p-6 select-none overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black text-zinc-100 flex flex-col justify-between p-5 sm:p-6 select-none overflow-y-auto">
       {/* Top Status Header */}
       <div className="flex items-center justify-between border-b border-zinc-900 pb-3 text-xs font-mono-tech text-zinc-500">
         <span>
           INTERCEPT // {lang === 'bn' && app.nameBn ? app.nameBn : app.name.toUpperCase()}
         </span>
         <span>
-          OPEN #{app.dailyOpens + 1} TODAY · {initialDelaySeconds}S DELAY
+          OPEN #{app.dailyOpens + 1} TODAY · {initialDelaySeconds}S + 30S QUIZ
         </span>
       </div>
 
@@ -175,7 +252,7 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
           </p>
 
           {/* Minimalist Monochrome Breathing Circle */}
-          <div className="relative flex items-center justify-center w-64 h-64 mb-8">
+          <div className="relative flex items-center justify-center w-60 h-60 mb-7">
             <div className="absolute inset-0 rounded-full border border-zinc-800 animate-breathe" />
             <div
               className="absolute inset-5 rounded-full border border-zinc-700/60 animate-breathe"
@@ -282,7 +359,7 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
           <div>
             <p className="text-xs font-mono-tech text-zinc-400 mb-2">{t.selectTimeBid}</p>
             <div className="grid grid-cols-4 gap-2">
-              {[1, 3, 5, 15].map((mins) => (
+              {[2, 5, 10, 15].map((mins) => (
                 <button
                   key={mins}
                   type="button"
@@ -312,7 +389,7 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
               onClick={handleProceedFromIntent}
               className="w-full py-3 border border-zinc-800 text-zinc-400 hover:text-zinc-200 font-mono-tech text-xs uppercase tracking-widest cursor-pointer"
             >
-              {requireHabitWallAlways || app.dailyOpens >= 1
+              {requireHabitWallAlways || activeHabitWall === 'read-30s-quiz' || app.dailyOpens >= 1
                 ? `${t.habitWallRequired} →`
                 : `Unlock for ${selectedMinutes}m →`}
             </button>
@@ -320,33 +397,34 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
         </div>
       )}
 
-      {/* STEP 3: HABIT-WALL GATEKEEPER (4 REAL PRODUCTIVE UNLOCKS) */}
+      {/* STEP 3: HABIT-WALL GATEKEEPER (INCLUDING 30-SEC SLOW READ + PLAY QUIZ) */}
       {step === 'habit-wall' && (
-        <div className="my-auto max-w-md mx-auto w-full space-y-4 py-4">
-          <div className="border-b border-zinc-800 pb-3">
-            <span className="text-[11px] font-mono-tech uppercase tracking-widest text-zinc-500">
-              STRICT GATEKEEPER // HABIT-WALL UNLOCK
+        <div className="my-auto max-w-md mx-auto w-full space-y-4 py-3">
+          <div className="border-b border-zinc-800 pb-2.5">
+            <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
+              STRICT GATEKEEPER // SLOW LEARNING & HABIT UNLOCK
             </span>
-            <h3 className="text-base font-medium text-zinc-100 mt-1">
-              Complete 1 mindful habit to unlock {app.name} ({selectedMinutes}m)
+            <h3 className="text-sm sm:text-base font-medium text-zinc-100 mt-1">
+              {t.read30sQuizGateTitle} — {app.name} ({selectedMinutes}m)
             </h3>
           </div>
 
-          {/* 4 Habit Wall Selector Tabs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px] font-mono-tech">
+          {/* 5 Habit Wall Selector Tabs (#1 is 30s Read + Quiz) */}
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 text-[10px] font-mono-tech">
             {[
-              { id: 'calm-transcribe', label: '1. Verse/Proverb' },
-              { id: 'journal-50', label: '2. Journal' },
-              { id: 'read-pages', label: '3. Read 3 Pages' },
-              { id: 'steps-20', label: '4. 20 Steps' },
+              { id: 'read-30s-quiz', label: '1. 30s Read+Quiz' },
+              { id: 'calm-transcribe', label: '2. Transcribe' },
+              { id: 'journal-50', label: '3. Journal' },
+              { id: 'read-pages', label: '4. Read 3p' },
+              { id: 'steps-20', label: '5. 20 Steps' },
             ].map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveWallTab(tab.id as HabitWallType)}
-                className={`py-2 px-2 border text-center cursor-pointer ${
+                className={`py-2 px-1.5 border text-center cursor-pointer ${
                   activeWallTab === tab.id
-                    ? 'border-zinc-200 bg-zinc-900 text-white'
+                    ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                     : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
                 }`}
               >
@@ -354,6 +432,137 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
               </button>
             ))}
           </div>
+
+          {/* Gatekeeper 0 (NEW DEFAULT): 30-Second Slow Learning Read + Play Quiz */}
+          {activeWallTab === 'read-30s-quiz' && (
+            <div className="border border-zinc-800 p-4 space-y-3.5 bg-zinc-950">
+              {/* Top Lesson Header & Track Badge */}
+              <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                <span className="text-[10px] font-mono-tech uppercase tracking-wider text-zinc-400">
+                  {slowLearningTrack === 'islam'
+                    ? t.trackIslamicLabel
+                    : slowLearningTrack === 'language'
+                    ? t.trackLanguageLabel
+                    : t.trackMindfulnessLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSwitchLesson}
+                  className="text-[10px] font-mono-tech underline text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                >
+                  Next Lesson ↻
+                </button>
+              </div>
+
+              {/* Lesson Title & Arabic/Root Header */}
+              <div>
+                <h4 className="text-sm font-mono-tech font-semibold text-zinc-100">
+                  {currentLesson.title[lang]}
+                </h4>
+                {currentLesson.arabicHeader && (
+                  <p
+                    dir="rtl"
+                    className="font-arabic text-base text-zinc-200 mt-2 bg-black border border-zinc-900 px-3 py-2 leading-relaxed"
+                  >
+                    {currentLesson.arabicHeader}
+                  </p>
+                )}
+                {currentLesson.transliteration && (
+                  <p className="text-[11px] font-mono-tech text-zinc-500 mt-1">
+                    {currentLesson.transliteration}
+                  </p>
+                )}
+              </div>
+
+              {/* 30-Second Reading Passage */}
+              <div className="bg-black border border-zinc-800 p-3.5 text-xs sm:text-sm text-zinc-200 leading-relaxed space-y-2">
+                <p>{currentLesson.readingText[lang]}</p>
+                <div className="pt-2 border-t border-zinc-900 text-xs font-mono-tech text-zinc-300">
+                  ★ {currentLesson.keyTakeaway[lang]}
+                </div>
+              </div>
+
+              {/* 30-Second Reading Timer Progress Bar */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-mono-tech">
+                  <span className={readSecondsLeft > 0 ? 'text-zinc-400' : 'text-zinc-100 font-semibold'}>
+                    {readSecondsLeft > 0
+                      ? `${t.read30sCountdownText} ${readSecondsLeft}s...`
+                      : t.quizReadyText}
+                  </span>
+                  <span className="text-zinc-400">{readProgressPct}%</span>
+                </div>
+                <div className="w-full h-1.5 bg-zinc-900 overflow-hidden">
+                  <div
+                    className="h-full bg-zinc-100 transition-all duration-300"
+                    style={{ width: `${readProgressPct}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Comprehension Quiz Section (Locked until 30s reading finishes) */}
+              <div
+                className={`border p-3.5 space-y-2.5 transition ${
+                  readSecondsLeft > 0
+                    ? 'border-zinc-900 bg-black/50 opacity-60'
+                    : 'border-zinc-700 bg-black'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
+                    COMPREHENSION QUIZ TO UNLOCK APP
+                  </span>
+                  {readSecondsLeft > 0 && (
+                    <span className="text-[10px] font-mono-tech text-zinc-500">
+                      🔒 Wait {readSecondsLeft}s
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-xs sm:text-sm font-medium text-zinc-100">
+                  Q: {currentLesson.quizQuestion[lang]}
+                </p>
+
+                <div className="space-y-1.5 pt-1">
+                  {currentLesson.quizOptions[lang].map((optText, idx) => {
+                    const isSelected = selectedQuizOption === idx;
+                    const isCorrect = idx === currentLesson.correctOptionIndex;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        disabled={readSecondsLeft > 0}
+                        onClick={() => handleSelectQuizOption(idx)}
+                        className={`w-full text-left p-2.5 border text-xs font-mono-tech transition ${
+                          readSecondsLeft > 0
+                            ? 'border-zinc-900 text-zinc-600 cursor-not-allowed'
+                            : isSelected && isCorrect
+                            ? 'border-zinc-100 bg-zinc-100 text-black font-semibold cursor-pointer'
+                            : isSelected && !isCorrect
+                            ? 'border-zinc-500 bg-zinc-900 text-zinc-300 cursor-pointer'
+                            : 'border-zinc-800 text-zinc-300 hover:border-zinc-600 cursor-pointer'
+                        }`}
+                      >
+                        {String.fromCharCode(65 + idx)}. {optText}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {quizErrorFeedback && (
+                  <div className="p-2.5 border border-zinc-700 bg-zinc-950 text-[11px] font-mono-tech text-zinc-300">
+                    ⚠️ {quizErrorFeedback}
+                  </div>
+                )}
+
+                {quizPassed && (
+                  <div className="p-2.5 border border-zinc-300 bg-zinc-900 text-[11px] font-mono-tech text-zinc-100">
+                    ✓ +15 XP! {currentLesson.explanation[lang]}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Gatekeeper 1: Calm Mind Transcription */}
           {activeWallTab === 'calm-transcribe' && (
@@ -506,12 +715,16 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
               }
               className={`w-full py-3 border font-mono-tech text-xs uppercase tracking-widest transition ${
                 isHabitComplete
-                  ? 'border-zinc-300 text-zinc-100 hover:bg-zinc-900 cursor-pointer'
+                  ? 'border-zinc-200 bg-zinc-900 text-zinc-100 hover:bg-zinc-800 cursor-pointer'
                   : 'border-zinc-900 text-zinc-700 cursor-not-allowed'
               }`}
             >
               {isHabitComplete
-                ? `✓ Habit Complete — Open ${app.name} (${selectedMinutes}m)`
+                ? `✓ Quiz & Habit Complete — Open ${app.name} (${selectedMinutes}m)`
+                : activeWallTab === 'read-30s-quiz'
+                ? readSecondsLeft > 0
+                  ? `Read for ${readSecondsLeft}s more to unlock Quiz`
+                  : 'Answer the Quiz above correctly to unlock'
                 : 'Complete habit above to unlock'}
             </button>
           </div>

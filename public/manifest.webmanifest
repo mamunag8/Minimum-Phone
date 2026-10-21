@@ -1,0 +1,21 @@
+{
+  "name": "Minimum Phone — Anti-Dopamine Launcher & Calm Mind OS",
+  "short_name": "Minimum Phone",
+  "description": "100% Free Anti-Dopamine Minimalist Launcher, Slow Learning 30s Quiz Gate & Purity Guard for Android, iOS, Tablet & Desktop Web.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["productivity", "lifestyle", "education", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

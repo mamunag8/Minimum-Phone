@@ -1,16 +1,25 @@
 export type LanguageCode = 'en' | 'bn' | 'ar' | 'ur' | 'id';
 
-export type PlatformMode = 'android' | 'ios';
+export type PlatformMode = 'android' | 'ios' | 'web';
 
 export type VisualTheme = 'oled-black' | 'eink-paper' | 'sunset-amber';
 
 export type WisdomPackSource = 'quran' | 'hadith' | 'proverbs' | 'blended';
 
+export type InspirationMode = 'islamic' | 'universal' | 'blended';
+
+export type SlowLearningTrack = 'islam' | 'language' | 'mindfulness';
+
 export type HomeProfileType = 'work' | 'personal' | 'sunset';
 
 export type AppFrictionTier = 'essential' | 'utility' | 'restricted' | 'adult-blocked';
 
-export type HabitWallType = 'calm-transcribe' | 'journal-50' | 'read-pages' | 'steps-20';
+export type HabitWallType =
+  | 'read-30s-quiz'
+  | 'calm-transcribe'
+  | 'journal-50'
+  | 'read-pages'
+  | 'steps-20';
 
 export interface AppItem {
   id: string;
@@ -73,8 +82,22 @@ export interface PurityState {
   adultDnsEnabled: boolean; // 1.1.1.3 Family / CleanBrowsing
   browserKeywordShield: boolean;
   nightGuardLock: boolean; // 11 PM - 6 AM browser/social lock
+  strictPornLockdown?: boolean; // Complete browser & trigger lock behind 30s Read+Quiz + DNS shield
+  safeSearchEnforced?: boolean;
+  customBlockedKeywords?: string[];
+  emergencyBrowserLockUntilMs?: number | null;
   pledgedToday: string | null; // YYYY-MM-DD
   logs: PurityTriggerLog[];
+}
+
+export interface SlowLearningState {
+  track: SlowLearningTrack;
+  require30sQuizToOpenApps: boolean;
+  readingDurationSeconds: number;
+  xp: number;
+  lessonsCompleted: number;
+  quizzesPassed: number;
+  currentLessonIndex: number;
 }
 
 export interface FocusVaultState {
