@@ -2,6 +2,10 @@ package com.kasbllc.minimumphone;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.role.RoleManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -41,6 +45,9 @@ public class MinimumPhoneNativePlugin extends Plugin {
     public static final int REQUEST_CODE_ROLE_HOME = 9001;
     private final Handler sessionTimerHandler = new Handler(Looper.getMainLooper());
     private Runnable activeReturnRunnable = null;
+    private Runnable minor5MinRunnable = null;
+    private Runnable medium10MinRunnable = null;
+    private Runnable full20MinRunnable = null;
 
     /**
      * Checks whether Minimum Phone is currently the system Default Home Launcher,
@@ -487,13 +494,60 @@ public class MinimumPhoneNativePlugin extends Plugin {
             }
         } catch (Exception ignored) {}
 
-        // 3. If this was a time-boxed restricted app unlock, pull user back to Minimum Phone when timer ends!
+        // 3. Progressive In-App Escalation (5m Minor -> 10m Medium -> 20m Full-Screen Auto-Close + 15s Quiz Re-Entry)
         if (launched && durationMinutes > 0) {
-            if (activeReturnRunnable != null) {
-                sessionTimerHandler.removeCallbacks(activeReturnRunnable);
+            if (activeReturnRunnable != null) sessionTimerHandler.removeCallbacks(activeReturnRunnable);
+            if (minor5MinRunnable != null) sessionTimerHandler.removeCallbacks(minor5MinRunnable);
+            if (medium10MinRunnable != null) sessionTimerHandler.removeCallbacks(medium10MinRunnable);
+            if (full20MinRunnable != null) sessionTimerHandler.removeCallbacks(full20MinRunnable);
+
+            final String displayApp = (appId != null && !appId.isEmpty()) ? appId.toUpperCase(Locale.ROOT) : "APP";
+            final String targetPkg = packageName;
+
+            // 5-Minute Minor Notification
+            minor5MinRunnable = () -> postEscalationNotification(
+                ctx,
+                9105,
+                "⏱ 5 Min Minor Notice · " + displayApp,
+                "You have spent 5 minutes in " + displayApp + ". Stay mindful of your intention.",
+                false
+            );
+            sessionTimerHandler.postDelayed(minor5MinRunnable, 5 * 60L * 1000L);
+
+            // 10-Minute Medium Warning Notification
+            medium10MinRunnable = () -> postEscalationNotification(
+                ctx,
+                9110,
+                "⚠ 10 Min Medium Alert · " + displayApp,
+                "10 minutes in " + displayApp + ". Wrap up soon—auto-close & 15s quiz lock triggers at 20m.",
+                true
+            );
+            sessionTimerHandler.postDelayed(medium10MinRunnable, 10 * 60L * 1000L);
+
+            // 20-Minute Full-Screen Auto-Close + Force Return to Minimum Phone (15s Read & Quiz Reopening Lock)
+            full20MinRunnable = () -> {
+                try {
+                    if (targetPkg != null && !targetPkg.isEmpty()) {
+                        ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+                        if (am != null) am.killBackgroundProcesses(targetPkg);
+                    }
+                } catch (Exception ignored) {}
+                postEscalationNotification(
+                    ctx,
+                    9120,
+                    "🛑 20 Min Limit · " + displayApp + " Closed",
+                    displayApp + " has been closed after 20 minutes. Complete the 15s Read & Quiz in Minimum Phone to reopen.",
+                    true
+                );
+                bringLauncherToFrontInternal(ctx);
+            };
+            sessionTimerHandler.postDelayed(full20MinRunnable, 20 * 60L * 1000L);
+
+            // Also respect shorter custom bid if < 20m
+            if (durationMinutes < 20) {
+                activeReturnRunnable = () -> bringLauncherToFrontInternal(ctx);
+                sessionTimerHandler.postDelayed(activeReturnRunnable, durationMinutes * 60L * 1000L);
             }
-            activeReturnRunnable = () -> bringLauncherToFrontInternal(ctx);
-            sessionTimerHandler.postDelayed(activeReturnRunnable, durationMinutes * 60L * 1000L);
         }
 
         JSObject ret = new JSObject();
@@ -568,5 +622,116 @@ public class MinimumPhoneNativePlugin extends Plugin {
             homeIntent.putExtra("session_expired", true);
             ctx.startActivity(homeIntent);
         } catch (Exception ignored) {}
+    }
+
+    public static void postEscalationNotification(
+        Context ctx,
+        int notifId,
+        String title,
+        String message,
+        boolean highPriority
+    ) {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            String channelId = highPriority ? "minphone_escalation_high" : "minphone_escalation_minor";
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel channel = new NotificationChannel(
+                    channelId,
+                    highPriority ? "Minimum Phone Session Warnings" : "Minimum Phone Mindful Notices",
+                    highPriority ? NotificationManager.IMPORTANCE_HIGH : NotificationManager.IMPORTANCE_DEFAULT
+                );
+                nm.createNotificationChannel(channel);
+            }
+
+            Intent tapIntent = new Intent(ctx, MainActivity.class);
+            tapIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                : PendingIntent.FLAG_UPDATE_CURRENT;
+            PendingIntent pi = PendingIntent.getActivity(ctx, notifId, tapIntent, flags);
+
+            Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(ctx, channelId)
+                : new Notification.Builder(ctx);
+
+            builder.setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                   .setContentTitle(title)
+                   .setContentText(message)
+                   .setAutoCancel(true)
+                   .setContentIntent(pi);
+
+            nm.notify(notifId, builder.build());
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Background Safe App Whitelist & Auto-Clean / Auto-Close Engine:
+     * Iterates over launchable apps and calls ActivityManager.killBackgroundProcesses(pkg)
+     * for all packages NOT in the user's safePackages / safeAppIds whitelist.
+     */
+    @PluginMethod
+    public void enforceBackgroundSafeList(PluginCall call) {
+        Context ctx = getContext();
+        ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+        PackageManager pm = ctx.getPackageManager();
+        String myPkg = ctx.getPackageName();
+
+        Set<String> safeTokens = new HashSet<>();
+        safeTokens.add(myPkg.toLowerCase(Locale.ROOT));
+
+        try {
+            JSArray safePackagesArr = call.getArray("safePackages");
+            if (safePackagesArr != null) {
+                for (int i = 0; i < safePackagesArr.length(); i++) {
+                    String s = safePackagesArr.getString(i);
+                    if (s != null && !s.trim().isEmpty()) {
+                        safeTokens.add(s.trim().toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        int closedCount = 0;
+        JSArray closedPackages = new JSArray();
+
+        if (am != null && pm != null) {
+            Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
+            mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> resolvedList = pm.queryIntentActivities(mainIntent, 0);
+            Set<String> checked = new HashSet<>();
+
+            for (ResolveInfo ri : resolvedList) {
+                if (ri.activityInfo == null) continue;
+                String pkg = ri.activityInfo.packageName;
+                if (pkg == null || pkg.equals(myPkg) || checked.contains(pkg)) continue;
+                checked.add(pkg);
+
+                String lowerPkg = pkg.toLowerCase(Locale.ROOT);
+                boolean isSafe = safeTokens.contains(lowerPkg);
+                if (!isSafe) {
+                    for (String token : safeTokens) {
+                        if (token.length() >= 3 && lowerPkg.contains(token)) {
+                            isSafe = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!isSafe) {
+                    try {
+                        am.killBackgroundProcesses(pkg);
+                        closedCount++;
+                        closedPackages.put(pkg);
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+
+        JSObject ret = new JSObject();
+        ret.put("cleaned", true);
+        ret.put("closedCount", closedCount);
+        ret.put("closedPackages", closedPackages);
+        call.resolve(ret);
     }
 }

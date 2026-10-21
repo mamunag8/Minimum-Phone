@@ -9,6 +9,7 @@ import type {
   LanguageCode,
   PlatformMode,
   PurityState,
+  QrComplexityLevel,
   SlowLearningState,
   SlowLearningTrack,
   VisualTheme,
@@ -23,6 +24,7 @@ import { getLessonsForTrack } from '../data/slowLearningCurriculum';
 import { SUPPORTED_LANGUAGES, TRANSLATIONS } from '../i18n/translations';
 import { NativeBridge } from '../services/nativeBridge';
 import {
+  enforceBackgroundSafeApps,
   forceTriggerHomePicker,
   openPhoneMainSetting,
   requestDefaultHomeLauncher,
@@ -54,10 +56,13 @@ interface AnalyticsAndKasbViewProps {
   apps: AppItem[];
   onTogglePinAppToProfile: (appId: string, profile: HomeProfileType) => void;
   onChangeAppTier: (appId: string, tier: AppFrictionTier) => void;
+  onSaveAppsBatch?: (updatedApps: AppItem[]) => void;
   onAddCustomApp: (name: string, tier: AppFrictionTier) => void;
   onRefreshInstalledApps: () => void;
   openHowToGuideImmediately?: boolean;
   onClearHowToGuideTrigger?: () => void;
+  onLockSettingsNow?: () => void;
+  onTriggerEscalationDemo?: (stage: '5m' | '10m' | '20m', appName: string) => void;
   impulsesStopped: number;
   reclaimedMinutes: number;
   purity: PurityState;
@@ -89,10 +94,13 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   apps,
   onTogglePinAppToProfile,
   onChangeAppTier,
+  onSaveAppsBatch,
   onAddCustomApp,
   onRefreshInstalledApps,
   openHowToGuideImmediately,
   onClearHowToGuideTrigger,
+  onLockSettingsNow,
+  onTriggerEscalationDemo,
   impulsesStopped,
   reclaimedMinutes,
   purity,
@@ -107,10 +115,25 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [showHowToGuideModal, setShowHowToGuideModal] = useState<boolean>(false);
 
-  // Active Apps Manager local search & custom app creator
+  // Active Apps Manager local search, staged draft & explicit Save button state
   const [appFilterQuery, setAppFilterQuery] = useState<string>('');
   const [newCustomAppName, setNewCustomAppName] = useState<string>('');
   const [newCustomAppTier, setNewCustomAppTier] = useState<AppFrictionTier>('restricted');
+  const [draftApps, setDraftApps] = useState<AppItem[]>(apps);
+  const [hasUnsavedAppChanges, setHasUnsavedAppChanges] = useState<boolean>(false);
+  const [savedAppsFeedback, setSavedAppsFeedback] = useState<string | null>(null);
+
+  // Background Safe App List & Auto-Clean Engine State
+  const defaultSafeIds = ['phone', 'calendar', 'notes', 'maps', 'authenticator', 'whatsapp'];
+  const [draftSafeAppIds, setDraftSafeAppIds] = useState<string[]>(
+    vault.backgroundSafeAppIds || defaultSafeIds
+  );
+  const [safeListSavedFeedback, setSafeListSavedFeedback] = useState<string | null>(null);
+  const [backgroundCleanFeedback, setBackgroundCleanFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftApps(apps);
+  }, [apps]);
 
   // Slow Learning Practice Modal State
   const [practiceModalOpen, setPracticeModalOpen] = useState<boolean>(false);
@@ -213,7 +236,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
     }
   };
 
-  const filteredApps = apps.filter((a) => {
+  const filteredApps = draftApps.filter((a) => {
     if (!appFilterQuery.trim()) return true;
     const q = appFilterQuery.trim().toLowerCase();
     return (
@@ -223,29 +246,128 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
     );
   });
 
-  const pinnedInCurrentProfileCount = apps.filter((a) =>
+  const pinnedInCurrentProfileCount = draftApps.filter((a) =>
     a.pinnedProfiles.includes(homeProfile)
   ).length;
 
+  const handleStageTogglePinApp = (appId: string, profile: HomeProfileType) => {
+    setDraftApps((prev) =>
+      prev.map((a) => {
+        if (a.id !== appId) return a;
+        const has = a.pinnedProfiles.includes(profile);
+        const nextProfiles = has
+          ? a.pinnedProfiles.filter((p) => p !== profile)
+          : [...a.pinnedProfiles, profile];
+        return { ...a, pinnedProfiles: nextProfiles };
+      })
+    );
+    setHasUnsavedAppChanges(true);
+    setSavedAppsFeedback(null);
+  };
+
+  const handleStageChangeAppTier = (appId: string, tier: AppFrictionTier) => {
+    setDraftApps((prev) =>
+      prev.map((a) => (a.id === appId ? { ...a, tier } : a))
+    );
+    setHasUnsavedAppChanges(true);
+    setSavedAppsFeedback(null);
+  };
+
+  const handleSaveAppsSelection = () => {
+    if (onSaveAppsBatch) {
+      onSaveAppsBatch(draftApps);
+    } else {
+      draftApps.forEach((da) => {
+        const orig = apps.find((oa) => oa.id === da.id);
+        if (orig && orig.tier !== da.tier) {
+          onChangeAppTier(da.id, da.tier);
+        }
+        (['work', 'personal', 'sunset'] as const).forEach((prof) => {
+          if (orig && orig.pinnedProfiles.includes(prof) !== da.pinnedProfiles.includes(prof)) {
+            onTogglePinAppToProfile(da.id, prof);
+          }
+        });
+      });
+    }
+    setHasUnsavedAppChanges(false);
+    setSavedAppsFeedback(
+      `✓ Saved Active Apps & Home Screen configuration (${pinnedInCurrentProfileCount} apps pinned on ${homeProfile.toUpperCase()} profile).`
+    );
+  };
+
+  const handleDiscardAppsChanges = () => {
+    setDraftApps(apps);
+    setHasUnsavedAppChanges(false);
+    setSavedAppsFeedback('↺ Discarded unsaved app selection changes.');
+  };
+
+  const handleToggleSafeAppId = (appId: string) => {
+    setDraftSafeAppIds((prev) =>
+      prev.includes(appId) ? prev.filter((id) => id !== appId) : [...prev, appId]
+    );
+    setSafeListSavedFeedback(null);
+  };
+
+  const handleSaveBackgroundSafeList = () => {
+    onUpdateVault((prev) => ({
+      ...prev,
+      backgroundSafeAppIds: draftSafeAppIds,
+    }));
+    setSafeListSavedFeedback(
+      `✓ Saved Background Safe App List (${draftSafeAppIds.length} safe apps protected; all apps outside this list will auto-clean/close).`
+    );
+  };
+
+  const handleRunBackgroundAutoCleanNow = async () => {
+    const safePackages: string[] = [];
+    for (const app of draftApps) {
+      if (draftSafeAppIds.includes(app.id)) {
+        safePackages.push(app.packageName || app.id);
+      }
+    }
+    const res = await enforceBackgroundSafeApps(safePackages, draftApps.length);
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    onUpdateVault((prev) => ({
+      ...prev,
+      backgroundSafeAppIds: draftSafeAppIds,
+      lastBackgroundCleanIso: nowTime,
+      lastBackgroundClosedCount: res.closedCount,
+    }));
+    setBackgroundCleanFeedback(
+      `🧹 Auto-Cleaned & Closed ${res.closedCount} background apps outside your Safe List at ${nowTime}!`
+    );
+  };
+
   return (
     <div className="space-y-6 pb-10">
-      {/* TOP BAR: SETTINGS HEADER + HOW TO USE GUIDE (ALL LANGUAGES) BUTTON */}
+      {/* TOP BAR: SETTINGS HEADER + LOCK SETTINGS (15S QUIZ GATE) + HOW TO USE GUIDE BUTTON */}
       <div className="border border-zinc-700 bg-zinc-950 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
-            CORE LAUNCHER CONFIGURATION & DOCUMENTATION
+            ALL SYSTEM & LAUNCHER SETTINGS (PROTECTED BY 15S READ & QUIZ GATE)
           </span>
           <h2 className="text-base font-mono-tech font-semibold text-zinc-100 mt-0.5">
             {t.settingsMenuTitle}
           </h2>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowHowToGuideModal(true)}
-          className="px-4 py-2.5 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer shrink-0"
-        >
-          {t.howToUseGuideBtn}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {onLockSettingsNow && (
+            <button
+              type="button"
+              onClick={onLockSettingsNow}
+              className="px-3 py-2.5 border border-zinc-500 text-zinc-200 font-mono-tech text-xs uppercase tracking-wider hover:bg-zinc-900 cursor-pointer"
+            >
+              🔒 Lock Settings (15s Quiz)
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowHowToGuideModal(true)}
+            className="px-4 py-2.5 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer shrink-0"
+          >
+            {t.howToUseGuideBtn}
+          </button>
+        </div>
       </div>
 
       {/* 1. PHONE MAIN SETTINGS BRIDGE (DIRECT ANDROID SYSTEM SETTINGS ACCESS) */}
@@ -635,7 +757,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                   {/* Pin to Home Toggle */}
                   <button
                     type="button"
-                    onClick={() => onTogglePinAppToProfile(app.id, homeProfile)}
+                    onClick={() => handleStageTogglePinApp(app.id, homeProfile)}
                     className={`px-2.5 py-1 border text-[10px] font-mono-tech cursor-pointer ${
                       isPinned
                         ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
@@ -660,7 +782,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                       <button
                         key={tierBtn.id}
                         type="button"
-                        onClick={() => onChangeAppTier(app.id, tierBtn.id)}
+                        onClick={() => handleStageChangeAppTier(app.id, tierBtn.id)}
                         className={`px-2 py-1 border text-[10px] font-mono-tech cursor-pointer ${
                           active
                             ? 'border-zinc-300 bg-zinc-800 text-white font-semibold'
@@ -675,6 +797,34 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               </div>
             );
           })}
+        </div>
+
+        {/* EXPLICIT SAVE & DISCARD BUTTONS FOR ACTIVE APPS SELECTION */}
+        <div className="border-t border-zinc-800 pt-3 space-y-2">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              type="button"
+              onClick={handleSaveAppsSelection}
+              className="flex-1 py-3 px-4 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer"
+            >
+              💾 Save Active Apps & Home Screen Selection
+              {hasUnsavedAppChanges ? ' (Unsaved Changes *)' : ''}
+            </button>
+            {hasUnsavedAppChanges && (
+              <button
+                type="button"
+                onClick={handleDiscardAppsChanges}
+                className="py-3 px-4 border border-zinc-700 text-xs font-mono-tech text-zinc-300 hover:bg-zinc-900 cursor-pointer"
+              >
+                ↺ Discard Changes
+              </button>
+            )}
+          </div>
+          {savedAppsFeedback && (
+            <div className="p-2.5 border border-zinc-400 bg-black text-xs font-mono-tech text-zinc-100">
+              {savedAppsFeedback}
+            </div>
+          )}
         </div>
 
         {/* Add Custom App Form */}
@@ -702,6 +852,295 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
             + Add App
           </button>
         </form>
+      </div>
+
+      {/* 5B. BACKGROUND SAFE APP LIST & AUTO-CLEAN / AUTO-CLOSE ENGINE */}
+      <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-zinc-900 pb-2.5">
+          <div>
+            <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
+              BACKGROUND PROCESS GUARD & RAM / DOPAMINE CLEANER
+            </span>
+            <h3 className="text-sm font-mono-tech font-semibold text-zinc-100 mt-0.5">
+              🧹 Background Safe App Whitelist & Auto-Close Engine
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              onUpdateVault((prev) => ({
+                ...prev,
+                autoCleanBackgroundApps: !(prev.autoCleanBackgroundApps ?? true),
+              }))
+            }
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+              vault.autoCleanBackgroundApps ?? true
+                ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
+                : 'border-zinc-700 text-zinc-400'
+            }`}
+          >
+            {vault.autoCleanBackgroundApps ?? true ? 'AUTO-CLEAN ON' : 'OFF'}
+          </button>
+        </div>
+
+        <p className="text-xs text-zinc-400 leading-relaxed">
+          Select the essential apps allowed to stay alive in the background. Any app{' '}
+          <strong>outside this Background Safe List</strong> (such as Facebook, Instagram, YouTube,
+          TikTok, or browsers) is automatically cleaned and closed when you return Home or when you
+          tap Clean below.
+        </p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto p-2 border border-zinc-900 bg-black">
+          {draftApps.map((app) => {
+            const isSafe = draftSafeAppIds.includes(app.id);
+            return (
+              <button
+                key={app.id}
+                type="button"
+                onClick={() => handleToggleSafeAppId(app.id)}
+                className={`p-2 border text-left text-xs font-mono-tech cursor-pointer flex items-center justify-between ${
+                  isSafe
+                    ? 'border-zinc-200 bg-zinc-900 text-zinc-100 font-semibold'
+                    : 'border-zinc-900 text-zinc-500 hover:border-zinc-700'
+                }`}
+              >
+                <span className="truncate">{app.name}</span>
+                <span className="ml-1 text-[10px]">{isSafe ? '✓ SAFE' : '✕ KILL'}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button
+            type="button"
+            onClick={handleSaveBackgroundSafeList}
+            className="flex-1 py-2.5 px-3 border border-zinc-300 bg-zinc-900 text-zinc-100 font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-zinc-800 cursor-pointer"
+          >
+            💾 Save Background Safe List ({draftSafeAppIds.length} Safe)
+          </button>
+          <button
+            type="button"
+            onClick={handleRunBackgroundAutoCleanNow}
+            className="flex-1 py-2.5 px-3 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer"
+          >
+            🧹 Auto-Clean & Close Non-Safe Apps Now
+          </button>
+        </div>
+
+        {safeListSavedFeedback && (
+          <div className="p-2.5 border border-zinc-600 bg-black text-xs font-mono-tech text-zinc-200">
+            {safeListSavedFeedback}
+          </div>
+        )}
+        {backgroundCleanFeedback && (
+          <div className="p-2.5 border border-zinc-300 bg-black text-xs font-mono-tech text-zinc-100">
+            {backgroundCleanFeedback}
+          </div>
+        )}
+      </div>
+
+      {/* 5C. RUNNING-APP ESCALATION (5M MINOR -> 10M MEDIUM -> 20M FULL-SCREEN CLOSE + 15S QUIZ) */}
+      <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
+        <div className="border-b border-zinc-900 pb-2.5">
+          <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
+            IN-APP TIME ESCALATION FOR FACEBOOK, YOUTUBE, INSTAGRAM & SOCIAL APPS
+          </span>
+          <h3 className="text-sm font-mono-tech font-semibold text-zinc-100 mt-0.5">
+            ⏱ 5m Minor → 10m Medium → 20m Full-Screen Auto-Close & 15s Quiz Lock
+          </h3>
+          <p className="text-xs text-zinc-400 mt-1">
+            While running distracting apps (Facebook, YouTube, Instagram, TikTok, X, Reddit),
+            Minimum Phone enforces progressive on-screen restrictions:
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs font-mono-tech">
+          <div className="border border-zinc-800 bg-black p-3 space-y-1">
+            <div className="text-zinc-200 font-semibold">1. At 5 Minutes (Minor)</div>
+            <p className="text-[11px] text-zinc-400">
+              Subtle on-screen & system notification reminding you to stay aligned with your
+              intention.
+            </p>
+          </div>
+          <div className="border border-zinc-700 bg-black p-3 space-y-1">
+            <div className="text-zinc-100 font-semibold">2. At 10 Minutes (Medium)</div>
+            <p className="text-[11px] text-zinc-400">
+              Prominent medium alert banner & heads-up pulse warning that 20m auto-close is
+              approaching.
+            </p>
+          </div>
+          <div className="border border-zinc-300 bg-black p-3 space-y-1">
+            <div className="text-white font-semibold">3. At 20 Minutes (Full-Screen)</div>
+            <p className="text-[11px] text-zinc-300">
+              Full-screen takeover automatically closes the app and requires a{' '}
+              <strong>15-second reading + quiz</strong> to reopen.
+            </p>
+          </div>
+        </div>
+
+        {onTriggerEscalationDemo && (
+          <div className="space-y-2 pt-1">
+            <div className="text-[10px] font-mono-tech uppercase text-zinc-400">
+              TEST LIVE ESCALATION SCREENS NOW (SIMULATE RUNNING YOUTUBE / FACEBOOK / INSTAGRAM):
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => onTriggerEscalationDemo('5m', 'Instagram')}
+                className="py-2.5 px-3 border border-zinc-700 text-xs font-mono-tech text-zinc-200 hover:bg-zinc-900 cursor-pointer"
+              >
+                ⏱ Test 5m Minor Notice
+              </button>
+              <button
+                type="button"
+                onClick={() => onTriggerEscalationDemo('10m', 'YouTube')}
+                className="py-2.5 px-3 border border-zinc-500 text-xs font-mono-tech text-zinc-100 hover:bg-zinc-900 cursor-pointer"
+              >
+                ⚠ Test 10m Medium Alert
+              </button>
+              <button
+                type="button"
+                onClick={() => onTriggerEscalationDemo('20m', 'Facebook')}
+                className="py-2.5 px-3 bg-zinc-100 text-black text-xs font-mono-tech font-semibold cursor-pointer"
+              >
+                🛑 Test 20m Full-Screen Close + 15s Quiz
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 5D. SETTINGS PAGE 15S QUIZ GATE, QR COMPLEXITY & NIGHT BROWSER QR LOCK */}
+      <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
+        <div className="border-b border-zinc-900 pb-2.5">
+          <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
+            ANTI-BYPASS GATES // SETTINGS, QR COMPLEXITY & NOTIFICATIONS
+          </span>
+          <h3 className="text-sm font-mono-tech font-semibold text-zinc-100 mt-0.5">
+            🔐 Settings 15s Read+Quiz Gate, QR Complexity & Night Browser Lock
+          </h3>
+        </div>
+
+        {/* Settings Page 15s Read & Quiz Restriction */}
+        <div className="flex items-center justify-between py-2 border-b border-zinc-900">
+          <div className="pr-3">
+            <div className="text-xs font-semibold text-zinc-100">
+              Require 15-Second Read & Quiz to Open Settings Page
+            </div>
+            <div className="text-[11px] text-zinc-400 font-mono-tech mt-0.5">
+              Prevents impulsively opening Settings to weaken your restrictions
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              onUpdateVault((prev) => ({
+                ...prev,
+                settingsGateEnabled: !(prev.settingsGateEnabled ?? true),
+              }))
+            }
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+              vault.settingsGateEnabled ?? true
+                ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
+                : 'border-zinc-700 text-zinc-400'
+            }`}
+          >
+            {vault.settingsGateEnabled ?? true ? '15S QUIZ ON' : 'OFF'}
+          </button>
+        </div>
+
+        {/* Notification App-Open Control */}
+        <div className="flex items-center justify-between py-2 border-b border-zinc-900">
+          <div className="pr-3">
+            <div className="text-xs font-semibold text-zinc-100">
+              Control Opening Apps from Notifications
+            </div>
+            <div className="text-[11px] text-zinc-400 font-mono-tech mt-0.5">
+              Blocks notifications from directly launching social/restricted apps without passing the
+              quiz gate
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              onUpdateVault((prev) => ({
+                ...prev,
+                blockNotificationAppLaunch: !(prev.blockNotificationAppLaunch ?? true),
+              }))
+            }
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+              vault.blockNotificationAppLaunch ?? true
+                ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
+                : 'border-zinc-700 text-zinc-400'
+            }`}
+          >
+            {vault.blockNotificationAppLaunch ?? true ? 'CONTROLLED' : 'OFF'}
+          </button>
+        </div>
+
+        {/* Night Browser QR Lock */}
+        <div className="flex items-center justify-between py-2 border-b border-zinc-900">
+          <div className="pr-3">
+            <div className="text-xs font-semibold text-zinc-100">
+              🌙 Mandatory QR Code Scan for Any Browser at Night
+            </div>
+            <div className="text-[11px] text-zinc-400 font-mono-tech mt-0.5">
+              Without physically scanning your QR code, no browser can be used at night (10 PM – 6
+              AM)
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              onUpdateVault((prev) => ({
+                ...prev,
+                nightBrowserQrRequired: !(prev.nightBrowserQrRequired ?? true),
+              }))
+            }
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+              vault.nightBrowserQrRequired ?? true
+                ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
+                : 'border-zinc-700 text-zinc-400'
+            }`}
+          >
+            {vault.nightBrowserQrRequired ?? true ? 'QR REQUIRED' : 'OFF'}
+          </button>
+        </div>
+
+        {/* QR Code Complexity Selector */}
+        <div className="space-y-2 pt-1">
+          <div className="text-xs font-mono-tech text-zinc-300">
+            QR Code Scanner Complexity Level (Easy / Medium / Hard):
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                { id: 'easy', label: 'EASY (6-Char)' },
+                { id: 'medium', label: 'MEDIUM (+Checksum)' },
+                { id: 'hard', label: 'HARD (Crypto + Math)' },
+              ] as const
+            ).map((lvl) => (
+              <button
+                key={lvl.id}
+                type="button"
+                onClick={() =>
+                  onUpdateVault((prev) => ({
+                    ...prev,
+                    qrComplexity: lvl.id as QrComplexityLevel,
+                  }))
+                }
+                className={`py-2 px-2 border text-xs font-mono-tech cursor-pointer ${
+                  (vault.qrComplexity || 'hard') === lvl.id
+                    ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
+                    : 'border-zinc-800 text-zinc-400'
+                }`}
+              >
+                {lvl.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* 6. DISPLAY, SYSTEM GRAYSCALE & DEFAULT HABIT-WALL */}

@@ -10,6 +10,8 @@ export type InspirationMode = 'islamic' | 'universal' | 'blended';
 
 export type SlowLearningTrack = 'islam' | 'language' | 'mindfulness';
 
+export type QrComplexityLevel = 'easy' | 'medium' | 'hard';
+
 export type HomeProfileType = 'work' | 'personal' | 'sunset';
 
 export type AppFrictionTier = 'essential' | 'utility' | 'restricted' | 'adult-blocked';
@@ -109,6 +111,19 @@ export interface FocusVaultState {
   sleepVaultScheduleEnabled: boolean; // 22:00 - 06:00
   physicalBrickLocked: boolean;
   physicalBrickAnchorCode: string;
+  qrComplexity?: QrComplexityLevel; // 'easy' | 'medium' | 'hard'
+  nightBrowserQrRequired?: boolean; // Without QR scan specifically cannot use any browser at night
+  nightQrStartHour?: number; // Default 22 (10:00 PM)
+  nightQrEndHour?: number; // Default 6 (6:00 AM)
+  forceNightBrowserQrTest?: boolean; // Enforce Night Browser QR requirement immediately
+  settingsGateEnabled?: boolean; // Require 15s read + quiz to open Settings page
+  settingsGateSeconds?: number; // Default 15s
+  blockNotificationAppLaunch?: boolean; // Control opening apps from notifications
+  readOnlyNotificationDigest?: boolean; // Read notification text without launching distracting app
+  autoCleanBackgroundApps?: boolean; // Auto clean/close apps outside Background Safe List
+  backgroundSafeAppIds?: string[]; // Whitelisted safe background app IDs
+  lastBackgroundCleanIso?: string | null;
+  lastBackgroundClosedCount?: number;
   uninstallProtectionEnabled: boolean;
   uninstallCooldownStartedIso: string | null;
   friendAccountabilitySecret: string;
@@ -119,4 +134,5 @@ export interface ScratchpadNote {
   text: string;
   createdAt: string;
   done: boolean;
+  pinned?: boolean;
 }

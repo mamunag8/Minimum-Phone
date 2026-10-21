@@ -505,21 +505,60 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
             </button>
           </div>
 
-          {/* 1-Tap Copy & Open Android Private DNS Settings */}
-          <div className="bg-black border border-zinc-800 p-3 space-y-2">
-            <div className="text-[10px] font-mono-tech uppercase text-zinc-400">
-              1-TAP ANDROID PRIVATE SAFE DNS SETUP (BLOCKS ALL PORN WEBSITES OS-WIDE):
+          {/* 1-Tap Copy & Open Android Private DNS Settings + Clear Protection Architecture Guide */}
+          <div className="bg-black border border-zinc-800 p-3.5 space-y-3">
+            <div className="text-[11px] font-mono-tech font-semibold uppercase text-zinc-200">
+              🛡️ HOW PRIVATE SAFE DNS PROTECTS YOU (ZERO-BYPASS NETWORK SHIELD):
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-zinc-300 leading-relaxed">
+              <div className="border border-zinc-800 bg-zinc-950/70 p-2.5">
+                <strong className="text-zinc-100 block font-mono-tech mb-0.5">
+                  1. Blocks Before Any Page Loads (&lt;5ms)
+                </strong>
+                Whenever any browser or app requests a website domain, Private DNS checks it at the
+                OS network layer and blocks 100% of porn, adult, and phishing domains (`0.0.0.0`)
+                before a single pixel or video can load.
+              </div>
+              <div className="border border-zinc-800 bg-zinc-950/70 p-2.5">
+                <strong className="text-zinc-100 block font-mono-tech mb-0.5">
+                  2. Works in Incognito & All Apps
+                </strong>
+                Unlike browser extensions that fail in Incognito/Private tabs or in-app webviews,
+                OS Private DNS protects Chrome, Safari, Firefox, Brave, and every social app
+                system-wide.
+              </div>
+              <div className="border border-zinc-800 bg-zinc-950/70 p-2.5">
+                <strong className="text-zinc-100 block font-mono-tech mb-0.5">
+                  3. Enforces Strict SafeSearch
+                </strong>
+                Automatically forces Google, Bing, YouTube, and DuckDuckGo into strict SafeSearch
+                mode so explicit images or videos cannot appear in search results.
+              </div>
+              <div className="border border-zinc-800 bg-zinc-950/70 p-2.5">
+                <strong className="text-zinc-100 block font-mono-tech mb-0.5">
+                  4. Zero Battery Drain & Encrypted
+                </strong>
+                Uses DNS-over-TLS (Port 853) built into Android/iOS—no heavy VPN battery drain,
+                zero speed loss, and zero browsing logs.
+              </div>
+            </div>
+
+            <div className="text-[10px] font-mono-tech uppercase text-zinc-400 pt-1">
+              1-TAP SETUP — COPY HOSTNAME & OPEN OS PRIVATE DNS SETTINGS:
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => handleCopyAndOpenPrivateDns('family.cloudflare-dns.com')}
-                className="p-2.5 border border-zinc-700 hover:border-zinc-400 text-left text-[11px] font-mono-tech text-zinc-200 cursor-pointer"
+                className="p-3 border border-zinc-700 hover:border-zinc-300 bg-zinc-950 text-left text-[11px] font-mono-tech text-zinc-200 cursor-pointer"
               >
-                <div className="font-semibold text-zinc-100">1. Cloudflare Family DNS</div>
-                <div className="text-zinc-400 mt-0.5">family.cloudflare-dns.com</div>
-                <div className="text-[10px] text-zinc-500 mt-1">
-                  [Tap to Copy & Open DNS Settings]
+                <div className="font-semibold text-zinc-100">
+                  1. Cloudflare 1.1.1.3 Family Shield (Recommended)
+                </div>
+                <div className="text-zinc-300 mt-0.5 select-all">family.cloudflare-dns.com</div>
+                <div className="text-[10px] text-zinc-400 mt-1">
+                  Blocks Malware + All Adult/Porn Domains → [Tap to Copy & Open DNS Settings]
                 </div>
               </button>
               <button
@@ -527,19 +566,39 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
                 onClick={() =>
                   handleCopyAndOpenPrivateDns('adult-filter-dns.cleanbrowsing.org')
                 }
-                className="p-2.5 border border-zinc-700 hover:border-zinc-400 text-left text-[11px] font-mono-tech text-zinc-200 cursor-pointer"
+                className="p-3 border border-zinc-700 hover:border-zinc-300 bg-zinc-950 text-left text-[11px] font-mono-tech text-zinc-200 cursor-pointer"
               >
-                <div className="font-semibold text-zinc-100">2. CleanBrowsing Adult Filter</div>
-                <div className="text-zinc-400 mt-0.5">adult-filter-dns.cleanbrowsing.org</div>
-                <div className="text-[10px] text-zinc-500 mt-1">
-                  [Tap to Copy & Open DNS Settings]
+                <div className="font-semibold text-zinc-100">
+                  2. CleanBrowsing Strict Adult Filter + SafeSearch
+                </div>
+                <div className="text-zinc-300 mt-0.5 select-all">
+                  adult-filter-dns.cleanbrowsing.org
+                </div>
+                <div className="text-[10px] text-zinc-400 mt-1">
+                  Blocks Adult Sites + Forces SafeSearch → [Tap to Copy & Open DNS Settings]
                 </div>
               </button>
             </div>
+
+            <div className="border border-zinc-800 bg-zinc-950 p-2.5 text-[11px] font-mono-tech text-zinc-300 space-y-1">
+              <div className="font-semibold text-zinc-100">
+                How to Paste in 10 Seconds (Android / iOS / Router):
+              </div>
+              <div>
+                • <strong>Android:</strong> Tap either button above (hostname is auto-copied) →
+                Settings → Network & Internet → <strong>Private DNS</strong> → select{' '}
+                <strong>"Private DNS provider hostname"</strong> → Paste → Save.
+              </div>
+              <div>
+                • <strong>iOS / Wi-Fi:</strong> Settings → Wi-Fi → tap (i) → Configure DNS → Manual
+                → add <strong>1.1.1.3</strong> and <strong>1.0.0.3</strong>.
+              </div>
+            </div>
+
             {copiedHost && (
-              <div className="text-[11px] font-mono-tech text-zinc-200 pt-1">
-                ✓ Copied <span className="underline">{copiedHost}</span>! In Android Network
-                Settings → Private DNS → select "Private DNS provider hostname" and paste it.
+              <div className="p-2.5 border border-zinc-300 bg-zinc-900 text-[11px] font-mono-tech text-zinc-100">
+                ✓ Copied <span className="underline font-semibold">{copiedHost}</span>! Now select
+                "Private DNS provider hostname" in your phone's Network Settings and paste it.
               </div>
             )}
           </div>
