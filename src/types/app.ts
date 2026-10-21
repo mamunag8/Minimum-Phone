@@ -16,6 +16,8 @@ export interface AppItem {
   id: string;
   name: string;
   nameBn?: string;
+  packageName?: string;
+  isSystemApp?: boolean;
   category: 'work' | 'utility' | 'social' | 'entertainment' | 'communication' | 'browser';
   tier: AppFrictionTier;
   dailyOpens: number;

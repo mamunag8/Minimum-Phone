@@ -24,6 +24,16 @@ import { InhaleInterceptModal } from './components/InhaleInterceptModal';
 import { PurityGuardView } from './components/PurityGuardView';
 import { DigestAndFocusView } from './components/DigestAndFocusView';
 import { AnalyticsAndKasbView } from './components/AnalyticsAndKasbView';
+import {
+  fetchNativeLauncherStatus,
+  forceTriggerHomePicker,
+  launchNativeAndroidApp,
+  loadRealInstalledApps,
+  openSystemHomeSettings,
+  requestDefaultHomeLauncher,
+  toggleHardwareKioskPin,
+  type NativeLauncherStatus,
+} from './services/nativeLauncherBridge';
 
 const STORAGE_KEY = 'minimum_phone_kasb_state_v1';
 
@@ -89,9 +99,25 @@ export function App() {
     friendAccountabilitySecret: 'KASB2026',
   });
 
-  // Live Clock & Battery
+  // Live Clock, Battery & Native Core Launcher Control State
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
-  const [batteryLevel] = useState<number>(84);
+  const [batteryLevel, setBatteryLevel] = useState<number>(84);
+  const [isCharging, setIsCharging] = useState<boolean>(false);
+  const [launcherStatus, setLauncherStatus] = useState<NativeLauncherStatus>({
+    isDefaultLauncher: false,
+    currentDefaultPackage: 'checking...',
+    isKioskPinned: false,
+    batteryLevel: 84,
+    isCharging: false,
+    platform: 'android',
+  });
+  const [showLauncherFortressModal, setShowLauncherFortressModal] =
+    useState<boolean>(false);
+  const [escapeGateTarget, setEscapeGateTarget] = useState<
+    'home-settings' | 'system-settings' | 'unpin-kiosk' | null
+  >(null);
+  const [escapeCooldownSec, setEscapeCooldownSec] = useState<number>(15);
+  const [escapePhraseInput, setEscapePhraseInput] = useState<string>('');
 
   // App Drawer Search State
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -112,6 +138,64 @@ export function App() {
   const [restlessOverlayOpen, setRestlessOverlayOpen] = useState<boolean>(false);
   const [openPuritySosImmediately, setOpenPuritySosImmediately] =
     useState<boolean>(false);
+
+  // Sync Native Android Core Launcher Status + Real Installed Phone Apps
+  const refreshNativeStatus = async () => {
+    const status = await fetchNativeLauncherStatus();
+    setLauncherStatus(status);
+    if (status.batteryLevel > 0) setBatteryLevel(status.batteryLevel);
+    setIsCharging(status.isCharging);
+  };
+
+  useEffect(() => {
+    refreshNativeStatus();
+    loadRealInstalledApps(DEFAULT_APPS).then((merged) => {
+      setApps(merged);
+    });
+
+    const onHomePressed = () => {
+      setInterceptedApp(null);
+      setRestlessOverlayOpen(false);
+      setEscapeGateTarget(null);
+      setSearchQuery('');
+      setActiveTab('home');
+      refreshNativeStatus();
+    };
+
+    const onBackPressed = () => {
+      setInterceptedApp((prev) => {
+        if (prev) return null;
+        return prev;
+      });
+      setRestlessOverlayOpen(false);
+      setShowLauncherFortressModal(false);
+      setEscapeGateTarget(null);
+      setActiveTab('home');
+    };
+
+    const onResume = () => {
+      refreshNativeStatus();
+    };
+
+    window.addEventListener('minimumphone:home', onHomePressed);
+    window.addEventListener('minimumphone:back', onBackPressed);
+    window.addEventListener('minimumphone:resume', onResume);
+    return () => {
+      window.removeEventListener('minimumphone:home', onHomePressed);
+      window.removeEventListener('minimumphone:back', onBackPressed);
+      window.removeEventListener('minimumphone:resume', onResume);
+    };
+  }, []);
+
+  // 15-second cooldown for Anti-Escape Launcher Switch / Settings Gate
+  useEffect(() => {
+    if (!escapeGateTarget) return;
+    if (escapeCooldownSec <= 0) return;
+    const timer = setInterval(() => {
+      setEscapeCooldownSec((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [escapeGateTarget, escapeCooldownSec]);
 
   // Load saved state from localStorage
   useEffect(() => {
@@ -237,6 +321,21 @@ export function App() {
   }, [apps, searchQuery, revealRestrictedInDrawer]);
 
   const handleTapApp = (app: AppItem) => {
+    // Anti-Escape Guard: if user tries to open Android Settings while Uninstall/Switch Protection is enabled
+    const lowerName = app.name.toLowerCase();
+    const lowerPkg = (app.packageName || '').toLowerCase();
+    if (
+      vault.uninstallProtectionEnabled &&
+      (lowerName === 'settings' ||
+        lowerPkg === 'com.android.settings' ||
+        lowerPkg.includes('launcher'))
+    ) {
+      setEscapeCooldownSec(15);
+      setEscapePhraseInput('');
+      setEscapeGateTarget('system-settings');
+      return;
+    }
+
     // Check if Physical QR Brick Lock is active for restricted apps
     if (app.tier === 'restricted' && vault.physicalBrickLocked) {
       setActiveTab('digest-focus');
@@ -263,6 +362,32 @@ export function App() {
       secondsRemaining: 15 * 60,
       totalSeconds: 15 * 60,
     });
+    launchNativeAndroidApp(app, 0);
+  };
+
+  const handleTogglePinHome = (appId: string) => {
+    setApps((prev) =>
+      prev.map((a) => {
+        if (a.id !== appId) return a;
+        const hasProfile = a.pinnedProfiles.includes(homeProfile);
+        const nextProfiles = hasProfile
+          ? a.pinnedProfiles.filter((p) => p !== homeProfile)
+          : [...a.pinnedProfiles, homeProfile];
+        return { ...a, pinnedProfiles: nextProfiles };
+      })
+    );
+  };
+
+  const handleToggleRestrictedTier = (appId: string) => {
+    setApps((prev) =>
+      prev.map((a) => {
+        if (a.id !== appId) return a;
+        return {
+          ...a,
+          tier: a.tier === 'restricted' ? 'utility' : 'restricted',
+        };
+      })
+    );
   };
 
   const handleReturnToPeaceFromIntercept = () => {
@@ -313,6 +438,8 @@ export function App() {
       secondsRemaining: minutesBid * 60,
       totalSeconds: minutesBid * 60,
     });
+    // Launch the real Android app with automatic return timer when minutesBid expires!
+    launchNativeAndroidApp(target, minutesBid);
   };
 
   const handleAddScratchpadNote = (e: React.FormEvent) => {
@@ -477,16 +604,111 @@ export function App() {
         {activeTab === 'home' && (
           <div className="flex-1 flex flex-col justify-between space-y-6">
             {/* Top Status Row: Only Clock, Date, Battery %, and Reassurance Digest Line */}
-            <div className="space-y-2 pt-2">
+            <div className="space-y-2.5 pt-2">
               <div className="flex items-baseline justify-between">
                 <h1 className="text-5xl sm:text-6xl font-mono-tech font-light tracking-tight">
                   {formattedClock}
                 </h1>
                 <div className="text-right font-mono-tech text-xs opacity-70">
                   <div>{formattedDate}</div>
-                  <div className="mt-0.5">BAT {batteryLevel}%</div>
+                  <div className="mt-0.5">
+                    BAT {batteryLevel}% {isCharging ? '⚡' : ''}
+                  </div>
                 </div>
               </div>
+
+              {/* CORE LAUNCHER & HOME BUTTON TAKEOVER CONTROL BAR */}
+              {!launcherStatus.isDefaultLauncher ? (
+                <div className="border-2 border-zinc-200 bg-zinc-950 p-3 space-y-2 font-mono-tech">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-zinc-100 uppercase tracking-wider">
+                      ⚠ CORE LAUNCHER NOT LOCKED YET
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowLauncherFortressModal(true)}
+                      className="underline text-zinc-300 cursor-pointer text-[10px]"
+                    >
+                      Fortress Setup →
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Pressing the Home button still opens your original phone launcher. Lock Minimum
+                    Phone as your default Home OS & pin the Home button below:
+                  </p>
+                  <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const s = await requestDefaultHomeLauncher();
+                        setLauncherStatus(s);
+                      }}
+                      className="py-2 px-2 bg-zinc-100 text-black text-[10px] font-semibold uppercase cursor-pointer text-center"
+                    >
+                      1. Set Default Home
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const s = await forceTriggerHomePicker();
+                        setLauncherStatus(s);
+                      }}
+                      className="py-2 px-2 border border-zinc-400 text-zinc-100 text-[10px] uppercase cursor-pointer text-center"
+                    >
+                      2. Clear Old Home
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const s = await toggleHardwareKioskPin(!launcherStatus.isKioskPinned);
+                        setLauncherStatus(s);
+                      }}
+                      className={`py-2 px-2 border text-[10px] uppercase cursor-pointer text-center ${
+                        launcherStatus.isKioskPinned
+                          ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
+                          : 'border-zinc-500 text-zinc-200'
+                      }`}
+                    >
+                      {launcherStatus.isKioskPinned ? '✓ Home Pinned' : '3. Pin Home Btn'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="border border-zinc-800 bg-zinc-950/90 px-3 py-1.5 flex items-center justify-between text-[10px] font-mono-tech">
+                  <span className="text-zinc-200">
+                    ● CORE LAUNCHER ACTIVE · HOME BUTTON OWNED
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (launcherStatus.isKioskPinned) {
+                          setEscapeCooldownSec(15);
+                          setEscapePhraseInput('');
+                          setEscapeGateTarget('unpin-kiosk');
+                        } else {
+                          const s = await toggleHardwareKioskPin(true);
+                          setLauncherStatus(s);
+                        }
+                      }}
+                      className={`px-2 py-0.5 border cursor-pointer ${
+                        launcherStatus.isKioskPinned
+                          ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
+                          : 'border-zinc-700 text-zinc-300'
+                      }`}
+                    >
+                      {launcherStatus.isKioskPinned ? '🔒 KIOSK LOCKED' : 'PIN HOME BTN'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowLauncherFortressModal(true)}
+                      className="underline text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                    >
+                      Shield
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Peace of Mind Reassurance Line */}
               <button
@@ -739,46 +961,65 @@ export function App() {
             </div>
 
             <div className="flex-1 space-y-1.5 overflow-y-auto max-h-[62vh] pr-1">
-              {drawerSearchResults.map((app) => (
-                <div
-                  key={app.id}
-                  className="flex items-center justify-between py-3 px-3 border border-zinc-900 hover:border-zinc-700 transition"
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleTapApp(app)}
-                    className="flex-1 text-left cursor-pointer"
+              {drawerSearchResults.map((app) => {
+                const isPinnedToCurrent = app.pinnedProfiles.includes(homeProfile);
+                return (
+                  <div
+                    key={app.id}
+                    className="flex items-center justify-between py-2.5 px-3 border border-zinc-900 hover:border-zinc-700 transition gap-2"
                   >
-                    <div className="text-base font-light">
-                      {lang === 'bn' && app.nameBn ? app.nameBn : app.name}
-                    </div>
-                    <div className="text-[10px] font-mono-tech opacity-50">
-                      {app.dailyOpens} opens today · {app.dailyMinutesUsed}m used
-                    </div>
-                  </button>
-
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`px-2 py-0.5 text-[10px] font-mono-tech border ${
-                        app.tier === 'restricted'
-                          ? 'border-zinc-600 text-zinc-300'
-                          : 'border-zinc-800 text-zinc-500'
-                      }`}
-                    >
-                      {app.tier === 'restricted'
-                        ? t.tierRestrictedBadge
-                        : t.tierUtilityBadge}
-                    </span>
                     <button
                       type="button"
                       onClick={() => handleTapApp(app)}
-                      className="px-2.5 py-1 bg-zinc-100 text-black text-[10px] font-mono-tech font-semibold uppercase cursor-pointer"
+                      className="flex-1 text-left cursor-pointer min-w-0"
                     >
-                      Open
+                      <div className="text-base font-light truncate">
+                        {lang === 'bn' && app.nameBn ? app.nameBn : app.name}
+                      </div>
+                      <div className="text-[10px] font-mono-tech opacity-50 truncate">
+                        {app.dailyOpens} opens · {app.dailyMinutesUsed}m
+                        {app.packageName ? ` · ${app.packageName}` : ''}
+                      </div>
                     </button>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePinHome(app.id)}
+                        title="Pin or unpin from 5-app Home Screen"
+                        className={`px-2 py-0.5 text-[10px] font-mono-tech border cursor-pointer ${
+                          isPinnedToCurrent
+                            ? 'border-zinc-200 bg-zinc-200 text-black font-semibold'
+                            : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {isPinnedToCurrent ? '★ HOME' : '☆ PIN'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleRestrictedTier(app.id)}
+                        title="Toggle Inhale Gate lock for this app"
+                        className={`px-2 py-0.5 text-[10px] font-mono-tech border cursor-pointer ${
+                          app.tier === 'restricted'
+                            ? 'border-zinc-500 text-zinc-200'
+                            : 'border-zinc-800 text-zinc-500'
+                        }`}
+                      >
+                        {app.tier === 'restricted'
+                          ? t.tierRestrictedBadge
+                          : t.tierUtilityBadge}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTapApp(app)}
+                        className="px-2.5 py-1 bg-zinc-100 text-black text-[10px] font-mono-tech font-semibold uppercase cursor-pointer"
+                      >
+                        Open
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {!revealRestrictedInDrawer && searchQuery.length < 4 && (
                 <div className="p-3.5 border border-dashed border-zinc-800 text-xs font-mono-tech opacity-60 text-center">
@@ -948,6 +1189,197 @@ export function App() {
           </div>
           <div className="text-[11px] font-mono-tech text-zinc-600">
             MINIMUM PHONE // KASB LLC
+          </div>
+        </div>
+      )}
+
+      {/* CORE LAUNCHER FORTRESS & HOME BUTTON CONTROL MODAL */}
+      {showLauncherFortressModal && (
+        <div className="fixed inset-0 z-50 bg-black/95 text-zinc-100 flex items-center justify-center p-4">
+          <div className="w-full max-w-md border-2 border-zinc-200 bg-black p-5 space-y-4 font-mono-tech">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div>
+                <div className="text-[10px] text-zinc-400 uppercase tracking-widest">
+                  SYSTEM HOME & HARDWARE LOCK
+                </div>
+                <h2 className="text-base font-semibold text-zinc-100">
+                  Core Launcher Fortress Control
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLauncherFortressModal(false)}
+                className="px-2.5 py-1 border border-zinc-700 text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between py-1.5 border-b border-zinc-900">
+                <span className="text-zinc-400">Default Home Role (ROLE_HOME):</span>
+                <span className="font-semibold text-zinc-100">
+                  {launcherStatus.isDefaultLauncher ? '✓ LOCKED TO MINIMUM PHONE' : '⚠ NOT SET'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-zinc-900">
+                <span className="text-zinc-400">Current Home Package:</span>
+                <span className="text-zinc-300 truncate max-w-[180px]">
+                  {launcherStatus.currentDefaultPackage}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-zinc-900">
+                <span className="text-zinc-400">Hardware Home Button Pin (Kiosk):</span>
+                <span className="font-semibold text-zinc-100">
+                  {launcherStatus.isKioskPinned ? '🔒 PINNED & LOCKED' : 'READY'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={async () => {
+                  const s = await requestDefaultHomeLauncher();
+                  setLauncherStatus(s);
+                }}
+                className="w-full py-3 px-3 bg-zinc-100 text-black text-xs font-semibold uppercase tracking-wider cursor-pointer text-left flex items-center justify-between"
+              >
+                <span>1. Set Minimum Phone as Default Home</span>
+                <span>→</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const s = await forceTriggerHomePicker();
+                  setLauncherStatus(s);
+                }}
+                className="w-full py-2.5 px-3 border border-zinc-500 text-zinc-100 text-xs uppercase tracking-wider cursor-pointer text-left flex items-center justify-between"
+              >
+                <span>2. Force Clear Original Phone Launcher</span>
+                <span>↻</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  if (launcherStatus.isKioskPinned) {
+                    setShowLauncherFortressModal(false);
+                    setEscapeCooldownSec(15);
+                    setEscapePhraseInput('');
+                    setEscapeGateTarget('unpin-kiosk');
+                  } else {
+                    const s = await toggleHardwareKioskPin(true);
+                    setLauncherStatus(s);
+                  }
+                }}
+                className="w-full py-2.5 px-3 border border-zinc-500 text-zinc-100 text-xs uppercase tracking-wider cursor-pointer text-left flex items-center justify-between"
+              >
+                <span>
+                  {launcherStatus.isKioskPinned
+                    ? '3. Unlock Hardware Home Button Pin (Guarded)'
+                    : '3. Pin & Lock Physical Home Button (Kiosk Mode)'}
+                </span>
+                <span>🔒</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLauncherFortressModal(false);
+                  setEscapeCooldownSec(15);
+                  setEscapePhraseInput('');
+                  setEscapeGateTarget('home-settings');
+                }}
+                className="w-full py-2 px-3 border border-zinc-800 text-zinc-400 text-[11px] uppercase tracking-wider cursor-pointer text-left flex items-center justify-between"
+              >
+                <span>Open System Default Home Settings (Guarded)</span>
+                <span>⚙</span>
+              </button>
+            </div>
+
+            <p className="text-[10px] text-zinc-500 leading-relaxed">
+              Tip: Select “Minimum Phone” and tap “Always” when Android asks for your Default Home
+              app. Enabling Kiosk Pin Lock physically blocks the Home and Recents buttons from
+              leaving Minimum Phone.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 15-SECOND ANTI-ESCAPE COMMITMENT GATE MODAL (BLOCKS EASY LAUNCHER SWITCHING) */}
+      {escapeGateTarget && (
+        <div className="fixed inset-0 z-50 bg-black text-zinc-100 flex items-center justify-center p-5">
+          <div className="w-full max-w-md border-2 border-zinc-200 bg-black p-6 space-y-5 font-mono-tech">
+            <div className="text-[10px] uppercase tracking-widest text-zinc-400">
+              CORE LAUNCHER ANTI-ESCAPE GUARD // CRAVING INTERCEPT
+            </div>
+            <h2 className="text-lg font-semibold text-zinc-100">
+              Are you trying to switch launchers from an impulse?
+            </h2>
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              “{getTriggerText(activeCalmTrigger, lang)}” —{' '}
+              <span className="text-zinc-500">{getTriggerSource(activeCalmTrigger, lang)}</span>
+            </p>
+
+            <div className="border border-zinc-800 p-3 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Cooling-Off Breath Timer:</span>
+                <span className="text-base font-semibold text-zinc-100">
+                  {escapeCooldownSec > 0 ? `${escapeCooldownSec}s remaining` : '✓ Ready'}
+                </span>
+              </div>
+              <div className="text-[11px] text-zinc-400">
+                To prevent impulsive switching back to your old launcher, type{' '}
+                <span className="text-zinc-100 font-semibold">UNLOCK CORE</span> or your Friend
+                Secret ({vault.friendAccountabilitySecret}):
+              </div>
+              <input
+                type="text"
+                value={escapePhraseInput}
+                onChange={(e) => setEscapePhraseInput(e.target.value)}
+                placeholder="Type UNLOCK CORE"
+                className="w-full bg-zinc-950 border border-zinc-700 px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-300"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEscapeGateTarget(null);
+                  setImpulsesStopped((n) => n + 1);
+                }}
+                className="flex-1 py-3 bg-zinc-100 text-black text-xs font-semibold uppercase tracking-wider cursor-pointer"
+              >
+                Stay in Minimum Phone
+              </button>
+              <button
+                type="button"
+                disabled={
+                  escapeCooldownSec > 0 ||
+                  (escapePhraseInput.trim().toUpperCase() !== 'UNLOCK CORE' &&
+                    escapePhraseInput.trim() !== vault.friendAccountabilitySecret)
+                }
+                onClick={async () => {
+                  const target = escapeGateTarget;
+                  setEscapeGateTarget(null);
+                  if (target === 'unpin-kiosk') {
+                    const s = await toggleHardwareKioskPin(false);
+                    setLauncherStatus(s);
+                  } else if (target === 'home-settings') {
+                    const s = await openSystemHomeSettings();
+                    setLauncherStatus(s);
+                  } else if (target === 'system-settings') {
+                    await openSystemHomeSettings();
+                  }
+                }}
+                className="px-4 py-3 border border-zinc-700 text-xs text-zinc-400 disabled:opacity-30 cursor-pointer"
+              >
+                Proceed
+              </button>
+            </div>
           </div>
         </div>
       )}
