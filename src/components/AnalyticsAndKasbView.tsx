@@ -31,6 +31,7 @@ import {
   toggleHardwareKioskPin,
   type PhoneSettingTarget,
 } from '../services/nativeLauncherBridge';
+import { ImpactReportAndReferralHub } from './ImpactReportAndReferralHub';
 
 interface AnalyticsAndKasbViewProps {
   lang: LanguageCode;
@@ -114,6 +115,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   const [nativeStatusLog, setNativeStatusLog] = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [showHowToGuideModal, setShowHowToGuideModal] = useState<boolean>(false);
+  const [settingsSubTab, setSettingsSubTab] = useState<'both' | 'report' | 'settings'>('both');
 
   // Active Apps Manager local search, staged draft & explicit Save button state
   const [appFilterQuery, setAppFilterQuery] = useState<string>('');
@@ -340,37 +342,88 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
 
   return (
     <div className="space-y-6 pb-10">
-      {/* TOP BAR: SETTINGS HEADER + LOCK SETTINGS (15S QUIZ GATE) + HOW TO USE GUIDE BUTTON */}
-      <div className="border border-zinc-700 bg-zinc-950 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
-            ALL SYSTEM & LAUNCHER SETTINGS (PROTECTED BY 15S READ & QUIZ GATE)
-          </span>
-          <h2 className="text-base font-mono-tech font-semibold text-zinc-100 mt-0.5">
-            {t.settingsMenuTitle}
-          </h2>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {onLockSettingsNow && (
+      {/* TOP BAR: SETTINGS & IMPACT REPORT HEADER + LOCK SETTINGS (15S QUIZ GATE) + HOW TO USE GUIDE BUTTON */}
+      <div className="border border-zinc-700 bg-zinc-950 p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
+              IMPACT REPORT, REFER FRIENDS & ALL PHONE/LAUNCHER SETTINGS (15S QUIZ GATED)
+            </span>
+            <h2 className="text-base font-mono-tech font-semibold text-zinc-100 mt-0.5">
+              {t.settingsMenuTitle}
+            </h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {onLockSettingsNow && (
+              <button
+                type="button"
+                onClick={onLockSettingsNow}
+                className="px-3 py-2.5 border border-zinc-500 text-zinc-200 font-mono-tech text-xs uppercase tracking-wider hover:bg-zinc-900 cursor-pointer"
+              >
+                🔒 Lock Settings (15s Quiz)
+              </button>
+            )}
             <button
               type="button"
-              onClick={onLockSettingsNow}
-              className="px-3 py-2.5 border border-zinc-500 text-zinc-200 font-mono-tech text-xs uppercase tracking-wider hover:bg-zinc-900 cursor-pointer"
+              onClick={() => setShowHowToGuideModal(true)}
+              className="px-4 py-2.5 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer shrink-0"
             >
-              🔒 Lock Settings (15s Quiz)
+              {t.howToUseGuideBtn}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowHowToGuideModal(true)}
-            className="px-4 py-2.5 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer shrink-0"
-          >
-            {t.howToUseGuideBtn}
-          </button>
+          </div>
+        </div>
+
+        {/* SUB-VIEW SWITCHER: IMPACT REPORT & REFERRAL VS ALL SETTINGS */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-zinc-800">
+          {(
+            [
+              {
+                id: 'both',
+                label: '📑 Full View (Impact Report + All Settings)',
+              },
+              {
+                id: 'report',
+                label: '📊 Impact Graphics, Time Saved & Refer Friends',
+              },
+              {
+                id: 'settings',
+                label: '⚙️ All Phone, Apps & Protection Settings',
+              },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setSettingsSubTab(tab.id)}
+              className={`py-2.5 px-3 border text-xs font-mono-tech text-left sm:text-center cursor-pointer transition ${
+                settingsSubTab === tab.id
+                  ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                  : 'border-zinc-800 bg-black text-zinc-300 hover:border-zinc-600'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* 1. PHONE MAIN SETTINGS BRIDGE (DIRECT ANDROID SYSTEM SETTINGS ACCESS) */}
+      {/* SECTION 0: IMPACT STATISTICS, VISUAL GRAPHICS & REFER FRIENDS/FAMILY HUB */}
+      {(settingsSubTab === 'both' || settingsSubTab === 'report') && (
+        <ImpactReportAndReferralHub
+          lang={lang}
+          impulsesStopped={impulsesStopped}
+          reclaimedMinutes={reclaimedMinutes}
+          purity={purity}
+          slowLearning={slowLearning}
+          vault={vault}
+          apps={apps}
+          onOpenShareableReceipt={() => setShowReceiptModal(true)}
+        />
+      )}
+
+      {(settingsSubTab === 'both' || settingsSubTab === 'settings') && (
+        <div className="space-y-6">
+          {/* 1. PHONE MAIN SETTINGS BRIDGE (DIRECT ANDROID SYSTEM SETTINGS ACCESS) */}
       <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-3.5">
         <div className="flex items-center justify-between">
           <div>
@@ -1466,6 +1519,8 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
           cloud telemetry to help millions reclaim their attention and inner peace.
         </p>
       </div>
+        </div>
+      )}
 
       {/* =====================================================================
           MODAL 1: COMPLETE "HOW TO USE" DOCUMENTATION IN ALL 5 LANGUAGES
