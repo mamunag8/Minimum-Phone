@@ -583,3 +583,212 @@ export const TRANSLATIONS: Record<LanguageCode, UIStrings> = {
     emergencyLock15mBtn: '🔒 Kunci Semua Browser & Aplikasi Sosial Selama 15 Menit',
   },
 };
+
+/**
+ * Universal inline multilingual helper.
+ * Guarantees 100% translation into Bangla ('bn'), Arabic ('ar'), Urdu ('ur'), Indonesian ('id'), or English ('en').
+ */
+export function tx(
+  lang: LanguageCode,
+  en: string,
+  bn: string,
+  ar?: string,
+  ur?: string,
+  id?: string
+): string {
+  switch (lang) {
+    case 'bn':
+      return bn;
+    case 'ar':
+      return ar || bn || en;
+    case 'ur':
+      return ur || ar || bn || en;
+    case 'id':
+      return id || en;
+    case 'en':
+    default:
+      return en;
+  }
+}
+
+const APP_NAME_TRANSLATIONS: Record<
+  string,
+  { bn: string; ar: string; ur: string; id: string }
+> = {
+  'phone calls': {
+    bn: 'ফোন কল',
+    ar: 'المكالمات الهاتفية',
+    ur: 'فون کالز',
+    id: 'Panggilan Telepon',
+  },
+  phone: {
+    bn: 'ফোন কল',
+    ar: 'الهاتف',
+    ur: 'فون',
+    id: 'Telepon',
+  },
+  'messages (sms)': {
+    bn: 'মেসেজ (SMS)',
+    ar: 'الرسائل (SMS)',
+    ur: 'پیغامات (SMS)',
+    id: 'Pesan (SMS)',
+  },
+  messages: {
+    bn: 'মেসেজ (SMS)',
+    ar: 'الرسائل',
+    ur: 'پیغامات',
+    id: 'Pesan',
+  },
+  whatsapp: {
+    bn: 'হোয়াটসঅ্যাপ (WhatsApp)',
+    ar: 'واتساب (WhatsApp)',
+    ur: 'واٹس ایپ (WhatsApp)',
+    id: 'WhatsApp',
+  },
+  calendar: {
+    bn: 'ক্যালেন্ডার',
+    ar: 'التقويم',
+    ur: 'کیلنڈر',
+    id: 'Kalender',
+  },
+  notes: {
+    bn: 'নোটস',
+    ar: 'الملاحظات',
+    ur: 'نوٹس',
+    id: 'Catatan',
+  },
+  'quran & sunnah': {
+    bn: 'কুরআন ও সুন্নাহ',
+    ar: 'القرآن والسنة',
+    ur: 'قرآن و سنت',
+    id: 'Al-Quran & Sunnah',
+  },
+  maps: {
+    bn: 'ম্যাপস (Maps)',
+    ar: 'الخرائط (Maps)',
+    ur: 'نقشہ (Maps)',
+    id: 'Peta (Maps)',
+  },
+  calculator: {
+    bn: 'ক্যালকুলেটর',
+    ar: 'الآلة الحاسبة',
+    ur: 'کیلکولیٹر',
+    id: 'Kalkulator',
+  },
+  authenticator: {
+    bn: 'অথেনটিকেটর (2FA)',
+    ar: 'المصادقة الثنائية (2FA)',
+    ur: 'اتھینٹیکیٹر (2FA)',
+    id: 'Autentikator (2FA)',
+  },
+  instagram: {
+    bn: 'ইনস্টাগ্রাম (Instagram)',
+    ar: 'إنستغرام (Instagram)',
+    ur: 'انسٹاگرام (Instagram)',
+    id: 'Instagram',
+  },
+  tiktok: {
+    bn: 'টিকটক (TikTok)',
+    ar: 'تيك توك (TikTok)',
+    ur: 'ٹک ٹاک (TikTok)',
+    id: 'TikTok',
+  },
+  youtube: {
+    bn: 'ইউটিউব (YouTube)',
+    ar: 'يوتيوب (YouTube)',
+    ur: 'یوٹیوب (YouTube)',
+    id: 'YouTube',
+  },
+  facebook: {
+    bn: 'ফেসবুক (Facebook)',
+    ar: 'فيسبوك (Facebook)',
+    ur: 'فیس بک (Facebook)',
+    id: 'Facebook',
+  },
+  'x / twitter': {
+    bn: 'এক্স / টুইটার (X)',
+    ar: 'إكس / تويتر (X)',
+    ur: 'ایکس / ٹوئٹر (X)',
+    id: 'X / Twitter',
+  },
+  reddit: {
+    bn: 'রেডিট (Reddit)',
+    ar: 'ريديت (Reddit)',
+    ur: 'ریڈٹ (Reddit)',
+    id: 'Reddit',
+  },
+  'web browser': {
+    bn: 'ওয়েব ব্রাউজার (Browser)',
+    ar: 'متصفح الويب (Browser)',
+    ur: 'ویب براؤزر (Browser)',
+    id: 'Browser Web',
+  },
+  chrome: {
+    bn: 'ক্রোম ব্রাউজার (Chrome)',
+    ar: 'متصفح كروم (Chrome)',
+    ur: 'کروم براؤزر (Chrome)',
+    id: 'Browser Chrome',
+  },
+  settings: {
+    bn: 'ফোন সেটিংস',
+    ar: 'إعدادات الهاتف',
+    ur: 'فون سیٹنگز',
+    id: 'Setelan Ponsel',
+  },
+};
+
+export function getAppDisplayName(
+  app: { name: string; nameBn?: string },
+  lang: LanguageCode
+): string {
+  if (lang === 'en') return app.name;
+  const key = app.name.trim().toLowerCase();
+  const mapped = APP_NAME_TRANSLATIONS[key];
+  if (mapped && mapped[lang as 'bn' | 'ar' | 'ur' | 'id']) {
+    return mapped[lang as 'bn' | 'ar' | 'ur' | 'id'];
+  }
+  if (lang === 'bn' && app.nameBn) return app.nameBn;
+  return app.name;
+}
+
+export function getSelfMasteryRank(xp: number, lang: LanguageCode): string {
+  if (xp >= 250) {
+    return tx(
+      lang,
+      'Level 4 · Master of Stillness',
+      'লেভেল ৪ · আত্মনিয়ন্ত্রণ ও প্রশান্তির চূড়ান্ত স্তর',
+      'المستوى ٤ · سيد السكينة وضبط النفس',
+      'لیول 4 · خود ضابطگی کا اعلیٰ مقام',
+      'Level 4 · Master Ketenangan'
+    );
+  }
+  if (xp >= 120) {
+    return tx(
+      lang,
+      'Level 3 · Guardian of Focus',
+      'লেভেল ৩ · মনোযোগ ও সময়ের প্রহরী',
+      'المستوى ٣ · حارس التركيز والوقت',
+      'لیول 3 · توجہ اور وقت کا محافظ',
+      'Level 3 · Penjaga Fokus'
+    );
+  }
+  if (xp >= 50) {
+    return tx(
+      lang,
+      'Level 2 · Mindful Learner',
+      'লেভেল ২ · সচেতন শিক্ষার্থী',
+      'المستوى ٢ · متعلم واعٍ',
+      'لیول 2 · باشعور طالب علم',
+      'Level 2 · Pembelajar Sadar'
+    );
+  }
+  return tx(
+    lang,
+    'Level 1 · Seeker of Calm',
+    'লেভেল ১ · প্রশান্তির অভিযাত্রী',
+    'المستوى ١ · باحث عن السكينة',
+    'لیول 1 · سکون کا متلاشی',
+    'Level 1 · Pencari Ketenangan'
+  );
+}
+

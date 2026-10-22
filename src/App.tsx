@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  AffectEmotionTag,
   AppFrictionTier,
   AppItem,
   CalmTrigger,
@@ -13,6 +14,7 @@ import type {
   PurityState,
   ScratchpadNote,
   SlowLearningState,
+  SlowLearningTrack,
   VisualTheme,
   WisdomPackSource,
 } from './types/app';
@@ -26,7 +28,13 @@ import {
   getLessonsForTrack,
   getShortLessonPassage,
 } from './data/slowLearningCurriculum';
-import { SUPPORTED_LANGUAGES, TRANSLATIONS } from './i18n/translations';
+import {
+  getAppDisplayName,
+  getSelfMasteryRank,
+  SUPPORTED_LANGUAGES,
+  TRANSLATIONS,
+  tx,
+} from './i18n/translations';
 import { InhaleInterceptModal } from './components/InhaleInterceptModal';
 import { PurityGuardView } from './components/PurityGuardView';
 import {
@@ -34,6 +42,7 @@ import {
   getRequiredQrTokenForComplexity,
 } from './components/DigestAndFocusView';
 import { AnalyticsAndKasbView } from './components/AnalyticsAndKasbView';
+import { FirstTimeSetupModal } from './components/FirstTimeSetupModal';
 import {
   enforceBackgroundSafeApps,
   fetchNativeLauncherStatus,
@@ -47,7 +56,7 @@ import {
   type NativeLauncherStatus,
 } from './services/nativeLauncherBridge';
 
-const STORAGE_KEY = 'minimum_phone_kasb_state_v4';
+const STORAGE_KEY = 'minimum_phone_kasb_state_v5';
 
 function normalizeAppsForCallingAndNightLock(list: AppItem[]): AppItem[] {
   const hasMessagesApp = list.some(
@@ -115,14 +124,42 @@ export function App() {
   const [defaultHabitWall, setDefaultHabitWall] =
     useState<HabitWallType>('read-30s-quiz');
 
+  // First-Time Step-by-Step Setup Wizard state
+  const [firstTimeSetupCompleted, setFirstTimeSetupCompleted] = useState<boolean>(() => {
+    try {
+      const saved =
+        localStorage.getItem(STORAGE_KEY) ||
+        localStorage.getItem('minimum_phone_kasb_state_v4');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Boolean(parsed.firstTimeSetupCompleted);
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  });
+  const [showFirstTimeSetupModal, setShowFirstTimeSetupModal] = useState<boolean>(
+    () => !firstTimeSetupCompleted
+  );
+
   const [slowLearning, setSlowLearning] = useState<SlowLearningState>({
     track: 'islam',
     require30sQuizToOpenApps: true,
     readingDurationSeconds: 12,
-    xp: 45,
-    lessonsCompleted: 3,
-    quizzesPassed: 3,
+    xp: 60,
+    lessonsCompleted: 4,
+    quizzesPassed: 4,
     currentLessonIndex: 0,
+    masteredLessonIds: ['islam-1', 'islam-2'],
+    reviewDueLessonIds: [],
+    emotionCounts: {
+      purpose: 4,
+      bored: 5,
+      stressed: 2,
+      tired: 1,
+    },
+    ifThenReplacementHabit: 'Drink Water / Dhikr / Deep Sigh',
   });
 
   const [activeTab, setActiveTab] = useState<
@@ -178,6 +215,7 @@ export function App() {
     monkTotalSeconds: 50 * 60,
     deepWorkScheduleEnabled: true,
     sleepVaultScheduleEnabled: true,
+    autoCircadianWindDown: true,
     physicalBrickLocked: false,
     physicalBrickAnchorCode: 'KASB-BRICK-77',
     qrComplexity: 'hard',
@@ -226,17 +264,17 @@ export function App() {
   const [escapeCooldownSec, setEscapeCooldownSec] = useState<number>(15);
   const [escapePhraseInput, setEscapePhraseInput] = useState<string>('');
 
-  // Settings Page 15-Second Read + Quiz Gate State
+  // Settings Page Quick 20-Second Read + Quiz Gate State
   const [settingsSessionUnlocked, setSettingsSessionUnlocked] = useState<boolean>(false);
   const [settingsGateModalOpen, setSettingsGateModalOpen] = useState<boolean>(false);
-  const [settingsGateTimerSec, setSettingsGateTimerSec] = useState<number>(15);
+  const [settingsGateTimerSec, setSettingsGateTimerSec] = useState<number>(10);
   const [settingsGateLessonIdx, setSettingsGateLessonIdx] = useState<number>(0);
   const [settingsGateSelectedOption, setSettingsGateSelectedOption] = useState<
     number | null
   >(null);
   const [settingsGateError, setSettingsGateError] = useState<string | null>(null);
 
-  // Night Browser Physical QR Scanner Gate State ("Without scan QR codes specifically can not use any browse at night")
+  // Night Browser Physical QR Scanner Gate State
   const [nightBrowserQrApp, setNightBrowserQrApp] = useState<AppItem | null>(null);
   const [nightQrInput, setNightQrInput] = useState<string>('');
   const [nightQrMathInput, setNightQrMathInput] = useState<string>('');
@@ -304,11 +342,12 @@ export function App() {
     if (!(currentVault.autoCleanBackgroundApps ?? true)) return;
     const safeIds = currentVault.backgroundSafeAppIds || [
       'phone',
+      'messages',
+      'whatsapp',
       'calendar',
       'notes',
       'maps',
       'authenticator',
-      'whatsapp',
     ];
     const safePackages = currentApps
       .filter((a) => safeIds.includes(a.id))
@@ -400,6 +439,7 @@ export function App() {
     try {
       const raw =
         localStorage.getItem(STORAGE_KEY) ||
+        localStorage.getItem('minimum_phone_kasb_state_v4') ||
         localStorage.getItem('minimum_phone_kasb_state_v3');
       if (raw) {
         const parsed = JSON.parse(raw);
@@ -409,14 +449,18 @@ export function App() {
         if (typeof parsed.grayscaleEnabled === 'boolean')
           setGrayscaleEnabled(parsed.grayscaleEnabled);
         if (parsed.defaultHabitWall) setDefaultHabitWall(parsed.defaultHabitWall);
+        if (typeof parsed.firstTimeSetupCompleted === 'boolean') {
+          setFirstTimeSetupCompleted(parsed.firstTimeSetupCompleted);
+        }
         if (parsed.slowLearning) {
-          setSlowLearning({
+          setSlowLearning((prev) => ({
+            ...prev,
             ...parsed.slowLearning,
             readingDurationSeconds: Math.min(
               15,
               parsed.slowLearning.readingDurationSeconds || 12
             ),
-          });
+          }));
         }
         if (parsed.impulsesStopped) setImpulsesStopped(parsed.impulsesStopped);
         if (parsed.reclaimedMinutes) setReclaimedMinutes(parsed.reclaimedMinutes);
@@ -443,6 +487,7 @@ export function App() {
           wisdomPack,
           grayscaleEnabled,
           defaultHabitWall,
+          firstTimeSetupCompleted,
           slowLearning,
           impulsesStopped,
           reclaimedMinutes,
@@ -461,6 +506,7 @@ export function App() {
     wisdomPack,
     grayscaleEnabled,
     defaultHabitWall,
+    firstTimeSetupCompleted,
     slowLearning,
     impulsesStopped,
     reclaimedMinutes,
@@ -501,12 +547,12 @@ export function App() {
 
         // 5-Minute Minor On-Screen Notification (300 seconds)
         if (nextElapsed === 5 * 60) {
-          setEscalationBanner({ stage: '5m', appName: prev.app.name });
+          setEscalationBanner({ stage: '5m', appName: getAppDisplayName(prev.app, lang) });
         }
 
         // 10-Minute Medium On-Screen Warning (600 seconds)
         if (nextElapsed === 10 * 60) {
-          setEscalationBanner({ stage: '10m', appName: prev.app.name });
+          setEscalationBanner({ stage: '10m', appName: getAppDisplayName(prev.app, lang) });
         }
 
         // 20-Minute Full-Screen Auto-Close + 15-Second Read & Quiz Reopening Restriction (1200 seconds)
@@ -535,7 +581,7 @@ export function App() {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [activeSession, apps, vault]);
+  }, [activeSession, apps, vault, lang]);
 
   const t = TRANSLATIONS[lang];
   const currentLangMeta =
@@ -621,18 +667,23 @@ export function App() {
 
     return apps.filter((app) => {
       const nameEn = app.name.toLowerCase();
+      const nameLocalized = getAppDisplayName(app, lang).toLowerCase();
       const nameBn = (app.nameBn || '').toLowerCase();
       if (
         (app.tier === 'restricted' || app.tier === 'adult-blocked') &&
         !revealRestrictedInDrawer
       ) {
         return (
-          q.length >= 3 && (nameEn.startsWith(q) || nameEn === q || nameBn.includes(q))
+          q.length >= 3 &&
+          (nameEn.startsWith(q) ||
+            nameEn === q ||
+            nameLocalized.includes(q) ||
+            nameBn.includes(q))
         );
       }
-      return nameEn.includes(q) || nameBn.includes(q);
+      return nameEn.includes(q) || nameLocalized.includes(q) || nameBn.includes(q);
     });
-  }, [apps, searchQuery, revealRestrictedInDrawer]);
+  }, [apps, searchQuery, revealRestrictedInDrawer, lang]);
 
   // Check if current hour is within Night Window (default 22:00 - 06:00) or forced test mode
   const isNightHourActive = useMemo(() => {
@@ -642,6 +693,14 @@ export function App() {
     const endH = vault.nightQrEndHour ?? 6;
     return hr >= startH || hr < endH;
   }, [currentTime, vault.forceNightBrowserQrTest, vault.nightQrStartHour, vault.nightQrEndHour]);
+
+  // Method 6: Automatic Circadian Sunset Wind-Down (9:30 PM – 6:00 AM)
+  const isCircadianSunsetActive = useMemo(() => {
+    if (!(vault.autoCircadianWindDown ?? true)) return false;
+    const hr = currentTime.getHours();
+    const min = currentTime.getMinutes();
+    return (hr === 21 && min >= 30) || hr >= 22 || hr < 6;
+  }, [currentTime, vault.autoCircadianWindDown]);
 
   // Sleeping-Time / Night Mandatory Emergency QR Lock for Browsers, Social Media & Entertainment Apps
   const isNightQrLockedApp = (app: AppItem): boolean => {
@@ -829,11 +888,16 @@ export function App() {
     setApps((prev) => [newItem, ...prev]);
   };
 
+  // Method 5 & Method 7: Walking away awards +20 XP toward Self-Mastery Rank
   const handleReturnToPeaceFromIntercept = () => {
     setInterceptedApp(null);
     setInterceptForce15sReopen(false);
     setImpulsesStopped((n) => n + 1);
     setReclaimedMinutes((m) => m + 15);
+    setSlowLearning((prev) => ({
+      ...prev,
+      xp: prev.xp + 20,
+    }));
     setSearchQuery('');
     setActiveTab('home');
   };
@@ -895,9 +959,9 @@ export function App() {
       apps[0];
 
     if (stage === '5m') {
-      setEscalationBanner({ stage: '5m', appName: matchedApp.name });
+      setEscalationBanner({ stage: '5m', appName: getAppDisplayName(matchedApp, lang) });
     } else if (stage === '10m') {
-      setEscalationBanner({ stage: '10m', appName: matchedApp.name });
+      setEscalationBanner({ stage: '10m', appName: getAppDisplayName(matchedApp, lang) });
     } else {
       setEscalationBanner(null);
       setActiveSession(null);
@@ -970,14 +1034,28 @@ export function App() {
 
     if (nightQrScanHoldSec > 0) {
       setNightQrError(
-        `Hold steady for ${nightQrScanHoldSec}s while optical QR verification completes.`
+        tx(
+          lang,
+          `Hold steady for ${nightQrScanHoldSec}s while optical QR verification completes.`,
+          `ক্যামেরা যাচাই সম্পন্ন হতে আরও ${nightQrScanHoldSec} সেকেন্ড স্থিরভাবে ধরে রাখুন।`,
+          `انتظر ${nightQrScanHoldSec} ثانية حتى يكتمل التحقق من رمز QR.`,
+          `کیمرہ تصدیق مکمل ہونے تک ${nightQrScanHoldSec} سیکنڈ انتظار کریں۔`,
+          `Tahan ${nightQrScanHoldSec} detik hingga verifikasi QR selesai.`
+        )
       );
       return;
     }
 
     if (complexity === 'hard' && nightQrMathInput.trim() !== '43') {
       setNightQrError(
-        'Hard QR Complexity requires solving the anti-impulse check (17 + 26 = 43) plus the exact QR token.'
+        tx(
+          lang,
+          'Hard QR Complexity requires solving the anti-impulse check (17 + 26 = 43) plus the exact QR token.',
+          'হার্ড (Hard) মোডে আনলক করতে গণিত যাচাই (১৭ + ২৬ = ৪৩) এবং সঠিক QR কোড উভয়ই দিতে হবে।',
+          'يتطلب المستوى الصعب حل المسألة (17 + 26 = 43) مع رمز QR الكامل.',
+          'ہارڈ موڈ کے لیے حساب (17 + 26 = 43) اور مکمل QR کوڈ دونوں درج کریں۔',
+          'Mode Sulit memerlukan jawaban (17 + 26 = 43) serta kode QR lengkap.'
+        )
       );
       return;
     }
@@ -991,7 +1069,14 @@ export function App() {
       setInterceptedApp(targetBrowser);
     } else {
       setNightQrError(
-        `Invalid Night Browser QR Code for [${complexity.toUpperCase()}] complexity. Required: ${expectedToken}`
+        tx(
+          lang,
+          `Invalid Night QR Code for [${complexity.toUpperCase()}] complexity. Required: ${expectedToken}`,
+          `[${complexity.toUpperCase()}] মোডের জন্য QR কোড সঠিক নয়। প্রয়োজনীয় কোড: ${expectedToken}`,
+          `رمز QR غير صحيح. الرمز المطلوب: ${expectedToken}`,
+          `یہ QR کوڈ درست نہیں۔ مطلوبہ کوڈ: ${expectedToken}`,
+          `Kode QR tidak valid. Kode yang diperlukan: ${expectedToken}`
+        )
       );
     }
   };
@@ -1047,10 +1132,16 @@ export function App() {
     }
   );
 
+  // Method 6: Automatic Circadian Sunset Wind-Down warms display after 9:30 PM
+  const effectiveTheme: VisualTheme =
+    visualTheme === 'oled-black' && isCircadianSunsetActive
+      ? 'sunset-amber'
+      : visualTheme;
+
   const themeClass =
-    visualTheme === 'eink-paper'
+    effectiveTheme === 'eink-paper'
       ? 'theme-eink'
-      : visualTheme === 'sunset-amber'
+      : effectiveTheme === 'sunset-amber'
       ? 'theme-sunset'
       : 'bg-black text-zinc-100';
 
@@ -1065,6 +1156,8 @@ export function App() {
       return 0;
     });
   }, [scratchpadNotes]);
+
+  const masteryRank = getSelfMasteryRank(slowLearning.xp, lang);
 
   return (
     <div
@@ -1085,14 +1178,27 @@ export function App() {
           <div className="text-xs">
             {escalationBanner.stage === '5m' ? (
               <span>
-                ⏱ <strong>5-MINUTE MINOR NOTICE ({escalationBanner.appName}):</strong> You have
-                spent 5 minutes inside {escalationBanner.appName}. Check your intention.
+                ⏱{' '}
+                {tx(
+                  lang,
+                  `5-MINUTE MINOR NOTICE (${escalationBanner.appName}): You have spent 5 minutes inside ${escalationBanner.appName}. Check your intention.`,
+                  `৫ মিনিটের মৃদু রিমাইন্ডার (${escalationBanner.appName}): আপনি ${escalationBanner.appName}-এ ৫ মিনিট ব্যয় করেছেন। আপনার মূল উদ্দেশ্য স্মরণ করুন।`,
+                  `تنبيه ٥ دقائق (${escalationBanner.appName}): قضيت ٥ دقائق في التطبيق. تذكر هدفك.`,
+                  `٥ منٹ کی یاد دہانی (${escalationBanner.appName}): آپ نے ٥ منٹ گزار لیے ہیں۔ اپنا مقصد یاد رکھیں۔`,
+                  `PERINGATAN 5 MENIT (${escalationBanner.appName}): Anda telah menghabiskan 5 menit. Ingat tujuan Anda.`
+                )}
               </span>
             ) : (
               <span>
-                ⚠ <strong>10-MINUTE MEDIUM WARNING ({escalationBanner.appName}):</strong> 10
-                minutes elapsed! Dopamine scroll loop detected. At 20 minutes,{' '}
-                {escalationBanner.appName} will auto-close and lock behind a 15s Read & Quiz.
+                ⚠{' '}
+                {tx(
+                  lang,
+                  `10-MINUTE MEDIUM WARNING (${escalationBanner.appName}): 10 minutes elapsed! At 20 minutes, ${escalationBanner.appName} will auto-close and lock behind a 15s Read & Quiz.`,
+                  `১০ মিনিটের মাঝারি সতর্কতা (${escalationBanner.appName}): ১০ মিনিট অতিবাহিত! ২০ মিনিট পূর্ণ হলে ${escalationBanner.appName} স্বয়ংক্রিয়ভাবে বন্ধ হবে এবং ১৫ সেকেন্ডের কুইজ লক চালু হবে।`,
+                  `تحذير ١٠ دقائق (${escalationBanner.appName}): عند ٢٠ دقيقة سيغلق التطبيق تلقائياً ويقفل باختبار.`,
+                  `١٠ منٹ کا الرٹ (${escalationBanner.appName}): ٢٠ منٹ پر ایپ خودکار طور پر بند ہو جائے گی۔`,
+                  `PERINGATAN 10 MENIT (${escalationBanner.appName}): Pada 20 menit aplikasi akan tertutup otomatis.`
+                )}
               </span>
             )}
           </div>
@@ -1107,14 +1213,21 @@ export function App() {
               }}
               className="px-3 py-1 bg-zinc-100 text-black text-[11px] font-semibold uppercase cursor-pointer"
             >
-              Close {escalationBanner.appName} Now
+              {tx(
+                lang,
+                `Close ${escalationBanner.appName} Now`,
+                `এখনই ${escalationBanner.appName} বন্ধ করুন`,
+                `أغلق ${escalationBanner.appName} الآن`,
+                `ابھی ${escalationBanner.appName} بند کریں`,
+                `Tutup ${escalationBanner.appName} Sekarang`
+              )}
             </button>
             <button
               type="button"
               onClick={() => setEscalationBanner(null)}
               className="px-2 py-1 border border-zinc-600 text-[11px] text-zinc-400 cursor-pointer"
             >
-              Dismiss
+              {tx(lang, 'Dismiss', 'বন্ধ', 'إخفاء', 'ہٹائیں', 'Tutup')}
             </button>
           </div>
         </div>
@@ -1140,11 +1253,11 @@ export function App() {
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono-tech">
             <div>
               <span className="text-zinc-200 font-semibold">
-                {activeSession.app.name}
+                {getAppDisplayName(activeSession.app, lang)}
               </span>{' '}
               <span className="text-zinc-500">
-                · Elapsed {Math.floor(activeSession.elapsedSeconds / 60)}m{' '}
-                {activeSession.elapsedSeconds % 60}s (5m Minor / 10m Med / 20m Close)
+                · {Math.floor(activeSession.elapsedSeconds / 60)}m{' '}
+                {activeSession.elapsedSeconds % 60}s (5m / 10m / 20m)
               </span>
             </div>
             <div className="flex items-center gap-1.5">
@@ -1152,7 +1265,6 @@ export function App() {
                 type="button"
                 onClick={() => handleTriggerEscalationStage('5m', activeSession.app.name)}
                 className="px-1.5 py-0.5 border border-zinc-800 text-[10px] text-zinc-400 hover:text-zinc-200 cursor-pointer"
-                title="Simulate 5-Minute Minor Notification"
               >
                 5m
               </button>
@@ -1160,7 +1272,6 @@ export function App() {
                 type="button"
                 onClick={() => handleTriggerEscalationStage('10m', activeSession.app.name)}
                 className="px-1.5 py-0.5 border border-zinc-700 text-[10px] text-zinc-300 hover:text-white cursor-pointer"
-                title="Simulate 10-Minute Medium Warning"
               >
                 10m
               </button>
@@ -1168,9 +1279,8 @@ export function App() {
                 type="button"
                 onClick={() => handleTriggerEscalationStage('20m', activeSession.app.name)}
                 className="px-1.5 py-0.5 border border-zinc-500 text-[10px] text-zinc-200 hover:bg-zinc-800 cursor-pointer"
-                title="Simulate 20-Minute Full-Screen Auto-Close"
               >
-                20m Close
+                20m
               </button>
               <span className="text-zinc-200 pl-1">
                 {Math.floor(activeSession.secondsRemaining / 60)}:
@@ -1184,7 +1294,7 @@ export function App() {
                 }}
                 className="px-2 py-1 bg-zinc-100 text-black text-[10px] font-semibold uppercase cursor-pointer"
               >
-                Close App
+                {tx(lang, 'Close App', 'অ্যাপ বন্ধ করুন', 'إغلاق', 'بند کریں', 'Tutup')}
               </button>
             </div>
           </div>
@@ -1198,7 +1308,7 @@ export function App() {
            ========================================================= */}
         {activeTab === 'home' && (
           <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 flex flex-col justify-between space-y-3 overflow-x-hidden">
-            {/* Top Status Row: Clean Clock, Date, Battery %, 1-Tap Wi-Fi/BT/DNS Quick Bar, and Quiet Digest Line */}
+            {/* Top Status Row: Clean Clock, Date, Battery %, Circadian Wind-Down & 1-Tap Wi-Fi/BT/DNS/Setup Quick Bar */}
             <div className="space-y-2">
               <div className="flex items-baseline justify-between gap-2">
                 <h1 className="text-5xl sm:text-6xl md:text-7xl font-mono-tech font-light tracking-tight">
@@ -1208,20 +1318,39 @@ export function App() {
                   <div>{formattedDate}</div>
                   <div className="mt-0.5">
                     BAT {batteryLevel}% {isCharging ? '⚡' : ''}
+                    {isCircadianSunsetActive ? ' · 🌇' : ''}
                   </div>
                 </div>
               </div>
 
-              {/* 1-Tap Hardware Quick Access Bar: Wi-Fi, Bluetooth, Private DNS, Data, Display, Sound */}
-              <div className="grid grid-cols-6 gap-1 pt-0.5">
+              {/* 1-Tap Hardware Quick Access Bar: Wi-Fi, Bluetooth, Private DNS, Data, Display, Sound + Easy Setup */}
+              <div className="grid grid-cols-7 gap-1 pt-0.5">
                 {(
                   [
-                    { target: 'wifi', label: '📶 Wi-Fi' },
-                    { target: 'bluetooth', label: '🦷 BT' },
-                    { target: 'dns', label: '🌐 DNS' },
-                    { target: 'data', label: '📱 Data' },
-                    { target: 'display', label: '🔆 Screen' },
-                    { target: 'sound', label: '🔊 Sound' },
+                    {
+                      target: 'wifi',
+                      label: tx(lang, '📶 Wi-Fi', '📶 Wi-Fi', '📶 Wi-Fi', '📶 Wi-Fi', '📶 Wi-Fi'),
+                    },
+                    {
+                      target: 'bluetooth',
+                      label: tx(lang, '🦷 BT', '🦷 BT', '🦷 BT', '🦷 BT', '🦷 BT'),
+                    },
+                    {
+                      target: 'dns',
+                      label: tx(lang, '🌐 DNS', '🌐 DNS', '🌐 DNS', '🌐 DNS', '🌐 DNS'),
+                    },
+                    {
+                      target: 'data',
+                      label: tx(lang, '📱 Data', '📱 ডেটা', '📱 بيانات', '📱 ڈیٹا', '📱 Data'),
+                    },
+                    {
+                      target: 'display',
+                      label: tx(lang, '🔆 Screen', '🔆 আলো', '🔆 شاشة', '🔆 اسکرین', '🔆 Layar'),
+                    },
+                    {
+                      target: 'sound',
+                      label: tx(lang, '🔊 Sound', '🔊 সাউন্ড', '🔊 صوت', '🔊 آواز', '🔊 Suara'),
+                    },
                   ] as const
                 ).map((qs) => (
                   <button
@@ -1233,6 +1362,21 @@ export function App() {
                     {qs.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setShowFirstTimeSetupModal(true)}
+                  className="py-1.5 px-1 border border-zinc-500 bg-zinc-900 text-[10px] font-mono-tech text-zinc-100 hover:bg-zinc-800 text-center truncate cursor-pointer font-semibold"
+                  title={tx(
+                    lang,
+                    'Open Easy Step-by-Step Setup Wizard',
+                    'সহজ ধাপে ধাপে সেটআপ গাইড খুলুন',
+                    'فتح دليل الإعداد السهل',
+                    'آسان سیٹ اپ گائیڈ کھولیں',
+                    'Buka Panduan Setup Mudah'
+                  )}
+                >
+                  🪄 {tx(lang, 'Setup', 'সেটআপ', 'إعداد', 'سیٹ اپ', 'Setup')}
+                </button>
               </div>
 
               {/* Peace of Mind Notification Digest Status Line */}
@@ -1243,10 +1387,26 @@ export function App() {
               >
                 <span className="truncate">
                   {urgentBreakthroughCount > 0
-                    ? `⚡ ${urgentBreakthroughCount} URGENT BREAKTHROUGH ALERT`
-                    : `${t.allQuietStatus} (${batchedQuietCount} batched)`}
+                    ? `⚡ ${urgentBreakthroughCount} ${tx(
+                        lang,
+                        'URGENT BREAKTHROUGH ALERT',
+                        'টি জরুরি নোটিফিকেশন অ্যালার্ট',
+                        'تنبيه طوارئ عاجل',
+                        'ہنگامی الرٹ',
+                        'PERINGATAN DARURAT'
+                      )}`
+                    : `${t.allQuietStatus} (${batchedQuietCount} ${tx(
+                        lang,
+                        'batched',
+                        'টি সংরক্ষিত',
+                        'مجدول',
+                        'محفوظ',
+                        'tersimpan'
+                      )})`}
                 </span>
-                <span className="shrink-0">{t.nextDigestAt} 18:00 →</span>
+                <span className="shrink-0">
+                  {t.nextDigestAt} 18:00 →
+                </span>
               </button>
             </div>
 
@@ -1254,7 +1414,14 @@ export function App() {
             {vault.monkModeActive ? (
               <div className="my-auto border-2 border-zinc-300 p-6 text-center space-y-4">
                 <div className="text-[11px] font-mono-tech uppercase tracking-[0.2em] opacity-70">
-                  MONK MODE // DEEP FOCUS BLOCK ACTIVE
+                  {tx(
+                    lang,
+                    'MONK MODE // DEEP FOCUS BLOCK ACTIVE',
+                    'মঙ্ক মোড // গভীর মনোযোগ সেশন চলছে',
+                    'وضع الراهب // جلسة التركيز العميق نشطة',
+                    'مونک موڈ // گہرے کام کا سیشن جاری ہے',
+                    'MODE FOKUS MENDALAM AKTIF'
+                  )}
                 </div>
                 <div className="text-base font-medium">{vault.monkTaskTitle}</div>
                 <div className="text-5xl font-mono-tech font-light py-2">
@@ -1271,7 +1438,14 @@ export function App() {
                   }
                   className="px-4 py-2 border border-zinc-600 text-xs font-mono-tech uppercase tracking-widest opacity-80 hover:opacity-100 cursor-pointer"
                 >
-                  End Focus Session
+                  {tx(
+                    lang,
+                    'End Focus Session',
+                    'মনোযোগ সেশন সমাপ্ত করুন',
+                    'إنهاء جلسة التركيز',
+                    'فوکس سیشن ختم کریں',
+                    'Akhiri Sesi Fokus'
+                  )}
                 </button>
               </div>
             ) : (
@@ -1298,20 +1472,20 @@ export function App() {
                         className="w-full text-left py-2 border-b border-zinc-900/90 flex items-baseline justify-between gap-2 group cursor-pointer"
                       >
                         <span className="text-2xl sm:text-3xl font-light tracking-tight group-hover:translate-x-1 transition-transform truncate">
-                          {lang === 'bn' && app.nameBn ? app.nameBn : app.name}
+                          {getAppDisplayName(app, lang)}
                         </span>
                         <span className="text-[10px] font-mono-tech opacity-50 group-hover:opacity-90 shrink-0">
                           {isNightQrLocked
-                            ? '🌙 QR LOCK'
+                            ? tx(lang, '🌙 QR LOCK', '🌙 রাতের QR লক', '🌙 قفل QR', '🌙 رات کا QR', '🌙 KUNCI QR')
                             : isReopenLocked
-                            ? '12S QUIZ'
+                            ? tx(lang, '15S QUIZ', '১৫সে কুইজ', 'اختبار ١٥ث', '١٥س کوئز', 'KUIS 15D')
                             : app.tier === 'restricted'
-                            ? '20S QUIZ'
+                            ? tx(lang, '20S QUIZ', '২০সে কুইজ', 'اختبار ٢٠ث', '٢٠س کوئز', 'KUIS 20D')
                             : app.tier === 'adult-blocked'
-                            ? 'BLOCKED'
+                            ? tx(lang, 'BLOCKED', 'ব্লকড', 'محجوب', 'بلاکڈ', 'BLOKIR')
                             : isCallingOrWhatsApp
-                            ? '📞 CALL / MSG'
-                            : 'OPEN'}
+                            ? tx(lang, '📞 CALL / MSG', '📞 কল / মেসেজ', '📞 اتصال / رسائل', '📞 کال / میسج', '📞 PANGGIL / PESAN')
+                            : tx(lang, 'OPEN', 'খুলুন', 'فتح', 'کھولیں', 'BUKA')}
                         </span>
                       </button>
                     );
@@ -1336,7 +1510,8 @@ export function App() {
                         : 'border-zinc-800 opacity-85 hover:opacity-100'
                     }`}
                   >
-                    ✎ Note ({scratchpadNotes.filter((n) => !n.done).length})
+                    ✎ {tx(lang, 'Note', 'নোট', 'ملاحظة', 'نوٹ', 'Catatan')} (
+                    {scratchpadNotes.filter((n) => !n.done).length})
                   </button>
                 </div>
 
@@ -1353,7 +1528,14 @@ export function App() {
                           }
                           className="underline text-zinc-400 hover:text-zinc-200 cursor-pointer"
                         >
-                          Clear Completed
+                          {tx(
+                            lang,
+                            'Clear Completed',
+                            'সম্পন্ন নোট মুছুন',
+                            'مسح المكتمل',
+                            'مکمل شدہ صاف کریں',
+                            'Hapus Selesai'
+                          )}
                         </button>
                       )}
                     </div>
@@ -1369,7 +1551,7 @@ export function App() {
                         type="submit"
                         className="px-3.5 py-2 bg-zinc-100 text-black text-xs font-mono-tech font-semibold cursor-pointer"
                       >
-                        + Add Note
+                        + {tx(lang, 'Add Note', 'যোগ করুন', 'إضافة', 'شامل کریں', 'Tambah')}
                       </button>
                     </form>
                     <div className="space-y-1 max-h-36 overflow-y-auto">
@@ -1405,7 +1587,6 @@ export function App() {
                               className={`text-[11px] cursor-pointer ${
                                 n.pinned ? 'text-zinc-100' : 'opacity-35 hover:opacity-80'
                               }`}
-                              title="Pin note to top"
                             >
                               ★
                             </button>
@@ -1454,7 +1635,7 @@ export function App() {
                     }}
                     className="py-2 border border-zinc-800 text-[10px] font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
                   >
-                    ☪ Sakīnah
+                    ☪ {tx(lang, 'Sakīnah', 'সাকীনাহ', 'السكينة', 'سکینہ', 'Sakinah')}
                   </button>
                 </div>
               </div>
@@ -1463,7 +1644,9 @@ export function App() {
             {/* Bottom Calm Mind Trigger Bar (Small Strong Line Only) */}
             <div className="border-t border-zinc-800/90 pt-2.5 space-y-1">
               <div className="flex items-center justify-between text-[10px] font-mono-tech uppercase tracking-widest opacity-60">
-                <span>{t.calmWhisperLabel}</span>
+                <span>
+                  {t.calmWhisperLabel} · 🏅 {masteryRank}
+                </span>
                 <button
                   type="button"
                   onClick={() => setTriggerIndex((i) => i + 1)}
@@ -1503,14 +1686,23 @@ export function App() {
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500 truncate">
-                  ASYMMETRIC FRICTION // CALLS & WHATSAPP NORMAL · GATED SOCIAL
+                  {tx(
+                    lang,
+                    'ASYMMETRIC FRICTION // CALLS & WHATSAPP NORMAL · GATED SOCIAL',
+                    'কল, SMS ও WhatsApp সাধারণ · সোশ্যাল মিডিয়ায় ২০ সেকেন্ড কুইজ সুরক্ষা',
+                    'المكالمات وواتساب فورية · تطبيقات التواصل محمية باختبار ٢٠ث',
+                    'کالز اور واٹس ایپ نارمل · سوشل میڈیا پر ٢٠ سیکنڈ کوئز گیٹ',
+                    'TELEPON & WHATSAPP NORMAL · MEDIA SOSIAL KUIS 20 DETIK'
+                  )}
                 </span>
                 <button
                   type="button"
                   onClick={() => setRevealRestrictedInDrawer((v) => !v)}
                   className="text-[10px] font-mono-tech text-zinc-400 underline cursor-pointer shrink-0"
                 >
-                  {revealRestrictedInDrawer ? 'Hide Restricted' : 'Show All Apps'}
+                  {revealRestrictedInDrawer
+                    ? tx(lang, 'Hide Restricted', 'নিয়ন্ত্রিত অ্যাপ লুকান', 'إخفاء المقيدة', 'مقید ایپس چھپائیں', 'Sembunyikan Terbatas')
+                    : tx(lang, 'Show All Apps', 'সব অ্যাপ দেখান', 'عرض كل التطبيقات', 'تمام ایپس دکھائیں', 'Tampilkan Semua')}
                 </button>
               </div>
               <input
@@ -1523,7 +1715,10 @@ export function App() {
                   const matches = apps.filter(
                     (a) =>
                       (a.tier === 'essential' || a.tier === 'utility') &&
-                      a.name.toLowerCase().startsWith(val.trim().toLowerCase())
+                      (a.name.toLowerCase().startsWith(val.trim().toLowerCase()) ||
+                        getAppDisplayName(a, lang)
+                          .toLowerCase()
+                          .startsWith(val.trim().toLowerCase()))
                   );
                   if (val.trim().length >= 3 && matches.length === 1) {
                     handleTapApp(matches[0]);
@@ -1552,23 +1747,26 @@ export function App() {
                       className="text-left flex-1 min-w-0 cursor-pointer group"
                     >
                       <div className="text-base font-light text-zinc-100 group-hover:translate-x-1 transition-transform truncate">
-                        {lang === 'bn' && app.nameBn ? app.nameBn : app.name}
+                        {getAppDisplayName(app, lang)}
                       </div>
                       <div className="text-[10px] font-mono-tech text-zinc-500">
-                        {app.category.toUpperCase()} · {app.dailyMinutesUsed}m today
+                        {app.dailyMinutesUsed}m{' '}
+                        {tx(lang, 'today', 'আজ ব্যবহৃত', 'اليوم', 'آج', 'hari ini')} ·{' '}
+                        {app.dailyOpens}{' '}
+                        {tx(lang, 'opens', 'বার খোলা হয়েছে', 'مرات فتح', 'بار کھولا گیا', 'kali dibuka')}
                       </div>
                     </button>
 
                     <span className="px-2 py-1 border border-zinc-800 text-[10px] font-mono-tech text-zinc-400 shrink-0">
                       {isNightQrLocked
-                        ? '🌙 NIGHT QR LOCK'
+                        ? tx(lang, '🌙 NIGHT QR LOCK', '🌙 রাতের QR লক', '🌙 قفل QR ليلي', '🌙 رات کا QR لاک', '🌙 KUNCI QR MALAM')
                         : isReopenLocked
-                        ? '🔒 12S QUIZ REOPEN'
+                        ? tx(lang, '🔒 15S QUIZ REOPEN', '🔒 ১৫সে কুইজ লক', '🔒 اختبار ١٥ث', '🔒 ١٥س کوئز لاک', '🔒 KUIS 15D')
                         : app.tier === 'restricted'
-                        ? '📚 20S QUIZ GATE'
+                        ? tx(lang, '📚 20S QUIZ GATE', '📚 ২০সে কুইজ গেট', '📚 اختبار ٢٠ث', '📚 ٢٠س کوئز گیٹ', '📚 KUIS 20D')
                         : app.tier === 'adult-blocked'
-                        ? '🚫 BLOCKED'
-                        : '⚡ NORMAL'}
+                        ? tx(lang, '🚫 BLOCKED', '🚫 ব্লকড', '🚫 محجوب', '🚫 بلاکڈ', '🚫 DIBLOKIR')
+                        : tx(lang, '⚡ NORMAL', '⚡ সাধারণ', '⚡ عادي', '⚡ نارمل', '⚡ NORMAL')}
                     </span>
                   </div>
                 );
@@ -1576,8 +1774,15 @@ export function App() {
 
               {!revealRestrictedInDrawer && searchQuery.trim().length < 3 && (
                 <div className="py-4 text-center text-[11px] font-mono-tech text-zinc-500">
-                  {t.typeExactToReveal} (e.g., type “Instagram”, “Facebook”, “YouTube”, or tap
-                  “Show All Apps” above).
+                  {t.typeExactToReveal}{' '}
+                  {tx(
+                    lang,
+                    '(e.g., type “Instagram”, “Facebook”, “YouTube”, or tap “Show All Apps” above).',
+                    '(যেমন: “Instagram”, “Facebook”, “YouTube” লিখুন অথবা ওপরে “সব অ্যাপ দেখান”-এ ট্যাপ করুন)।',
+                    '(اكتب اسم التطبيق أو اضغط "عرض كل التطبيقات" أعلاه).',
+                    '(مثلاً ایپ کا نام لکھیں یا اوپر "تمام ایپس دکھائیں" پر ٹیپ کریں)۔',
+                    '(ketik nama aplikasi atau ketuk "Tampilkan Semua" di atas).'
+                  )}
                 </div>
               )}
             </div>
@@ -1669,6 +1874,7 @@ export function App() {
               onRefreshInstalledApps={handleRefreshInstalledApps}
               openHowToGuideImmediately={openHowToGuideImmediately}
               onClearHowToGuideTrigger={() => setOpenHowToGuideImmediately(false)}
+              onOpenFirstTimeSetup={() => setShowFirstTimeSetupModal(true)}
               onLockSettingsNow={() => {
                 setSettingsSessionUnlocked(false);
                 setActiveTab('home');
@@ -1717,6 +1923,30 @@ export function App() {
       </nav>
 
       {/* =========================================================
+          MODAL 0: VERY EASY 1ST-TIME STEP-BY-STEP SETUP WIZARD IN USER LANGUAGES
+         ========================================================= */}
+      {showFirstTimeSetupModal && (
+        <FirstTimeSetupModal
+          lang={lang}
+          onChangeLanguage={setLang}
+          inspirationMode={inspirationMode}
+          onChangeInspirationMode={handleChangeInspirationMode}
+          slowLearningTrack={slowLearning.track}
+          onChangeSlowLearningTrack={(tr: SlowLearningTrack) =>
+            setSlowLearning((prev) => ({ ...prev, track: tr, currentLessonIndex: 0 }))
+          }
+          qrAnchorCode={vault.physicalBrickAnchorCode || 'KASB-BRICK-77'}
+          onApplyNormalCallingAndNightLockPreset={() => {
+            setApps((prev) => normalizeAppsForCallingAndNightLock(prev));
+          }}
+          onCompleteSetup={() => {
+            setFirstTimeSetupCompleted(true);
+            setShowFirstTimeSetupModal(false);
+          }}
+        />
+      )}
+
+      {/* =========================================================
           MODAL 1: COMPACT SETTINGS PAGE 20-SECOND READ & QUIZ RESTRICTION GATE
          ========================================================= */}
       {settingsGateModalOpen && activeSettingsGateLesson && (
@@ -1725,10 +1955,24 @@ export function App() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
               <div>
                 <div className="text-[10px] text-zinc-400 uppercase tracking-widest">
-                  SETTINGS GUARD // QUICK 20-SEC QUIZ
+                  {tx(
+                    lang,
+                    'SETTINGS GUARD // QUICK 20-SEC QUIZ',
+                    'সেটিংস সুরক্ষা গার্ড // সংক্ষিপ্ত ২০ সেকেন্ড কুইজ',
+                    'حارس الإعدادات // اختبار ٢٠ ثانية السريع',
+                    'سیٹنگز گارڈ // مختصر ٢٠ سیکنڈ کوئز',
+                    'PENJAGA PENGATURAN // KUIS CEPAT 20 DETIK'
+                  )}
                 </div>
                 <h3 className="text-xs font-semibold text-zinc-100 mt-0.5">
-                  Quick Read & 1-Tap Quiz to Open Settings
+                  {tx(
+                    lang,
+                    'Quick Read & 1-Tap Quiz to Open Settings',
+                    'সেটিংস খুলতে সংক্ষিপ্ত অনুচ্ছেদটি পড়ুন ও ১-ট্যাপে উত্তর দিন',
+                    'اقرأ الفقرة القصيرة وأجب بضغطة واحدة لفتح الإعدادات',
+                    'سیٹنگز کھولنے کے لیے مختصر عبارت پڑھیں اور جواب منتخب کریں',
+                    'Baca Singkat & Jawab 1-Sentuh untuk Membuka Pengaturan'
+                  )}
                 </h3>
               </div>
               <button
@@ -1740,29 +1984,47 @@ export function App() {
               </button>
             </div>
 
-            {/* Instant 1-Tap Wi-Fi / BT / DNS Access even before unlocking full Settings */}
+            {/* Instant 1-Tap Wi-Fi / BT / DNS / Setup Access even before unlocking full Settings */}
             <div className="border border-zinc-800 bg-zinc-950 p-2.5 space-y-1.5">
               <div className="text-[10px] text-zinc-400 uppercase">
-                ⚡ Need Quick Wi-Fi, Bluetooth or DNS? (No Quiz Needed):
+                ⚡{' '}
+                {tx(
+                  lang,
+                  'Need Quick Wi-Fi, Bluetooth, DNS or Setup Guide? (No Quiz Needed):',
+                  'দ্রুত Wi-Fi, Bluetooth, DNS বা সেটআপ গাইড প্রয়োজন? (কুইজ ছাড়াই খুলুন):',
+                  'هل تحتاج Wi-Fi أو بلوتوث أو DNS سريعاً؟ (بدون اختبار):',
+                  'فوری Wi-Fi، بلوٹوتھ یا DNS چاہیے؟ (بغیر کوئز کھولیں):',
+                  'Butuh Wi-Fi, Bluetooth, DNS atau Panduan Cepat? (Tanpa Kuis):'
+                )}
               </div>
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-5 gap-1">
                 {(
                   [
                     { target: 'wifi', label: '📶 Wi-Fi' },
                     { target: 'bluetooth', label: '🦷 BT' },
                     { target: 'dns', label: '🌐 DNS' },
-                    { target: 'display', label: '🔆 Display' },
+                    { target: 'display', label: tx(lang, '🔆 Screen', '🔆 আলো', '🔆 شاشة', '🔆 اسکرین', '🔆 Layar') },
                   ] as const
                 ).map((item) => (
                   <button
                     key={item.target}
                     type="button"
                     onClick={() => openPhoneMainSetting(item.target)}
-                    className="py-1.5 px-1 border border-zinc-700 bg-black text-[10px] text-zinc-200 hover:border-zinc-300 cursor-pointer"
+                    className="py-1.5 px-1 border border-zinc-700 bg-black text-[10px] text-zinc-200 hover:border-zinc-300 cursor-pointer truncate"
                   >
                     {item.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsGateModalOpen(false);
+                    setShowFirstTimeSetupModal(true);
+                  }}
+                  className="py-1.5 px-1 border border-zinc-400 bg-zinc-900 text-[10px] text-zinc-100 font-semibold cursor-pointer truncate"
+                >
+                  🪄 {tx(lang, 'Setup', 'সেটআপ', 'إعداد', 'سیٹ اپ', 'Setup')}
+                </button>
               </div>
             </div>
 
@@ -1775,7 +2037,7 @@ export function App() {
                 <span className="px-2 py-0.5 border border-zinc-700 text-zinc-200 font-semibold shrink-0">
                   {settingsGateTimerSec > 0
                     ? `⏳ ${settingsGateTimerSec}s`
-                    : '✓ Ready'}
+                    : `✓ ${tx(lang, 'Ready', 'প্রস্তুত', 'جاهز', 'تیار', 'Siap')}`}
                 </span>
               </div>
 
@@ -1827,9 +2089,16 @@ export function App() {
                         setActiveTab('system-kasb');
                       } else {
                         setSettingsGateError(
-                          'Not quite right. Re-read for 5 seconds and tap the correct answer.'
+                          tx(
+                            lang,
+                            'Not quite right. Re-read for 4 seconds and tap the correct answer.',
+                            'সঠিক নয়। ৪ সেকেন্ড পড়ে আবার সঠিক উত্তরটি ট্যাপ করুন।',
+                            'إجابة غير صحيحة. اقرأ لمدة ٤ ثوانٍ ثم اختر الإجابة الصحيحة.',
+                            'درست نہیں۔ ٤ سیکنڈ دوبارہ پڑھیں اور صحیح جواب منتخب کریں۔',
+                            'Belum tepat. Baca ulang 4 detik lalu pilih jawaban yang benar.'
+                          )
                         );
-                        setSettingsGateTimerSec(5);
+                        setSettingsGateTimerSec(4);
                       }
                     }}
                     className={`w-full text-left px-2.5 py-2 border text-xs leading-snug cursor-pointer disabled:opacity-40 ${
@@ -1855,7 +2124,7 @@ export function App() {
               onClick={() => setSettingsGateModalOpen(false)}
               className="w-full py-2.5 bg-zinc-100 text-black text-xs font-semibold uppercase tracking-wider cursor-pointer"
             >
-              Return to Calm Home Screen
+              {t.returnToPeaceBtn}
             </button>
           </div>
         </div>
@@ -1863,7 +2132,6 @@ export function App() {
 
       {/* =========================================================
           MODAL 2: SLEEPING-TIME / NIGHT MANDATORY EMERGENCY QR CODE SCANNER GATE
-          (Enforced at Night 10 PM – 6 AM for Browsers, Social Media & Entertainment)
          ========================================================= */}
       {nightBrowserQrApp && (
         <div className="fixed inset-0 z-50 bg-black/95 text-zinc-100 flex items-center justify-center p-3 overflow-y-auto">
@@ -1871,10 +2139,25 @@ export function App() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
               <div>
                 <div className="text-[10px] text-zinc-400 uppercase tracking-widest">
-                  🌙 SLEEPING-TIME EMERGENCY QR FORTRESS ({(vault.qrComplexity || 'hard').toUpperCase()})
+                  🌙{' '}
+                  {tx(
+                    lang,
+                    `SLEEPING-TIME EMERGENCY QR FORTRESS (${(vault.qrComplexity || 'hard').toUpperCase()})`,
+                    `রাতের ঘুমানোর সময় জরুরি QR দুর্গ (${(vault.qrComplexity || 'hard').toUpperCase()})`,
+                    `قلعة رمز QR الليلي للطوارئ (${(vault.qrComplexity || 'hard').toUpperCase()})`,
+                    `رات کے وقت ایمرجنسی QR قلعہ (${(vault.qrComplexity || 'hard').toUpperCase()})`,
+                    `BENTENG QR DARURAT MALAM HARI (${(vault.qrComplexity || 'hard').toUpperCase()})`
+                  )}
                 </div>
                 <h3 className="text-sm font-semibold text-zinc-100 mt-0.5">
-                  Mandatory Emergency QR Scan for {nightBrowserQrApp.name}
+                  {tx(
+                    lang,
+                    `Mandatory Emergency QR Scan for ${getAppDisplayName(nightBrowserQrApp, lang)}`,
+                    `${getAppDisplayName(nightBrowserQrApp, lang)} খুলতে জরুরি ফিজিক্যাল QR কোড স্ক্যান বাধ্যতামূলক`,
+                    `مسح رمز QR للطوارئ إلزامي لفتح ${getAppDisplayName(nightBrowserQrApp, lang)}`,
+                    `${getAppDisplayName(nightBrowserQrApp, lang)} کھولنے کے لیے ایمرجنسی QR اسکین لازمی ہے`,
+                    `Wajib Pindai QR Darurat untuk ${getAppDisplayName(nightBrowserQrApp, lang)}`
+                  )}
                 </h3>
               </div>
               <button
@@ -1890,16 +2173,21 @@ export function App() {
             </div>
 
             <p className="text-xs text-zinc-300 leading-relaxed">
-              Browsers, Social Media, and entertainment apps have stronger sleeping-time
-              restrictions at night (10:00 PM – 6:00 AM). For emergency use, physically scanning
-              your QR code card is mandatory to unlock{' '}
-              <strong>{nightBrowserQrApp.name}</strong>.
+              {tx(
+                lang,
+                `Browsers, Social Media, and entertainment apps have stronger sleeping-time restrictions at night (10:00 PM – 6:00 AM). For emergency use, physically scanning your QR code card is mandatory to unlock ${getAppDisplayName(nightBrowserQrApp, lang)}.`,
+                `রাত ১০:০০টা থেকে ভোর ৬:০০টা পর্যন্ত ঘুমানোর সময়ে ব্রাউজার, সোশ্যাল মিডিয়া ও বিনোদন অ্যাপে কঠোর সুরক্ষা চালু থাকে। জরুরি প্রয়োজনে ${getAppDisplayName(nightBrowserQrApp, lang)} খুলতে আপনার অন্য ঘরে রাখা ফিজিক্যাল QR কোড কার্ডটি স্ক্যান করা বাধ্যতামূলক।`,
+                `تخضع المتصفحات وتطبيقات التواصل لحماية مشددة ليلاً (١٠ مساءً – ٦ صباحاً). لحالات الطوارئ، يجب مسح بطاقة رمز QR الفعلية لفتح ${getAppDisplayName(nightBrowserQrApp, lang)}.`,
+                `رات ١٠ بجے سے صبح ٦ بجے تک براؤزرز اور سوشل میڈیا پر سخت پابندی ہوتی ہے۔ ہنگامی ضرورت میں ${getAppDisplayName(nightBrowserQrApp, lang)} کھولنے کے لیے فزیکل QR کارڈ اسکین کرنا لازمی ہے۔`,
+                `Browser & media sosial memiliki pembatasan ketat di malam hari (22:00 – 06:00). Untuk keadaan darurat, wajib memindai kartu QR fisik Anda.`
+              )}
             </p>
 
             <div className="border border-zinc-800 bg-zinc-950 p-3 space-y-2.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-zinc-400">
-                  Complexity: <strong>{(vault.qrComplexity || 'hard').toUpperCase()}</strong>
+                  {tx(lang, 'Complexity', 'কাঠিন্য', 'المستوى', 'سختی', 'Tingkat')}:{' '}
+                  <strong>{(vault.qrComplexity || 'hard').toUpperCase()}</strong>
                 </span>
                 {!nightQrCameraActive ? (
                   <button
@@ -1907,7 +2195,15 @@ export function App() {
                     onClick={startNightQrCamera}
                     className="px-2.5 py-1 bg-zinc-100 text-black text-[10px] font-semibold uppercase cursor-pointer"
                   >
-                    📷 Open QR Camera Scanner
+                    📷{' '}
+                    {tx(
+                      lang,
+                      'Open QR Camera Scanner',
+                      'QR ক্যামেরা স্ক্যানার খুলুন',
+                      'فتح كاميرا مسح QR',
+                      'QR کیمرہ اسکینر کھولیں',
+                      'Buka Kamera QR'
+                    )}
                   </button>
                 ) : (
                   <button
@@ -1915,7 +2211,7 @@ export function App() {
                     onClick={stopNightQrCamera}
                     className="px-2.5 py-1 border border-zinc-700 text-[10px] text-zinc-300 cursor-pointer"
                   >
-                    Close Camera
+                    {tx(lang, 'Close Camera', 'ক্যামেরা বন্ধ করুন', 'إغلاق الكاميرا', 'کیمرہ بند کریں', 'Tutup Kamera')}
                   </button>
                 )}
               </div>
@@ -1931,8 +2227,22 @@ export function App() {
                   />
                   <div className="text-[11px] text-zinc-300">
                     {nightQrScanHoldSec > 0
-                      ? `Hold camera pointed at your physical QR card (${nightQrScanHoldSec}s)...`
-                      : '✓ Optical lock verified. Capture QR token below:'}
+                      ? tx(
+                          lang,
+                          `Hold camera pointed at your physical QR card (${nightQrScanHoldSec}s)...`,
+                          `আপনার প্রিন্ট করা ফিজিক্যাল QR কার্ডের ওপর ক্যামেরা ধরে রাখুন (${nightQrScanHoldSec} সেকেন্ড)...`,
+                          `ثبّت الكاميرا على بطاقة QR الفعلية (${nightQrScanHoldSec} ثانية)...`,
+                          `اپنے فزیکل QR کارڈ پر کیمرہ رکھیں (${nightQrScanHoldSec} سیکنڈ)...`,
+                          `Arahkan kamera ke kartu QR fisik (${nightQrScanHoldSec} detik)...`
+                        )
+                      : tx(
+                          lang,
+                          '✓ Optical lock verified. Capture QR token below:',
+                          '✓ ক্যামেরা যাচাই সম্পন্ন! নিচে QR কোডটি গ্রহণ করুন:',
+                          '✓ تم التحقق بالكاميرا. التقط الرمز أدناه:',
+                          '✓ کیمرہ تصدیق مکمل! نیچے QR کوڈ حاصل کریں:',
+                          '✓ Verifikasi kamera selesai. Tangkap kode QR di bawah:'
+                        )}
                   </div>
                   {nightQrScanHoldSec === 0 && (
                     <button
@@ -1947,14 +2257,22 @@ export function App() {
                       }
                       className="px-3 py-1.5 bg-zinc-100 text-black text-[11px] font-semibold uppercase cursor-pointer"
                     >
-                      ✓ Capture Scanned QR Code
+                      ✓{' '}
+                      {tx(
+                        lang,
+                        'Capture Scanned QR Code',
+                        'স্ক্যান করা QR কোড গ্রহণ করুন',
+                        'التقاط رمز QR الممسوح',
+                        'اسکین شدہ QR کوڈ درج کریں',
+                        'Tangkap Kode QR'
+                      )}
                     </button>
                   )}
                 </div>
               )}
 
               <div className="text-[11px] text-zinc-400">
-                Required Physical QR Token:{' '}
+                {tx(lang, 'Required Physical QR Token:', 'প্রয়োজনীয় ফিজিক্যাল QR কোড:', 'رمز QR المطلوب:', 'مطلوبہ QR کوڈ:', 'Kode QR Wajib:')}{' '}
                 <strong className="text-zinc-200">
                   {getRequiredQrTokenForComplexity(
                     vault.physicalBrickAnchorCode,
@@ -1966,13 +2284,20 @@ export function App() {
               {(vault.qrComplexity || 'hard') === 'hard' && (
                 <div className="space-y-1">
                   <label className="block text-[11px] text-zinc-300">
-                    Hard Mode Verification — Solve: <strong>17 + 26 = ?</strong>
+                    {tx(
+                      lang,
+                      'Hard Mode Verification — Solve: 17 + 26 = ?',
+                      'হার্ড মোড যাচাই — যোগফল লিখুন: ১৭ + ২৬ = ?',
+                      'تحقق الوضع الصعب — احسب: 17 + 26 = ؟',
+                      'ہارڈ موڈ تصدیق — حل کریں: 17 + 26 = ؟',
+                      'Verifikasi Mode Sulit — Hitung: 17 + 26 = ?'
+                    )}
                   </label>
                   <input
                     type="text"
                     value={nightQrMathInput}
                     onChange={(e) => setNightQrMathInput(e.target.value)}
-                    placeholder="Enter 43"
+                    placeholder={tx(lang, 'Enter 43', '43 লিখুন', 'أدخل 43', '43 لکھیں', 'Ketik 43')}
                     className="w-full bg-black border border-zinc-700 px-3 py-2 text-xs text-zinc-100"
                   />
                 </div>
@@ -1982,7 +2307,14 @@ export function App() {
                 type="text"
                 value={nightQrInput}
                 onChange={(e) => setNightQrInput(e.target.value)}
-                placeholder="Scan or enter physical QR code token..."
+                placeholder={tx(
+                  lang,
+                  'Scan or enter physical QR code token...',
+                  'ফিজিক্যাল QR কোডটি স্ক্যান বা টাইপ করুন...',
+                  'امسح أو أدخل رمز QR الفعلي...',
+                  'فزیکل QR کوڈ اسکین یا ٹائپ کریں...',
+                  'Pindai atau ketik kode QR fisik...'
+                )}
                 className="w-full bg-black border border-zinc-700 px-3 py-2 text-xs text-zinc-100"
               />
             </div>
@@ -2000,17 +2332,25 @@ export function App() {
                   stopNightQrCamera();
                   setNightBrowserQrApp(null);
                   setImpulsesStopped((n) => n + 1);
+                  setSlowLearning((prev) => ({ ...prev, xp: prev.xp + 20 }));
                 }}
                 className="flex-1 py-3 bg-zinc-100 text-black text-xs font-semibold uppercase tracking-wider cursor-pointer"
               >
-                Sleep & Return to Peace
+                {tx(
+                  lang,
+                  '✓ Sleep & Return to Peace (+20 XP)',
+                  '✓ ঘুমাতে যান ও প্রশান্তিতে ফিরুন (+২০ XP)',
+                  '✓ نم بسلام وعد للسكينة (+٢٠ XP)',
+                  '✓ سو جائیں اور سکون میں لوٹیں (+٢٠ XP)',
+                  '✓ Tidur & Kembali Tenang (+20 XP)'
+                )}
               </button>
               <button
                 type="button"
                 onClick={handleVerifyNightBrowserQr}
                 className="px-4 py-3 border border-zinc-600 text-xs text-zinc-200 hover:bg-zinc-900 cursor-pointer"
               >
-                Verify QR Scan
+                {tx(lang, 'Verify QR Scan', 'QR যাচাই করুন', 'تحقق من QR', 'QR تصدیق کریں', 'Verifikasi QR')}
               </button>
             </div>
           </div>
@@ -2019,31 +2359,67 @@ export function App() {
 
       {/* =========================================================
           MODAL 3: 20-MINUTE FULL-SCREEN AUTO-CLOSE & 15S QUIZ REOPENING LOCK
+          (With Method 7: Loss-Aversion XP Shield)
          ========================================================= */}
       {fullScreen20mClosedApp && (
         <div className="fixed inset-0 z-50 bg-black text-zinc-100 flex flex-col justify-between p-6 text-center font-mono-tech">
           <div className="text-xs uppercase tracking-widest text-zinc-400">
-            🛑 20-MINUTE FULL-SCREEN INTERVENTION // APP AUTOMATICALLY CLOSED
+            🛑{' '}
+            {tx(
+              lang,
+              '20-MINUTE FULL-SCREEN INTERVENTION // APP AUTOMATICALLY CLOSED',
+              '২০ মিনিটের পূর্ণ-স্ক্রিন হস্তক্ষেপ // অ্যাপটি স্বয়ংক্রিয়ভাবে বন্ধ করা হয়েছে',
+              'تدخل الشاشة الكاملة بعد ٢٠ دقيقة // تم إغلاق التطبيق تلقائياً',
+              '٢٠ منٹ بعد فل اسکرین مداخلت // ایپ خودکار طور پر بند کر دی گئی',
+              'INTERVENSI LAYAR PENUH 20 MENIT // APLIKASI DITUTUP OTOMATIS'
+            )}
           </div>
           <div className="max-w-md mx-auto space-y-5">
             <div className="inline-block px-3 py-1 border border-zinc-300 text-xs uppercase">
-              {fullScreen20mClosedApp.app.name} Closed at {fullScreen20mClosedApp.closedAt}
+              {getAppDisplayName(fullScreen20mClosedApp.app, lang)} ·{' '}
+              {fullScreen20mClosedApp.closedAt}
             </div>
             <h2 className="text-2xl sm:text-3xl font-light text-white">
-              20 Minutes Reached in {fullScreen20mClosedApp.app.name}
+              {tx(
+                lang,
+                `20 Minutes Reached in ${getAppDisplayName(fullScreen20mClosedApp.app, lang)}`,
+                `${getAppDisplayName(fullScreen20mClosedApp.app, lang)}-এ ২০ মিনিট পূর্ণ হয়েছে`,
+                `اكتملت ٢٠ دقيقة في ${getAppDisplayName(fullScreen20mClosedApp.app, lang)}`,
+                `${getAppDisplayName(fullScreen20mClosedApp.app, lang)} میں ٢٠ منٹ مکمل ہو گئے`,
+                `20 Menit Tercapai di ${getAppDisplayName(fullScreen20mClosedApp.app, lang)}`
+              )}
             </h2>
             <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-              Following your 5-minute minor check and 10-minute medium warning,{' '}
-              <strong>{fullScreen20mClosedApp.app.name}</strong> has been automatically closed and
-              cleaned from the background after 20 minutes.
+              {tx(
+                lang,
+                `Following your 5-minute minor check and 10-minute medium warning, ${getAppDisplayName(fullScreen20mClosedApp.app, lang)} has been automatically closed and cleaned from the background after 20 minutes.`,
+                `৫ মিনিটের মৃদু সতর্কতা এবং ১০ মিনিটের মাঝারি সতর্কতার পর ২০ মিনিট পূর্ণ হওয়ায় ${getAppDisplayName(fullScreen20mClosedApp.app, lang)} স্বয়ংক্রিয়ভাবে বন্ধ ও ব্যাকগ্রাউন্ড থেকে পরিষ্কার করা হয়েছে।`,
+                `بعد تنبيه الـ ٥ دقائق وتحذير الـ ١٠ دقائق، تم إغلاق التطبيق وتنظيفه من الخلفية بعد ٢٠ دقيقة.`,
+                `٥ اور ١٠ منٹ کی تنبیہ کے بعد ٢٠ منٹ پورے ہونے پر ایپ کو خودکار طور پر بند اور بیک گراؤنڈ سے صاف کر دیا گیا ہے۔`,
+                `Setelah peringatan 5m dan 10m, aplikasi ditutup otomatis dan dibersihkan dari latar belakang setelah 20 menit.`
+              )}
             </p>
             <div className="border border-zinc-800 bg-zinc-950 p-4 text-xs text-zinc-300 space-y-2">
               <div className="text-zinc-100 font-semibold">
-                🔒 Reopening Restriction Activated:
+                🔒{' '}
+                {tx(
+                  lang,
+                  'Reopening Restriction & Commitment Shield Activated:',
+                  'পুনরায় খোলার বিধিনিষেধ ও অঙ্গীকার শিল্ড সক্রিয়:',
+                  'تم تفعيل قفل إعادة الفتح ودرع الالتزام:',
+                  'دوبارہ کھولنے کی پابندی اور عہد شیلڈ فعال:',
+                  'Pembatasan Buka Ulang & Perisai Komitmen Aktif:'
+                )}
               </div>
               <p className="text-[11px] text-zinc-400">
-                To reopen {fullScreen20mClosedApp.app.name}, you must complete a mandatory{' '}
-                <strong>15-Second Reading + Comprehension Quiz</strong>.
+                {tx(
+                  lang,
+                  `Staying closed awards +20 XP toward your Self-Mastery Rank (${masteryRank}). Force-reopening right now deducts -25 XP and requires a 15-Second Reading + Quiz.`,
+                  `এখন অ্যাপটি বন্ধ রাখলে আপনার আত্মনিয়ন্ত্রণ পদমর্যাদায় (${masteryRank}) +২০ XP যোগ হবে। আর এখনই জোর করে পুনরায় খুললে -২৫ XP কাটা যাবে এবং ১৫ সেকেন্ডের পাঠ ও কুইজ দিতে হবে।`,
+                  `البقاء مغلقاً يمنحك +٢٠ XP، بينما إعادة الفتح الآن تخصم -٢٥ XP وتتطلب اختباراً.`,
+                  `بند رکھنے پر +٢٠ XP ملیں گے، جبکہ ابھی دوبارہ کھولنے پر -٢٥ XP کٹیں گے اور ١٥ سیکنڈ کوئز دینا ہوگا۔`,
+                  `Tetap tutup memberi +20 XP, sedangkan membuka paksa mengurangi -25 XP & wajib kuis 15d.`
+                )}
               </p>
             </div>
 
@@ -2054,23 +2430,43 @@ export function App() {
                   setFullScreen20mClosedApp(null);
                   setImpulsesStopped((n) => n + 1);
                   setReclaimedMinutes((m) => m + 20);
+                  setSlowLearning((prev) => ({ ...prev, xp: prev.xp + 20 }));
                   setActiveTab('home');
                 }}
                 className="flex-1 py-3.5 bg-zinc-100 text-black text-xs font-semibold uppercase tracking-widest cursor-pointer"
               >
-                ✓ Stay Closed & Return Home
+                ✓{' '}
+                {tx(
+                  lang,
+                  'Stay Closed & Return Home (+20 XP)',
+                  'বন্ধ রাখুন ও হোমে ফিরুন (+২০ XP)',
+                  'ابق مغلقاً وعد للرئيسية (+٢٠ XP)',
+                  'بند رکھیں اور ہوم پر لوٹیں (+٢٠ XP)',
+                  'Tetap Tutup & Kembali (+20 XP)'
+                )}
               </button>
               <button
                 type="button"
                 onClick={() => {
                   const appToReopen = fullScreen20mClosedApp.app;
                   setFullScreen20mClosedApp(null);
+                  setSlowLearning((prev) => ({
+                    ...prev,
+                    xp: Math.max(0, prev.xp - 25),
+                  }));
                   setInterceptForce15sReopen(true);
                   setInterceptedApp(appToReopen);
                 }}
                 className="px-4 py-3.5 border border-zinc-700 text-xs text-zinc-300 hover:border-zinc-400 cursor-pointer"
               >
-                Reopen via 15s Read & Quiz →
+                {tx(
+                  lang,
+                  'Reopen via 15s Quiz (-25 XP) →',
+                  '১৫সে কুইজ দিয়ে খুলুন (-২৫ XP) →',
+                  'إعادة الفتح باختبار (-٢٥ XP) ←',
+                  '١٥س کوئز سے کھولیں (-٢٥ XP) →',
+                  'Buka lewat Kuis 15d (-25 XP) →'
+                )}
               </button>
             </div>
           </div>
@@ -2080,7 +2476,7 @@ export function App() {
         </div>
       )}
 
-      {/* INHALE & SLOW LEARNING READ + PLAY QUIZ INTERCEPT MODAL */}
+      {/* INHALE & SLOW LEARNING READ + PLAY QUIZ INTERCEPT MODAL (WITH SCIENTIFIC METHODS 1-5) */}
       {interceptedApp && (
         <InhaleInterceptModal
           app={interceptedApp}
@@ -2100,14 +2496,47 @@ export function App() {
             interceptForce15sReopen ? 15 : slowLearning.readingDurationSeconds
           }
           lessonIndex={slowLearning.currentLessonIndex}
-          onQuizPassed={() =>
-            setSlowLearning((prev) => ({
-              ...prev,
-              xp: prev.xp + 15,
-              lessonsCompleted: prev.lessonsCompleted + 1,
-              quizzesPassed: prev.quizzesPassed + 1,
-              currentLessonIndex: prev.currentLessonIndex + 1,
-            }))
+          openCountToday={interceptedApp.dailyOpens}
+          masteredLessonIds={slowLearning.masteredLessonIds}
+          reviewDueLessonIds={slowLearning.reviewDueLessonIds}
+          ifThenReplacementHabit={slowLearning.ifThenReplacementHabit}
+          onLogEmotionTag={(emotion: AffectEmotionTag) => {
+            setSlowLearning((prev) => {
+              const currentCounts = prev.emotionCounts || {
+                purpose: 0,
+                bored: 0,
+                stressed: 0,
+                tired: 0,
+              };
+              return {
+                ...prev,
+                emotionCounts: {
+                  ...currentCounts,
+                  [emotion]: (currentCounts[emotion] || 0) + 1,
+                },
+              };
+            });
+          }}
+          onQuizPassed={(lessonId: string, missedOnce: boolean) =>
+            setSlowLearning((prev) => {
+              const prevMastered = prev.masteredLessonIds || [];
+              const prevReview = prev.reviewDueLessonIds || [];
+              const nextMastered = missedOnce
+                ? prevMastered
+                : Array.from(new Set([...prevMastered, lessonId]));
+              const nextReview = missedOnce
+                ? Array.from(new Set([...prevReview, lessonId]))
+                : prevReview.filter((id) => id !== lessonId);
+              return {
+                ...prev,
+                xp: prev.xp + 15,
+                lessonsCompleted: prev.lessonsCompleted + 1,
+                quizzesPassed: prev.quizzesPassed + 1,
+                currentLessonIndex: prev.currentLessonIndex + 1,
+                masteredLessonIds: nextMastered,
+                reviewDueLessonIds: nextReview,
+              };
+            })
           }
           onCancelReturnToPeace={handleReturnToPeaceFromIntercept}
           onUnlockApproved={handleApproveRestrictedUnlock}
@@ -2119,7 +2548,14 @@ export function App() {
       {restlessOverlayOpen && (
         <div className="fixed inset-0 z-50 bg-black text-zinc-100 flex flex-col justify-between p-6 text-center">
           <div className="text-xs font-mono-tech text-zinc-500 uppercase tracking-widest">
-            SAKĪNAH STILLNESS INTERVENTION // RESTLESS CHECK DETECTED
+            {tx(
+              lang,
+              'SAKĪNAH STILLNESS INTERVENTION // STANFORD CYCLIC SIGH',
+              'সাকীনাহ প্রশান্তি বিরতি // স্ট্যানফোর্ড ডাবল-শ্বাস ও আত্মিক স্থিরতা',
+              'وقفة السكينة والهدوء // التنفس العميق وتهدئة القلب',
+              'سکینہ اور قلبی سکون کا وقفہ // گہری سانس اور ذکر',
+              'INTERVENSI KETENANGAN SAKINAH // NAPAS DALAM'
+            )}
           </div>
           <div className="max-w-md mx-auto space-y-6">
             {showArabicScript &&
@@ -2136,7 +2572,18 @@ export function App() {
             <p className="text-xs font-mono-tech text-zinc-500">
               — {getTriggerSource(activeCalmTrigger, lang)}
             </p>
-            <div className="flex gap-2 justify-center pt-4">
+            <div className="border border-zinc-800 bg-zinc-950 p-3 text-xs font-mono-tech text-zinc-300">
+              🫁{' '}
+              {tx(
+                lang,
+                'Take 1 Cyclic Sigh: Two quick nose inhales (2s + 1s), then a slow 6s mouth exhale.',
+                '১টি সাইক্লিক শ্বাস নিন: নাক দিয়ে পরপর ২ বার শ্বাস টানুন (২সে + ১সে), এরপর মুখ দিয়ে ৬ সেকেন্ড ধরে ধীরে শ্বাস ছাড়ুন।',
+                'خذ شهيقين متتاليين من الأنف ثم زفيراً طويلاً وهادئاً من الفم (٦ ثوانٍ).',
+                'ناک سے دو بار سانس اندر کھینچیں اور پھر منہ سے ٦ سیکنڈ تک آہستہ سانس چھوڑیں۔',
+                'Ambil 2 hirupan lewat hidung (2d + 1d), lalu hembuskan perlahan lewat mulut (6d).'
+              )}
+            </div>
+            <div className="flex gap-2 justify-center pt-2">
               <button
                 type="button"
                 onClick={() => setTriggerIndex((i) => i + 1)}
@@ -2166,10 +2613,24 @@ export function App() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div>
                 <div className="text-[10px] text-zinc-400 uppercase tracking-widest">
-                  SYSTEM HOME & HARDWARE LOCK
+                  {tx(
+                    lang,
+                    'SYSTEM HOME & HARDWARE LOCK',
+                    'সিস্টেম হোম ও হার্ডওয়্যার লক',
+                    'قفل الشاشة الرئيسية والنظام',
+                    'سسٹم ہوم اور ہارڈویئر لاک',
+                    'KUNCI LAYAR UTAMA SISTEM'
+                  )}
                 </div>
                 <h2 className="text-base font-semibold text-zinc-100">
-                  Core Launcher Fortress Control
+                  {tx(
+                    lang,
+                    'Core Launcher Fortress Control',
+                    'ডিফল্ট হোম লঞ্চার সুরক্ষা নিয়ন্ত্রণ',
+                    'التحكم في مشغل الشاشة الرئيسية',
+                    'ڈیفالٹ ہوم لانچر کنٹرول',
+                    'Kontrol Peluncur Utama'
+                  )}
                 </h2>
               </div>
               <button
@@ -2181,21 +2642,6 @@ export function App() {
               </button>
             </div>
 
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between py-1.5 border-b border-zinc-900">
-                <span className="text-zinc-400">Default Home Role (ROLE_HOME):</span>
-                <span className="font-semibold text-zinc-100">
-                  {launcherStatus.isDefaultLauncher ? '✓ LOCKED TO MINIMUM PHONE' : '⚠ NOT SET'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-zinc-900">
-                <span className="text-zinc-400">Hardware Home Button Pin (Kiosk):</span>
-                <span className="font-semibold text-zinc-100">
-                  {launcherStatus.isKioskPinned ? '🔒 PINNED & LOCKED' : 'READY'}
-                </span>
-              </div>
-            </div>
-
             <div className="space-y-2 pt-1">
               <button
                 type="button"
@@ -2205,7 +2651,17 @@ export function App() {
                 }}
                 className="w-full py-3 px-3 bg-zinc-100 text-black text-xs font-semibold uppercase tracking-wider cursor-pointer text-left flex items-center justify-between"
               >
-                <span>1. Set Minimum Phone as Default Home</span>
+                <span>
+                  1.{' '}
+                  {tx(
+                    lang,
+                    'Set Minimum Phone as Default Home',
+                    'Minimum Phone-কে ডিফল্ট হোম অ্যাপ করুন',
+                    'تعيين Minimum Phone كشاشة رئيسية افتراضية',
+                    'Minimum Phone کو ڈیفالٹ ہوم بنائیں',
+                    'Jadikan Minimum Phone Layar Utama Default'
+                  )}
+                </span>
                 <span>→</span>
               </button>
 
@@ -2217,24 +2673,18 @@ export function App() {
                 }}
                 className="w-full py-2.5 px-3 border border-zinc-500 text-zinc-100 text-xs uppercase tracking-wider cursor-pointer text-left flex items-center justify-between"
               >
-                <span>2. Force Clear Original Phone Launcher</span>
-                <span>↻</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={async () => {
-                  const s = await toggleHardwareKioskPin(!launcherStatus.isKioskPinned);
-                  setLauncherStatus(s);
-                }}
-                className="w-full py-2.5 px-3 border border-zinc-500 text-zinc-100 text-xs uppercase tracking-wider cursor-pointer text-left flex items-center justify-between"
-              >
                 <span>
-                  {launcherStatus.isKioskPinned
-                    ? '3. Unlock Hardware Home Button Pin'
-                    : '3. Pin & Lock Physical Home Button (Kiosk Mode)'}
+                  2.{' '}
+                  {tx(
+                    lang,
+                    'Open System Default Home Picker',
+                    'ফোনের ডিফল্ট হোম নির্বাচন মেনু খুলুন',
+                    'فتح قائمة اختيار الشاشة الرئيسية',
+                    'سسٹم ہوم ایپ مینو کھولیں',
+                    'Buka Menu Pilih Layar Utama'
+                  )}
                 </span>
-                <span>🔒</span>
+                <span>↻</span>
               </button>
             </div>
           </div>
@@ -2246,10 +2696,24 @@ export function App() {
         <div className="fixed inset-0 z-50 bg-black text-zinc-100 flex items-center justify-center p-5">
           <div className="w-full max-w-md border-2 border-zinc-200 bg-black p-6 space-y-5 font-mono-tech">
             <div className="text-[10px] uppercase tracking-widest text-zinc-400">
-              CORE LAUNCHER ANTI-ESCAPE GUARD // CRAVING INTERCEPT
+              {tx(
+                lang,
+                'CORE LAUNCHER ANTI-ESCAPE GUARD // CRAVING INTERCEPT',
+                'লঞ্চার পরিবর্তন সুরক্ষা গার্ড // তাড়না প্রতিরোধ',
+                'حارس منع الهروب // اعتراض الرغبة',
+                'لانچر تبدیلی روک تھام گارڈ',
+                'PENJAGA ANTI-BYPASS PELUNCUR'
+              )}
             </div>
             <h2 className="text-lg font-semibold text-zinc-100">
-              Are you trying to switch launchers from an impulse?
+              {tx(
+                lang,
+                'Are you trying to switch launchers from an impulse?',
+                'আপনি কি হঠাৎ তাড়নার বশে লঞ্চার বা সেটিংস পরিবর্তন করতে চাইছেন?',
+                'هل تحاول تغيير المشغل بدافع الاندفاع؟',
+                'کیا آپ وقتی خواہش کی وجہ سے لانچر بدلنا چاہتے ہیں؟',
+                'Apakah Anda mencoba mengganti peluncur karena dorongan sesaat?'
+              )}
             </h2>
             <p className="text-xs text-zinc-300 leading-relaxed">
               “{getTriggerText(activeCalmTrigger, lang)}” —{' '}
@@ -2258,20 +2722,30 @@ export function App() {
 
             <div className="border border-zinc-800 p-3 space-y-2 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Cooling-Off Breath Timer:</span>
+                <span className="text-zinc-400">
+                  {tx(lang, 'Cooling-Off Breath Timer:', 'শান্ত হওয়ার শ্বাস টাইমার:', 'مؤقت التهدئة:', 'پرسکون ہونے کا وقت:', 'Timer Tenang:')}
+                </span>
                 <span className="text-base font-semibold text-zinc-100">
-                  {escapeCooldownSec > 0 ? `${escapeCooldownSec}s remaining` : '✓ Ready'}
+                  {escapeCooldownSec > 0
+                    ? `${escapeCooldownSec}s`
+                    : `✓ ${tx(lang, 'Ready', 'প্রস্তুত', 'جاهز', 'تیار', 'Siap')}`}
                 </span>
               </div>
               <div className="text-[11px] text-zinc-400">
-                Type <span className="text-zinc-100 font-semibold">UNLOCK CORE</span> or your
-                Friend Secret ({vault.friendAccountabilitySecret}):
+                {tx(
+                  lang,
+                  `Type UNLOCK CORE or your Friend Secret (${vault.friendAccountabilitySecret}):`,
+                  `নিচে UNLOCK CORE অথবা আপনার ফ্রেন্ড কোড (${vault.friendAccountabilitySecret}) লিখুন:`,
+                  `اكتب UNLOCK CORE أو رمز الصديق (${vault.friendAccountabilitySecret}):`,
+                  `نیچے UNLOCK CORE یا اپنا فرینڈ کوڈ (${vault.friendAccountabilitySecret}) لکھیں:`,
+                  `Ketik UNLOCK CORE atau kode teman (${vault.friendAccountabilitySecret}):`
+                )}
               </div>
               <input
                 type="text"
                 value={escapePhraseInput}
                 onChange={(e) => setEscapePhraseInput(e.target.value)}
-                placeholder="Type UNLOCK CORE"
+                placeholder="UNLOCK CORE"
                 className="w-full bg-zinc-950 border border-zinc-700 px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-300"
               />
             </div>
@@ -2285,7 +2759,14 @@ export function App() {
                 }}
                 className="flex-1 py-3 bg-zinc-100 text-black text-xs font-semibold uppercase tracking-wider cursor-pointer"
               >
-                Stay in Minimum Phone
+                {tx(
+                  lang,
+                  'Stay in Minimum Phone',
+                  'Minimum Phone-এই নিরাপদে থাকুন',
+                  'ابق في Minimum Phone',
+                  'Minimum Phone میں ہی رہیں',
+                  'Tetap di Minimum Phone'
+                )}
               </button>
               <button
                 type="button"
@@ -2309,7 +2790,7 @@ export function App() {
                 }}
                 className="px-4 py-3 border border-zinc-700 text-xs text-zinc-400 disabled:opacity-30 cursor-pointer"
               >
-                Proceed
+                {tx(lang, 'Proceed', 'এগিয়ে যান', 'متابعة', 'آگے بڑھیں', 'Lanjut')}
               </button>
             </div>
           </div>
@@ -2323,12 +2804,19 @@ export function App() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
               <div>
                 <div className="text-[10px] text-zinc-500 uppercase tracking-widest">
-                  BUILT-IN ZERO-DISTRACTION UTILITY
+                  {tx(
+                    lang,
+                    'BUILT-IN ZERO-DISTRACTION UTILITY',
+                    'বিল্ট-ইন মনোযোগ-বান্ধব টুল',
+                    'أداة مدمجة خالية من التشتيت',
+                    'بلٹ ان توجہ دوست ٹول',
+                    'ALAT BAWAAN BEBAS DISTRAKSI'
+                  )}
                 </div>
                 <h3 className="text-sm font-semibold text-zinc-100">
                   {activeBuiltInUtility === 'calculator'
-                    ? 'Monochrome Calculator'
-                    : 'Offline 2FA & Security Codes'}
+                    ? tx(lang, 'Monochrome Calculator', 'মনোক্রোম ক্যালকুলেটর', 'آلة حاسبة أحادية', 'مونوکروم کیلکولیٹر', 'Kalkulator Monokrom')
+                    : tx(lang, 'Offline 2FA & Security Codes', 'অফলাইন 2FA ও সিকিউরিটি কোড', 'رموز الأمان 2FA', 'آف لائن 2FA سیکیورٹی کوڈز', 'Kode Keamanan 2FA Offline')}
                 </h3>
               </div>
               <button
@@ -2398,8 +2886,14 @@ export function App() {
             ) : (
               <div className="space-y-3 text-xs">
                 <p className="text-zinc-400">
-                  100% offline rotating security codes for your essential accounts and
-                  Accountability Lock:
+                  {tx(
+                    lang,
+                    '100% offline rotating security codes for your essential accounts and Accountability Lock:',
+                    'আপনার জরুরি অ্যাকাউন্ট ও সুরক্ষা লকের জন্য ১০০% অফলাইন পরিবর্তনশীল সিকিউরিটি কোড:',
+                    'رموز أمان متجددة ١٠٠٪ بدون إنترنت لحساباتك الأساسية:',
+                    'آپ کے اہم اکاؤنٹس اور حفاظتی لاک کے لیے ١٠٠٪ آف لائن سیکیورٹی کوڈز:',
+                    'Kode keamanan bergilir 100% offline untuk akun penting Anda:'
+                  )}
                 </p>
                 <div className="space-y-2">
                   {[

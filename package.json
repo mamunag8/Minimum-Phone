@@ -1,7 +1,7 @@
 {
   "name": "minimum-phone-kasb",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "Minimum Phone — The Anti-Dopamine Launcher & Calm Mind OS by kasb LLC (Android Play Store & iOS App Store)",
   "type": "module",
   "scripts": {

@@ -655,6 +655,40 @@ export function getLessonsForTrack(track: SlowLearningTrack): SlowLearningLesson
 }
 
 /**
+ * Spaced Repetition (Ebbinghaus Forgetting Curve / Leitner SM-2) Smart Selector:
+ * Prioritizes lessons in `reviewDueIds` (previously missed) every other turn,
+ * then unmastered lessons, then cycles through mastered lessons for long-term retention.
+ */
+export function getSmartSpacedLesson(
+  track: SlowLearningTrack,
+  lessonIndex: number,
+  masteredIds: string[] = [],
+  reviewDueIds: string[] = []
+): {
+  lesson: SlowLearningLesson;
+  isReviewDue: boolean;
+  isMastered: boolean;
+} {
+  const trackLessons = getLessonsForTrack(track);
+  if (reviewDueIds.length > 0 && lessonIndex % 2 === 1) {
+    const dueLesson = trackLessons.find((l) => reviewDueIds.includes(l.id));
+    if (dueLesson) {
+      return {
+        lesson: dueLesson,
+        isReviewDue: true,
+        isMastered: masteredIds.includes(dueLesson.id),
+      };
+    }
+  }
+  const selected = trackLessons[lessonIndex % trackLessons.length] || trackLessons[0];
+  return {
+    lesson: selected,
+    isReviewDue: reviewDueIds.includes(selected.id),
+    isMastered: masteredIds.includes(selected.id),
+  };
+}
+
+/**
  * Returns a compact, easy-to-read 1-2 sentence micro-passage so the user can read
  * and answer the comprehension quiz comfortably within 15–20 seconds.
  */

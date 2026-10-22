@@ -95,6 +95,8 @@ export interface PurityState {
   logs: PurityTriggerLog[];
 }
 
+export type AffectEmotionTag = 'purpose' | 'bored' | 'stressed' | 'tired' | 'task';
+
 export interface SlowLearningState {
   track: SlowLearningTrack;
   require30sQuizToOpenApps: boolean;
@@ -103,6 +105,10 @@ export interface SlowLearningState {
   lessonsCompleted: number;
   quizzesPassed: number;
   currentLessonIndex: number;
+  masteredLessonIds?: string[]; // Spaced Repetition (SM-2 / Leitner) mastered items
+  reviewDueLessonIds?: string[]; // Spaced Repetition priority queue for missed items
+  emotionCounts?: Partial<Record<AffectEmotionTag, number>>; // Affect Labeling ("Name It to Tame It")
+  ifThenReplacementHabit?: string; // Implementation Intention
 }
 
 export interface FocusVaultState {
@@ -112,6 +118,7 @@ export interface FocusVaultState {
   monkTotalSeconds: number;
   deepWorkScheduleEnabled: boolean; // 09:00 - 17:00
   sleepVaultScheduleEnabled: boolean; // 22:00 - 06:00
+  autoCircadianWindDown?: boolean; // 21:30+ automatic warm circadian sunset filter
   physicalBrickLocked: boolean;
   physicalBrickAnchorCode: string;
   qrComplexity?: QrComplexityLevel; // 'easy' | 'medium' | 'hard'
