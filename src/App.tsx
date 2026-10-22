@@ -22,7 +22,10 @@ import {
   getTriggerText,
 } from './data/calmTriggers';
 import { DEFAULT_APPS, INITIAL_NOTIFICATIONS } from './data/defaultApps';
-import { getLessonsForTrack } from './data/slowLearningCurriculum';
+import {
+  getLessonsForTrack,
+  getShortLessonPassage,
+} from './data/slowLearningCurriculum';
 import { SUPPORTED_LANGUAGES, TRANSLATIONS } from './i18n/translations';
 import { InhaleInterceptModal } from './components/InhaleInterceptModal';
 import { PurityGuardView } from './components/PurityGuardView';
@@ -44,7 +47,61 @@ import {
   type NativeLauncherStatus,
 } from './services/nativeLauncherBridge';
 
-const STORAGE_KEY = 'minimum_phone_kasb_state_v3';
+const STORAGE_KEY = 'minimum_phone_kasb_state_v4';
+
+function normalizeAppsForCallingAndNightLock(list: AppItem[]): AppItem[] {
+  const hasMessagesApp = list.some(
+    (a) => a.id === 'messages' || a.name.toLowerCase().includes('message')
+  );
+  const baseList = hasMessagesApp
+    ? list
+    : [
+        ...list.slice(0, 1),
+        DEFAULT_APPS.find((d) => d.id === 'messages')!,
+        ...list.slice(1),
+      ].filter(Boolean);
+
+  return baseList.map((app) => {
+    const lowerName = app.name.toLowerCase();
+    const lowerPkg = (app.packageName || '').toLowerCase();
+    const isCallingOrWhatsApp =
+      app.id === 'phone' ||
+      app.id === 'messages' ||
+      app.id === 'whatsapp' ||
+      lowerName.includes('whatsapp') ||
+      lowerPkg.includes('whatsapp');
+
+    if (isCallingOrWhatsApp) {
+      const profiles: HomeProfileType[] =
+        app.pinnedProfiles.length > 0
+          ? app.pinnedProfiles
+          : (['work', 'personal', 'sunset'] as HomeProfileType[]);
+      return {
+        ...app,
+        category: 'communication',
+        tier: 'essential',
+        nightQrLocked: false,
+        pinnedProfiles: Array.from(new Set([...profiles, 'work', 'personal', 'sunset'])),
+      };
+    }
+
+    if (typeof app.nightQrLocked !== 'boolean') {
+      const shouldNightLock =
+        app.category === 'browser' ||
+        app.category === 'social' ||
+        app.category === 'entertainment' ||
+        /chrome|browser|safari|firefox|brave|opera|duckduckgo|edge|instagram|facebook|youtube|tiktok|twitter|reddit/.test(
+          lowerName
+        );
+      return {
+        ...app,
+        nightQrLocked: shouldNightLock,
+      };
+    }
+
+    return app;
+  });
+}
 
 export function App() {
   // Persistent state initialization
@@ -61,7 +118,7 @@ export function App() {
   const [slowLearning, setSlowLearning] = useState<SlowLearningState>({
     track: 'islam',
     require30sQuizToOpenApps: true,
-    readingDurationSeconds: 30,
+    readingDurationSeconds: 12,
     xp: 45,
     lessonsCompleted: 3,
     quizzesPassed: 3,
@@ -73,7 +130,9 @@ export function App() {
   >('home');
 
   const [homeProfile, setHomeProfile] = useState<HomeProfileType>('work');
-  const [apps, setApps] = useState<AppItem[]>(DEFAULT_APPS);
+  const [apps, setApps] = useState<AppItem[]>(() =>
+    normalizeAppsForCallingAndNightLock(DEFAULT_APPS)
+  );
   const [notifications, setNotifications] =
     useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
 
@@ -99,6 +158,8 @@ export function App() {
     urgesDefeatedCount: 9,
     discreetMode: false,
     adultDnsEnabled: true,
+    selectedDnsProvider: 'cloudflare-family',
+    dnsLockedByQr: true,
     browserKeywordShield: true,
     nightGuardLock: true,
     strictPornLockdown: true,
@@ -125,17 +186,18 @@ export function App() {
     nightQrEndHour: 6,
     forceNightBrowserQrTest: false,
     settingsGateEnabled: true,
-    settingsGateSeconds: 15,
+    settingsGateSeconds: 10,
     blockNotificationAppLaunch: true,
     readOnlyNotificationDigest: true,
     autoCleanBackgroundApps: true,
     backgroundSafeAppIds: [
       'phone',
+      'messages',
+      'whatsapp',
       'calendar',
       'notes',
       'maps',
       'authenticator',
-      'whatsapp',
     ],
     lastBackgroundCleanIso: null,
     lastBackgroundClosedCount: 0,
@@ -262,14 +324,14 @@ export function App() {
 
   const handleRefreshInstalledApps = () => {
     loadRealInstalledApps(apps).then((merged) => {
-      setApps(merged);
+      setApps(normalizeAppsForCallingAndNightLock(merged));
     });
   };
 
   useEffect(() => {
     refreshNativeStatus();
     loadRealInstalledApps(DEFAULT_APPS).then((merged) => {
-      setApps(merged);
+      setApps(normalizeAppsForCallingAndNightLock(merged));
     });
 
     const onHomePressed = () => {
@@ -314,7 +376,7 @@ export function App() {
     return () => clearInterval(timer);
   }, [escapeGateTarget, escapeCooldownSec]);
 
-  // Settings Page 15-Second Read & Quiz Gate countdown
+  // Settings Page Read & Quiz Gate countdown
   useEffect(() => {
     if (!settingsGateModalOpen) return;
     if (settingsGateTimerSec <= 0) return;
@@ -324,7 +386,7 @@ export function App() {
     return () => clearInterval(timer);
   }, [settingsGateModalOpen, settingsGateTimerSec]);
 
-  // Night Browser QR Camera Hold Countdown
+  // Night Browser/Social QR Camera Hold Countdown
   useEffect(() => {
     if (nightQrScanHoldSec <= 0) return;
     const timer = setInterval(() => {
@@ -336,7 +398,9 @@ export function App() {
   // Load saved state from localStorage
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw =
+        localStorage.getItem(STORAGE_KEY) ||
+        localStorage.getItem('minimum_phone_kasb_state_v3');
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.lang) setLang(parsed.lang);
@@ -345,12 +409,22 @@ export function App() {
         if (typeof parsed.grayscaleEnabled === 'boolean')
           setGrayscaleEnabled(parsed.grayscaleEnabled);
         if (parsed.defaultHabitWall) setDefaultHabitWall(parsed.defaultHabitWall);
-        if (parsed.slowLearning) setSlowLearning(parsed.slowLearning);
+        if (parsed.slowLearning) {
+          setSlowLearning({
+            ...parsed.slowLearning,
+            readingDurationSeconds: Math.min(
+              15,
+              parsed.slowLearning.readingDurationSeconds || 12
+            ),
+          });
+        }
         if (parsed.impulsesStopped) setImpulsesStopped(parsed.impulsesStopped);
         if (parsed.reclaimedMinutes) setReclaimedMinutes(parsed.reclaimedMinutes);
-        if (parsed.purity) setPurity(parsed.purity);
+        if (parsed.purity) setPurity((prev) => ({ ...prev, ...parsed.purity }));
         if (parsed.vault) setVault((prev) => ({ ...prev, ...parsed.vault }));
-        if (Array.isArray(parsed.apps) && parsed.apps.length > 0) setApps(parsed.apps);
+        if (Array.isArray(parsed.apps) && parsed.apps.length > 0) {
+          setApps(normalizeAppsForCallingAndNightLock(parsed.apps));
+        }
         if (Array.isArray(parsed.scratchpadNotes)) setScratchpadNotes(parsed.scratchpadNotes);
       }
     } catch {
@@ -520,9 +594,21 @@ export function App() {
     filteredCalmTriggers[triggerIndex % Math.max(1, filteredCalmTriggers.length)] ||
     CALM_MIND_TRIGGERS[0];
 
-  // Active Home Apps (up to 7 apps for current Home Screen profile)
+  // Active Home Apps (up to 7 apps for current Home Screen profile; Phone Calls, Messages & WhatsApp first)
   const pinnedHomeApps = useMemo(() => {
-    return apps.filter((a) => a.pinnedProfiles.includes(homeProfile)).slice(0, 7);
+    const priorityOrder: Record<string, number> = {
+      phone: 1,
+      messages: 2,
+      whatsapp: 3,
+    };
+    return apps
+      .filter((a) => a.pinnedProfiles.includes(homeProfile))
+      .sort((a, b) => {
+        const pa = priorityOrder[a.id] || 99;
+        const pb = priorityOrder[b.id] || 99;
+        return pa - pb;
+      })
+      .slice(0, 7);
   }, [apps, homeProfile]);
 
   // Search-First App Drawer Filtering with Asymmetric Friction
@@ -557,17 +643,34 @@ export function App() {
     return hr >= startH || hr < endH;
   }, [currentTime, vault.forceNightBrowserQrTest, vault.nightQrStartHour, vault.nightQrEndHour]);
 
-  const isBrowserAppItem = (app: AppItem): boolean => {
+  // Sleeping-Time / Night Mandatory Emergency QR Lock for Browsers, Social Media & Entertainment Apps
+  const isNightQrLockedApp = (app: AppItem): boolean => {
     const n = app.name.toLowerCase();
     const p = (app.packageName || '').toLowerCase();
+    if (
+      app.id === 'phone' ||
+      app.id === 'messages' ||
+      app.id === 'whatsapp' ||
+      n.includes('whatsapp') ||
+      p.includes('whatsapp')
+    ) {
+      return false;
+    }
+    if (typeof app.nightQrLocked === 'boolean') return app.nightQrLocked;
     return (
       app.category === 'browser' ||
-      /chrome|browser|safari|firefox|brave|opera|duckduckgo|edge/.test(n) ||
-      /chrome|browser|safari|firefox|brave|opera|duckduckgo|edge/.test(p)
+      app.category === 'social' ||
+      app.category === 'entertainment' ||
+      /chrome|browser|safari|firefox|brave|opera|duckduckgo|edge|instagram|facebook|youtube|tiktok|twitter|reddit/.test(
+        n
+      ) ||
+      /chrome|browser|safari|firefox|brave|opera|duckduckgo|edge|instagram|facebook|youtube|tiktok|twitter|reddit/.test(
+        p
+      )
     );
   };
 
-  // Navigate to Settings tab with 15-Second Read & Quiz Gate
+  // Navigate to Settings tab with Compact 10s Read & Quiz Gate (Answer within 20s)
   const handleSelectNavigationTab = (
     tabId: 'home' | 'drawer' | 'purity' | 'digest-focus' | 'system-kasb'
   ) => {
@@ -583,7 +686,7 @@ export function App() {
       (vault.settingsGateEnabled ?? true) &&
       !settingsSessionUnlocked
     ) {
-      setSettingsGateTimerSec(vault.settingsGateSeconds || 15);
+      setSettingsGateTimerSec(Math.min(12, vault.settingsGateSeconds || 10));
       setSettingsGateSelectedOption(null);
       setSettingsGateError(null);
       setSettingsGateLessonIdx((idx) => idx + 1);
@@ -614,11 +717,11 @@ export function App() {
       return;
     }
 
-    // 2. Mandatory Night Browser QR Scan Lock ("Without scan QR codes specifically can not use any browse at night")
+    // 2. Mandatory Sleeping-Time Emergency QR Scan Lock (Browsers, Social Media, Entertainment at 10 PM – 6 AM)
     if (
       (vault.nightBrowserQrRequired ?? true) &&
       isNightHourActive &&
-      isBrowserAppItem(app)
+      isNightQrLockedApp(app)
     ) {
       setNightQrInput('');
       setNightQrMathInput('');
@@ -1089,15 +1192,15 @@ export function App() {
       )}
 
       {/* MAIN 100% DEVICE-FIT LAUNCHER VIEWPORT */}
-      <main className="w-full flex-1 min-h-0 flex flex-col justify-between overflow-y-auto px-4 sm:px-8 md:px-12 py-4">
+      <main className="w-full max-w-full min-w-0 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto overflow-x-hidden px-3.5 sm:px-8 md:px-12 py-3">
         {/* =========================================================
             TAB 1: THE PURE MINIMALIST HOME SCREEN (ZERO SETTINGS CLUTTER)
            ========================================================= */}
         {activeTab === 'home' && (
-          <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col justify-between space-y-4">
-            {/* Top Status Row: Clean Clock, Date, Battery %, and Quiet Digest Reassurance Line */}
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 flex flex-col justify-between space-y-3 overflow-x-hidden">
+            {/* Top Status Row: Clean Clock, Date, Battery %, 1-Tap Wi-Fi/BT/DNS Quick Bar, and Quiet Digest Line */}
             <div className="space-y-2">
-              <div className="flex items-baseline justify-between">
+              <div className="flex items-baseline justify-between gap-2">
                 <h1 className="text-5xl sm:text-6xl md:text-7xl font-mono-tech font-light tracking-tight">
                   {formattedClock}
                 </h1>
@@ -1109,18 +1212,41 @@ export function App() {
                 </div>
               </div>
 
+              {/* 1-Tap Hardware Quick Access Bar: Wi-Fi, Bluetooth, Private DNS, Data, Display, Sound */}
+              <div className="grid grid-cols-6 gap-1 pt-0.5">
+                {(
+                  [
+                    { target: 'wifi', label: '📶 Wi-Fi' },
+                    { target: 'bluetooth', label: '🦷 BT' },
+                    { target: 'dns', label: '🌐 DNS' },
+                    { target: 'data', label: '📱 Data' },
+                    { target: 'display', label: '🔆 Screen' },
+                    { target: 'sound', label: '🔊 Sound' },
+                  ] as const
+                ).map((qs) => (
+                  <button
+                    key={qs.target}
+                    type="button"
+                    onClick={() => openPhoneMainSetting(qs.target)}
+                    className="py-1.5 px-1 border border-zinc-800/90 bg-zinc-950/60 text-[10px] font-mono-tech text-zinc-300 hover:border-zinc-500 hover:text-white text-center truncate cursor-pointer"
+                  >
+                    {qs.label}
+                  </button>
+                ))}
+              </div>
+
               {/* Peace of Mind Notification Digest Status Line */}
               <button
                 type="button"
                 onClick={() => setActiveTab('digest-focus')}
-                className="w-full text-left py-2 border-y border-zinc-800/80 flex items-center justify-between text-xs font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
+                className="w-full text-left py-1.5 border-y border-zinc-800/80 flex items-center justify-between gap-2 text-xs font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
               >
-                <span>
+                <span className="truncate">
                   {urgentBreakthroughCount > 0
                     ? `⚡ ${urgentBreakthroughCount} URGENT BREAKTHROUGH ALERT`
                     : `${t.allQuietStatus} (${batchedQuietCount} batched)`}
                 </span>
-                <span>{t.nextDigestAt} 18:00 →</span>
+                <span className="shrink-0">{t.nextDigestAt} 18:00 →</span>
               </button>
             </div>
 
@@ -1150,34 +1276,41 @@ export function App() {
               </div>
             ) : (
               /* PURE MINIMALIST ACTIVE HOME APPS + HOME NOTE SYSTEM */
-              <div className="my-auto space-y-4 py-1">
-                {/* Text-Only Monochromatic Active Home App List */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5">
+              <div className="my-auto space-y-3.5 py-1">
+                {/* Text-Only Monochromatic Active Home App List (Phone Calls, Messages & WhatsApp Normal First) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1">
                   {pinnedHomeApps.map((app) => {
                     const isReopenLocked = reopenLockedAppIds.includes(app.id);
                     const isNightQrLocked =
                       (vault.nightBrowserQrRequired ?? true) &&
                       isNightHourActive &&
-                      isBrowserAppItem(app);
+                      isNightQrLockedApp(app);
+                    const isCallingOrWhatsApp =
+                      app.id === 'phone' ||
+                      app.id === 'messages' ||
+                      app.id === 'whatsapp' ||
+                      app.name.toLowerCase().includes('whatsapp');
                     return (
                       <button
                         key={app.id}
                         type="button"
                         onClick={() => handleTapApp(app)}
-                        className="w-full text-left py-2.5 border-b border-zinc-900/90 flex items-baseline justify-between group cursor-pointer"
+                        className="w-full text-left py-2 border-b border-zinc-900/90 flex items-baseline justify-between gap-2 group cursor-pointer"
                       >
-                        <span className="text-2xl sm:text-3xl font-light tracking-tight group-hover:translate-x-1.5 transition-transform">
+                        <span className="text-2xl sm:text-3xl font-light tracking-tight group-hover:translate-x-1 transition-transform truncate">
                           {lang === 'bn' && app.nameBn ? app.nameBn : app.name}
                         </span>
-                        <span className="text-[10px] font-mono-tech opacity-45 group-hover:opacity-85">
+                        <span className="text-[10px] font-mono-tech opacity-50 group-hover:opacity-90 shrink-0">
                           {isNightQrLocked
                             ? '🌙 QR LOCK'
                             : isReopenLocked
-                            ? '15S QUIZ'
+                            ? '12S QUIZ'
                             : app.tier === 'restricted'
-                            ? '30S QUIZ'
+                            ? '20S QUIZ'
                             : app.tier === 'adult-blocked'
                             ? 'BLOCKED'
+                            : isCallingOrWhatsApp
+                            ? '📞 CALL / MSG'
                             : 'OPEN'}
                         </span>
                       </button>
@@ -1328,7 +1461,7 @@ export function App() {
             )}
 
             {/* Bottom Calm Mind Trigger Bar (Small Strong Line Only) */}
-            <div className="border-t border-zinc-800/90 pt-3 space-y-1.5">
+            <div className="border-t border-zinc-800/90 pt-2.5 space-y-1">
               <div className="flex items-center justify-between text-[10px] font-mono-tech uppercase tracking-widest opacity-60">
                 <span>{t.calmWhisperLabel}</span>
                 <button
@@ -1366,16 +1499,16 @@ export function App() {
             TAB 2: ASYMMETRIC SEARCH-FIRST APP DRAWER
            ========================================================= */}
         {activeTab === 'drawer' && (
-          <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col space-y-4">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 flex flex-col space-y-3 overflow-x-hidden">
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
-                  ASYMMETRIC FRICTION // INSTANT UTILITY · GATED DOPAMINE
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500 truncate">
+                  ASYMMETRIC FRICTION // CALLS & WHATSAPP NORMAL · GATED SOCIAL
                 </span>
                 <button
                   type="button"
                   onClick={() => setRevealRestrictedInDrawer((v) => !v)}
-                  className="text-[10px] font-mono-tech text-zinc-400 underline cursor-pointer"
+                  className="text-[10px] font-mono-tech text-zinc-400 underline cursor-pointer shrink-0"
                 >
                   {revealRestrictedInDrawer ? 'Hide Restricted' : 'Show All Apps'}
                 </button>
@@ -1397,28 +1530,28 @@ export function App() {
                   }
                 }}
                 placeholder={t.searchPlaceholder}
-                className="w-full bg-black border border-zinc-700 px-3.5 py-3 text-sm font-mono-tech text-zinc-100 focus:outline-none focus:border-zinc-200"
+                className="w-full bg-black border border-zinc-700 px-3.5 py-2.5 text-sm font-mono-tech text-zinc-100 focus:outline-none focus:border-zinc-200"
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-zinc-900 pr-1">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-zinc-900">
               {drawerSearchResults.map((app) => {
                 const isReopenLocked = reopenLockedAppIds.includes(app.id);
                 const isNightQrLocked =
                   (vault.nightBrowserQrRequired ?? true) &&
                   isNightHourActive &&
-                  isBrowserAppItem(app);
+                  isNightQrLockedApp(app);
                 return (
                   <div
                     key={app.id}
-                    className="py-3 flex items-center justify-between gap-2"
+                    className="py-2.5 flex items-center justify-between gap-2"
                   >
                     <button
                       type="button"
                       onClick={() => handleTapApp(app)}
-                      className="text-left flex-1 cursor-pointer group"
+                      className="text-left flex-1 min-w-0 cursor-pointer group"
                     >
-                      <div className="text-base font-light text-zinc-100 group-hover:translate-x-1 transition-transform">
+                      <div className="text-base font-light text-zinc-100 group-hover:translate-x-1 transition-transform truncate">
                         {lang === 'bn' && app.nameBn ? app.nameBn : app.name}
                       </div>
                       <div className="text-[10px] font-mono-tech text-zinc-500">
@@ -1426,16 +1559,16 @@ export function App() {
                       </div>
                     </button>
 
-                    <span className="px-2 py-1 border border-zinc-800 text-[10px] font-mono-tech text-zinc-400">
+                    <span className="px-2 py-1 border border-zinc-800 text-[10px] font-mono-tech text-zinc-400 shrink-0">
                       {isNightQrLocked
-                        ? '🌙 NIGHT QR REQUIRED'
+                        ? '🌙 NIGHT QR LOCK'
                         : isReopenLocked
-                        ? '🔒 15S QUIZ REOPEN'
+                        ? '🔒 12S QUIZ REOPEN'
                         : app.tier === 'restricted'
-                        ? '🔒 30S QUIZ GATE'
+                        ? '📚 20S QUIZ GATE'
                         : app.tier === 'adult-blocked'
                         ? '🚫 BLOCKED'
-                        : '⚡ INSTANT'}
+                        : '⚡ NORMAL'}
                     </span>
                   </div>
                 );
@@ -1455,7 +1588,7 @@ export function App() {
             TAB 3: PURITY & ANTI-PORN GUARD + PRIVATE DNS + URGE SOS
            ========================================================= */}
         {activeTab === 'purity' && (
-          <div className="w-full max-w-4xl mx-auto flex-1">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 overflow-x-hidden">
             <PurityGuardView
               purity={purity}
               lang={lang}
@@ -1473,7 +1606,7 @@ export function App() {
             TAB 4: NOTIFICATION DIGEST + MONK FOCUS + QR COMPLEXITY & NIGHT BROWSER QR LOCK
            ========================================================= */}
         {activeTab === 'digest-focus' && (
-          <div className="w-full max-w-4xl mx-auto flex-1">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 overflow-x-hidden">
             <DigestAndFocusView
               lang={lang}
               notifications={notifications}
@@ -1506,7 +1639,7 @@ export function App() {
             TAB 5: COMPLETE SETTINGS PAGE (ALL SETTINGS IN ONE PLACE)
            ========================================================= */}
         {activeTab === 'system-kasb' && (
-          <div className="w-full max-w-4xl mx-auto flex-1">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 overflow-x-hidden">
             <AnalyticsAndKasbView
               lang={lang}
               onChangeLanguage={setLang}
@@ -1552,7 +1685,7 @@ export function App() {
       </main>
 
       {/* STICKY 100%-FIT BOTTOM NAVIGATION BAR */}
-      <nav className="w-full shrink-0 border-t border-zinc-800 bg-black px-3 sm:px-8 py-2 grid grid-cols-5 gap-1.5 text-[11px] font-mono-tech">
+      <nav className="w-full shrink-0 border-t border-zinc-800 bg-black px-2.5 sm:px-8 py-2 grid grid-cols-5 gap-1 text-[11px] font-mono-tech">
         {(
           [
             { id: 'home', label: t.navHome },
@@ -1584,39 +1717,65 @@ export function App() {
       </nav>
 
       {/* =========================================================
-          MODAL 1: SETTINGS PAGE 15-SECOND READ & QUIZ RESTRICTION GATE
+          MODAL 1: COMPACT SETTINGS PAGE 20-SECOND READ & QUIZ RESTRICTION GATE
          ========================================================= */}
       {settingsGateModalOpen && activeSettingsGateLesson && (
-        <div className="fixed inset-0 z-50 bg-black/95 text-zinc-100 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="w-full max-w-md border-2 border-zinc-200 bg-black p-5 space-y-4 font-mono-tech">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+        <div className="fixed inset-0 z-50 bg-black/95 text-zinc-100 flex items-center justify-center p-3 overflow-y-auto">
+          <div className="w-full max-w-md border-2 border-zinc-200 bg-black p-4 space-y-3 font-mono-tech my-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
               <div>
                 <div className="text-[10px] text-zinc-400 uppercase tracking-widest">
-                  SETTINGS ANTI-IMPULSE GUARD // 15-SEC READ & QUIZ
+                  SETTINGS GUARD // QUICK 20-SEC QUIZ
                 </div>
-                <h3 className="text-sm font-semibold text-zinc-100 mt-0.5">
-                  Read for 15 Seconds & Answer Quiz to Open Settings
+                <h3 className="text-xs font-semibold text-zinc-100 mt-0.5">
+                  Quick Read & 1-Tap Quiz to Open Settings
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setSettingsGateModalOpen(false)}
-                className="px-2.5 py-1 border border-zinc-700 text-xs cursor-pointer"
+                className="px-2 py-1 border border-zinc-700 text-xs cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <div className="border border-zinc-800 bg-zinc-950 p-3.5 space-y-2">
-              <div className="flex items-center justify-between text-[11px] text-zinc-400">
-                <span>
+            {/* Instant 1-Tap Wi-Fi / BT / DNS Access even before unlocking full Settings */}
+            <div className="border border-zinc-800 bg-zinc-950 p-2.5 space-y-1.5">
+              <div className="text-[10px] text-zinc-400 uppercase">
+                ⚡ Need Quick Wi-Fi, Bluetooth or DNS? (No Quiz Needed):
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {(
+                  [
+                    { target: 'wifi', label: '📶 Wi-Fi' },
+                    { target: 'bluetooth', label: '🦷 BT' },
+                    { target: 'dns', label: '🌐 DNS' },
+                    { target: 'display', label: '🔆 Display' },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.target}
+                    type="button"
+                    onClick={() => openPhoneMainSetting(item.target)}
+                    className="py-1.5 px-1 border border-zinc-700 bg-black text-[10px] text-zinc-200 hover:border-zinc-300 cursor-pointer"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="border border-zinc-800 bg-zinc-950 p-3 space-y-1.5">
+              <div className="flex items-center justify-between gap-2 text-[11px] text-zinc-400">
+                <span className="truncate">
                   {activeSettingsGateLesson.title[lang] ||
                     activeSettingsGateLesson.title.en}
                 </span>
-                <span className="px-2 py-0.5 border border-zinc-700 text-zinc-200 font-semibold">
+                <span className="px-2 py-0.5 border border-zinc-700 text-zinc-200 font-semibold shrink-0">
                   {settingsGateTimerSec > 0
-                    ? `⏳ Read ${settingsGateTimerSec}s`
-                    : '✓ Quiz Ready'}
+                    ? `⏳ ${settingsGateTimerSec}s`
+                    : '✓ Ready'}
                 </span>
               </div>
 
@@ -1625,21 +1784,23 @@ export function App() {
                 inspirationMode !== 'universal' && (
                   <p
                     dir="rtl"
-                    className="font-arabic text-base text-zinc-200 text-right leading-relaxed"
+                    className="font-arabic text-sm text-zinc-200 text-right leading-snug"
                   >
                     {activeSettingsGateLesson.arabicHeader}
                   </p>
                 )}
 
-              <p className="text-xs text-zinc-200 leading-relaxed font-sans">
-                {activeSettingsGateLesson.readingText[lang] ||
-                  activeSettingsGateLesson.readingText.en}
+              <p className="text-xs text-zinc-200 leading-snug font-sans">
+                {getShortLessonPassage(activeSettingsGateLesson, lang)}
               </p>
+              <div className="text-[11px] text-zinc-300 pt-1 border-t border-zinc-900">
+                ★ {activeSettingsGateLesson.keyTakeaway[lang] || activeSettingsGateLesson.keyTakeaway.en}
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-zinc-100">
-                Quiz:{' '}
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-zinc-100 leading-snug">
+                Q:{' '}
                 {activeSettingsGateLesson.quizQuestion[lang] ||
                   activeSettingsGateLesson.quizQuestion.en}
               </div>
@@ -1666,25 +1827,25 @@ export function App() {
                         setActiveTab('system-kasb');
                       } else {
                         setSettingsGateError(
-                          'Incorrect answer. Re-read the passage for 10 seconds and try again.'
+                          'Not quite right. Re-read for 5 seconds and tap the correct answer.'
                         );
-                        setSettingsGateTimerSec(10);
+                        setSettingsGateTimerSec(5);
                       }
                     }}
-                    className={`w-full text-left p-2.5 border text-xs cursor-pointer disabled:opacity-40 ${
+                    className={`w-full text-left px-2.5 py-2 border text-xs leading-snug cursor-pointer disabled:opacity-40 ${
                       settingsGateSelectedOption === idx
                         ? 'border-zinc-200 bg-zinc-900 text-white'
                         : 'border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-600'
                     }`}
                   >
-                    {idx + 1}. {opt}
+                    {String.fromCharCode(65 + idx)}. {opt}
                   </button>
                 ))}
               </div>
             </div>
 
             {settingsGateError && (
-              <div className="p-2.5 border border-zinc-500 bg-zinc-900 text-xs text-zinc-200">
+              <div className="p-2 border border-zinc-500 bg-zinc-900 text-xs text-zinc-200">
                 ⚠ {settingsGateError}
               </div>
             )}
@@ -1701,19 +1862,19 @@ export function App() {
       )}
 
       {/* =========================================================
-          MODAL 2: NIGHT BROWSER MANDATORY QR CODE SCANNER GATE
-          ("Without scan QR codes specifically can not use any browse at night")
+          MODAL 2: SLEEPING-TIME / NIGHT MANDATORY EMERGENCY QR CODE SCANNER GATE
+          (Enforced at Night 10 PM – 6 AM for Browsers, Social Media & Entertainment)
          ========================================================= */}
       {nightBrowserQrApp && (
-        <div className="fixed inset-0 z-50 bg-black/95 text-zinc-100 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="w-full max-w-md border-2 border-zinc-100 bg-black p-5 space-y-4 font-mono-tech">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+        <div className="fixed inset-0 z-50 bg-black/95 text-zinc-100 flex items-center justify-center p-3 overflow-y-auto">
+          <div className="w-full max-w-md border-2 border-zinc-100 bg-black p-4 space-y-3.5 font-mono-tech my-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
               <div>
                 <div className="text-[10px] text-zinc-400 uppercase tracking-widest">
-                  🌙 NIGHT BROWSER QR FORTRESS ({(vault.qrComplexity || 'hard').toUpperCase()} MODE)
+                  🌙 SLEEPING-TIME EMERGENCY QR FORTRESS ({(vault.qrComplexity || 'hard').toUpperCase()})
                 </div>
                 <h3 className="text-sm font-semibold text-zinc-100 mt-0.5">
-                  Physical QR Code Scan Required for {nightBrowserQrApp.name}
+                  Mandatory Emergency QR Scan for {nightBrowserQrApp.name}
                 </h3>
               </div>
               <button
@@ -1729,9 +1890,10 @@ export function App() {
             </div>
 
             <p className="text-xs text-zinc-300 leading-relaxed">
-              Browsers are strictly locked at night (10:00 PM – 6:00 AM). Without physically
-              scanning your QR code card in another room,{' '}
-              <strong>{nightBrowserQrApp.name}</strong> cannot be opened.
+              Browsers, Social Media, and entertainment apps have stronger sleeping-time
+              restrictions at night (10:00 PM – 6:00 AM). For emergency use, physically scanning
+              your QR code card is mandatory to unlock{' '}
+              <strong>{nightBrowserQrApp.name}</strong>.
             </p>
 
             <div className="border border-zinc-800 bg-zinc-950 p-3 space-y-2.5">

@@ -34,7 +34,10 @@ export type PhoneSettingTarget =
   | 'battery'
   | 'accessibility'
   | 'usage'
-  | 'home';
+  | 'home'
+  | 'data'
+  | 'hotspot'
+  | 'location';
 
 export interface MinimumPhoneNativePluginInterface {
   getLauncherStatus(): Promise<NativeLauncherStatus>;
@@ -231,6 +234,9 @@ export async function openPhoneMainSetting(
         sound: 'android.settings.SOUND_SETTINGS',
         apps: 'android.settings.APPLICATION_SETTINGS',
         dns: 'android.settings.WIRELESS_SETTINGS',
+        data: 'android.settings.DATA_USAGE_SETTINGS',
+        hotspot: 'android.settings.WIRELESS_SETTINGS',
+        location: 'android.settings.LOCATION_SOURCE_SETTINGS',
         battery: 'android.intent.action.POWER_USAGE_SUMMARY',
         accessibility: 'android.settings.ACCESSIBILITY_SETTINGS',
         usage: 'android.settings.USAGE_ACCESS_SETTINGS',
@@ -250,6 +256,9 @@ export async function openPhoneMainSetting(
         sound: 'App-Prefs:root=Sounds',
         apps: 'App-Prefs:root=General',
         dns: 'App-Prefs:root=General&path=ManagedConfigurationList',
+        data: 'App-Prefs:root=MOBILE_DATA_SETTINGS_ID',
+        hotspot: 'App-Prefs:root=INTERNET_TETHERING',
+        location: 'App-Prefs:root=Privacy&path=LOCATION',
         battery: 'App-Prefs:root=BATTERY_USAGE',
         accessibility: 'App-Prefs:root=ACCESSIBILITY',
         usage: 'App-Prefs:root=SCREEN_TIME',
@@ -268,6 +277,9 @@ export async function openPhoneMainSetting(
         sound: 'ms-settings:sound',
         apps: 'ms-settings:appsfeatures',
         dns: 'ms-settings:network-status',
+        data: 'ms-settings:datausage',
+        hotspot: 'ms-settings:network-mobilehotspot',
+        location: 'ms-settings:privacy-location',
         battery: 'ms-settings:batterysaver',
         accessibility: 'ms-settings:easeofaccess',
         usage: 'ms-settings:privacy',

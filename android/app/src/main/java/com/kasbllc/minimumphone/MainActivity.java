@@ -3,11 +3,17 @@ package com.kasbllc.minimumphone;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.view.View;
 import android.view.Window;
-import android.view.WindowManager;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -18,12 +24,51 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MinimumPhoneNativePlugin.class);
         super.onCreate(savedInstanceState);
 
-        // Enforce pure monochrome OLED black system bars
+        // Native OS Edge-to-Edge & System Bar Inset Fitting (Android 10 - Android 16 / SDK 36 compliant)
         try {
             Window window = getWindow();
-            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(Color.BLACK);
-            window.setNavigationBarColor(Color.BLACK);
+            WindowCompat.setDecorFitsSystemWindows(window, false);
+            window.getDecorView().setBackgroundColor(Color.BLACK);
+
+            WindowInsetsControllerCompat insetsController =
+                WindowCompat.getInsetsController(window, window.getDecorView());
+            if (insetsController != null) {
+                insetsController.setAppearanceLightStatusBars(false);
+                insetsController.setAppearanceLightNavigationBars(false);
+            }
+
+            View contentView = findViewById(android.R.id.content);
+            if (contentView != null) {
+                contentView.setBackgroundColor(Color.BLACK);
+                ViewCompat.setOnApplyWindowInsetsListener(contentView, (v, windowInsets) -> {
+                    Insets insets = windowInsets.getInsets(
+                        WindowInsetsCompat.Type.systemBars()
+                            | WindowInsetsCompat.Type.displayCutout()
+                            | WindowInsetsCompat.Type.ime()
+                    );
+                    v.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+                    return WindowInsetsCompat.CONSUMED;
+                });
+            }
+        } catch (Exception ignored) {}
+
+        // Configure WebView to behave 100% as a Native OS Launcher (no scrollbars, no horizontal drift, no zoom)
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                WebView wv = getBridge().getWebView();
+                wv.setBackgroundColor(Color.BLACK);
+                wv.setVerticalScrollBarEnabled(false);
+                wv.setHorizontalScrollBarEnabled(false);
+                wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+
+                WebSettings ws = wv.getSettings();
+                ws.setSupportZoom(false);
+                ws.setBuiltInZoomControls(false);
+                ws.setDisplayZoomControls(false);
+                ws.setUseWideViewPort(true);
+                ws.setLoadWithOverviewMode(true);
+                ws.setTextZoom(100);
+            }
         } catch (Exception ignored) {}
 
         // Intercept hardware Back button / gesture so the launcher NEVER closes or exits to stock home

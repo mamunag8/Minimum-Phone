@@ -34,6 +34,7 @@ export interface AppItem {
   dailyOpens: number;
   dailyMinutesUsed: number;
   pinnedProfiles: HomeProfileType[];
+  nightQrLocked?: boolean; // Mandatory Emergency QR Code scan required at night / sleeping hours
 }
 
 export interface CalmTrigger {
@@ -82,6 +83,8 @@ export interface PurityState {
   urgesDefeatedCount: number;
   discreetMode: boolean; // Shows "Neuro-Reset & Clarity" instead of "Anti-Porn & Purity"
   adultDnsEnabled: boolean; // 1.1.1.3 Family / CleanBrowsing
+  selectedDnsProvider?: 'cloudflare-family' | 'cleanbrowsing-adult' | 'adguard-family';
+  dnsLockedByQr?: boolean; // Requires Emergency Physical QR Code scan to disable Private DNS shield
   browserKeywordShield: boolean;
   nightGuardLock: boolean; // 11 PM - 6 AM browser/social lock
   strictPornLockdown?: boolean; // Complete browser & trigger lock behind 30s Read+Quiz + DNS shield

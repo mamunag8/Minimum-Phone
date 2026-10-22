@@ -246,7 +246,14 @@ public class MinimumPhoneNativePlugin extends Plugin {
                 break;
             case "dns":
             case "network":
+            case "hotspot":
                 action = Settings.ACTION_WIRELESS_SETTINGS;
+                break;
+            case "data":
+                action = Settings.ACTION_DATA_ROAMING_SETTINGS;
+                break;
+            case "location":
+                action = Settings.ACTION_LOCATION_SOURCE_SETTINGS;
                 break;
             case "battery":
                 action = Intent.ACTION_POWER_USAGE_SUMMARY;
@@ -423,8 +430,10 @@ public class MinimumPhoneNativePlugin extends Plugin {
             }
         }
 
-        // Core essential tools
+        // Core essential tools (Calls, Messages, WhatsApp, Calendar, Notes, Quran/Hadith)
         if (p.contains("dialer") || p.contains("telecom") || l.equals("phone") ||
+            p.contains("mms") || p.contains("messaging") || l.equals("messages") ||
+            p.contains("whatsapp") ||
             p.contains("contacts") || p.contains("calendar") || p.contains("notes") ||
             p.contains("keep") || p.contains("quran") || p.contains("hadith") ||
             p.contains("muslim")) {
@@ -566,6 +575,13 @@ public class MinimumPhoneNativePlugin extends Plugin {
         switch (id) {
             case "phone":
                 return new Intent(Intent.ACTION_DIAL);
+            case "messages":
+            case "sms": {
+                Intent msg = new Intent(Intent.ACTION_MAIN);
+                msg.addCategory(Intent.CATEGORY_APP_MESSAGING);
+                if (msg.resolveActivity(pm) != null) return msg;
+                return new Intent(Intent.ACTION_VIEW, Uri.parse("sms:"));
+            }
             case "camera":
                 return new Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA);
             case "alarm":
@@ -587,8 +603,11 @@ public class MinimumPhoneNativePlugin extends Plugin {
                 if (calc.resolveActivity(pm) != null) return calc;
                 return pm.getLaunchIntentForPackage("com.google.android.calculator");
             }
-            case "whatsapp":
-                return pm.getLaunchIntentForPackage("com.whatsapp");
+            case "whatsapp": {
+                Intent wa = pm.getLaunchIntentForPackage("com.whatsapp");
+                if (wa != null) return wa;
+                return pm.getLaunchIntentForPackage("com.whatsapp.w4b");
+            }
             case "instagram":
                 return pm.getLaunchIntentForPackage("com.instagram.android");
             case "youtube":

@@ -483,122 +483,132 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           </button>
         </div>
 
-        {/* Layer 1: System Adult DNS Filter + 1-Tap Android Private DNS Opener */}
-        <div className="py-2.5 border-b border-zinc-900 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <div className="pr-3">
-              <div className="text-xs font-medium text-zinc-200">{t.adultDnsShieldLabel}</div>
-              <div className="text-[11px] text-zinc-500 font-mono-tech">
-                Blocks 100% of adult & porn domains across all browsers on your phone
+        {/* Layer 1: 1-Tap Private Safe DNS Setup + Stronger Tamper-Proof Control */}
+        <div className="py-2.5 border-b border-zinc-900 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold text-zinc-100">{t.adultDnsShieldLabel}</div>
+              <div className="text-[11px] text-zinc-400 font-mono-tech">
+                Blocks 100% of porn, adult & gambling domains across ALL browsers & apps
               </div>
             </div>
             <button
               type="button"
-              onClick={handleToggleAdultDns}
-              className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+              onClick={() => {
+                if (purity.adultDnsEnabled && (purity.dnsLockedByQr ?? true)) {
+                  setDnsStatusMessage(
+                    '🔒 Tamper Lock Active: Private DNS Shield is locked for your protection. Scan Emergency QR in Focus/Settings to unlock.'
+                  );
+                  return;
+                }
+                handleToggleAdultDns();
+              }}
+              className={`px-3 py-1.5 border text-xs font-mono-tech shrink-0 cursor-pointer ${
                 purity.adultDnsEnabled
-                  ? 'border-zinc-200 bg-zinc-100 text-black font-semibold'
+                  ? 'border-zinc-200 bg-zinc-100 text-black font-bold'
                   : 'border-zinc-700 text-zinc-400'
               }`}
             >
-              {purity.adultDnsEnabled ? 'ACTIVE' : 'OFF'}
+              {purity.adultDnsEnabled ? '🛡️ LOCKED ON' : 'OFF'}
             </button>
           </div>
 
-          {/* 1-Tap Copy & Open Android Private DNS Settings + Clear Protection Architecture Guide */}
-          <div className="bg-black border border-zinc-800 p-3.5 space-y-3">
-            <div className="text-[11px] font-mono-tech font-semibold uppercase text-zinc-200">
-              🛡️ HOW PRIVATE SAFE DNS PROTECTS YOU (ZERO-BYPASS NETWORK SHIELD):
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-zinc-300 leading-relaxed">
-              <div className="border border-zinc-800 bg-zinc-950/70 p-2.5">
-                <strong className="text-zinc-100 block font-mono-tech mb-0.5">
-                  1. Blocks Before Any Page Loads (&lt;5ms)
-                </strong>
-                Whenever any browser or app requests a website domain, Private DNS checks it at the
-                OS network layer and blocks 100% of porn, adult, and phishing domains (`0.0.0.0`)
-                before a single pixel or video can load.
-              </div>
-              <div className="border border-zinc-800 bg-zinc-950/70 p-2.5">
-                <strong className="text-zinc-100 block font-mono-tech mb-0.5">
-                  2. Works in Incognito & All Apps
-                </strong>
-                Unlike browser extensions that fail in Incognito/Private tabs or in-app webviews,
-                OS Private DNS protects Chrome, Safari, Firefox, Brave, and every social app
-                system-wide.
-              </div>
-              <div className="border border-zinc-800 bg-zinc-950/70 p-2.5">
-                <strong className="text-zinc-100 block font-mono-tech mb-0.5">
-                  3. Enforces Strict SafeSearch
-                </strong>
-                Automatically forces Google, Bing, YouTube, and DuckDuckGo into strict SafeSearch
-                mode so explicit images or videos cannot appear in search results.
-              </div>
-              <div className="border border-zinc-800 bg-zinc-950/70 p-2.5">
-                <strong className="text-zinc-100 block font-mono-tech mb-0.5">
-                  4. Zero Battery Drain & Encrypted
-                </strong>
-                Uses DNS-over-TLS (Port 853) built into Android/iOS—no heavy VPN battery drain,
-                zero speed loss, and zero browsing logs.
-              </div>
-            </div>
-
-            <div className="text-[10px] font-mono-tech uppercase text-zinc-400 pt-1">
-              1-TAP SETUP — COPY HOSTNAME & OPEN OS PRIVATE DNS SETTINGS:
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleCopyAndOpenPrivateDns('family.cloudflare-dns.com')}
-                className="p-3 border border-zinc-700 hover:border-zinc-300 bg-zinc-950 text-left text-[11px] font-mono-tech text-zinc-200 cursor-pointer"
-              >
-                <div className="font-semibold text-zinc-100">
-                  1. Cloudflare 1.1.1.3 Family Shield (Recommended)
-                </div>
-                <div className="text-zinc-300 mt-0.5 select-all">family.cloudflare-dns.com</div>
-                <div className="text-[10px] text-zinc-400 mt-1">
-                  Blocks Malware + All Adult/Porn Domains → [Tap to Copy & Open DNS Settings]
-                </div>
-              </button>
+          {/* 1-Tap Easy Setup + Stronger Control Panel */}
+          <div className="bg-black border border-zinc-700 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2 border-b border-zinc-900 pb-2">
+              <span className="text-[11px] font-mono-tech font-bold uppercase text-zinc-100">
+                ⚡ EASY 1-TAP PRIVATE DNS SETUP (STRONGER CONTROL)
+              </span>
               <button
                 type="button"
                 onClick={() =>
-                  handleCopyAndOpenPrivateDns('adult-filter-dns.cleanbrowsing.org')
+                  onUpdatePurity((prev) => ({
+                    ...prev,
+                    dnsLockedByQr: !(prev.dnsLockedByQr ?? true),
+                  }))
                 }
-                className="p-3 border border-zinc-700 hover:border-zinc-300 bg-zinc-950 text-left text-[11px] font-mono-tech text-zinc-200 cursor-pointer"
+                className={`px-2 py-0.5 border text-[10px] font-mono-tech cursor-pointer ${
+                  purity.dnsLockedByQr ?? true
+                    ? 'border-zinc-200 bg-zinc-100 text-black font-bold'
+                    : 'border-zinc-700 text-zinc-400'
+                }`}
               >
-                <div className="font-semibold text-zinc-100">
-                  2. CleanBrowsing Strict Adult Filter + SafeSearch
-                </div>
-                <div className="text-zinc-300 mt-0.5 select-all">
-                  adult-filter-dns.cleanbrowsing.org
-                </div>
-                <div className="text-[10px] text-zinc-400 mt-1">
-                  Blocks Adult Sites + Forces SafeSearch → [Tap to Copy & Open DNS Settings]
-                </div>
+                {purity.dnsLockedByQr ?? true ? '🔒 QR Tamper Lock: ON' : 'Tamper Lock: OFF'}
               </button>
             </div>
 
-            <div className="border border-zinc-800 bg-zinc-950 p-2.5 text-[11px] font-mono-tech text-zinc-300 space-y-1">
-              <div className="font-semibold text-zinc-100">
-                How to Paste in 10 Seconds (Android / iOS / Router):
+            {/* 3-Step Visual Quick Guide */}
+            <div className="grid grid-cols-3 gap-1.5 text-center text-[10px] font-mono-tech">
+              <div className="border border-zinc-800 bg-zinc-950 p-2">
+                <div className="text-zinc-100 font-bold">STEP 1</div>
+                <div className="text-zinc-400 mt-0.5">Tap 1-Tap Setup Button below</div>
               </div>
-              <div>
-                • <strong>Android:</strong> Tap either button above (hostname is auto-copied) →
-                Settings → Network & Internet → <strong>Private DNS</strong> → select{' '}
-                <strong>"Private DNS provider hostname"</strong> → Paste → Save.
+              <div className="border border-zinc-800 bg-zinc-950 p-2">
+                <div className="text-zinc-100 font-bold">STEP 2</div>
+                <div className="text-zinc-400 mt-0.5">Tap “Private DNS Hostname”</div>
               </div>
-              <div>
-                • <strong>iOS / Wi-Fi:</strong> Settings → Wi-Fi → tap (i) → Configure DNS → Manual
-                → add <strong>1.1.1.3</strong> and <strong>1.0.0.3</strong>.
+              <div className="border border-zinc-800 bg-zinc-950 p-2">
+                <div className="text-zinc-100 font-bold">STEP 3</div>
+                <div className="text-zinc-400 mt-0.5">Paste & Save (100% Protected)</div>
               </div>
             </div>
 
+            {/* Primary 1-Tap Setup Buttons for the 3 Best Family/Adult-Block DNS Providers */}
+            <div className="space-y-2">
+              {[
+                {
+                  id: 'cloudflare',
+                  title: '⭐ 1. Cloudflare Family Shield (Fastest · Recommended)',
+                  host: 'family.cloudflare-dns.com',
+                  desc: 'Blocks all Adult/Porn sites + Malware across Chrome, Safari & all apps',
+                },
+                {
+                  id: 'cleanbrowsing',
+                  title: '🔒 2. CleanBrowsing Strict Adult + Proxy/VPN Block (Strongest)',
+                  host: 'adult-filter-dns.cleanbrowsing.org',
+                  desc: 'Blocks Adult sites + Forces SafeSearch on Google/YouTube + Blocks Proxies',
+                },
+                {
+                  id: 'adguard',
+                  title: '🛡️ 3. AdGuard Family DNS (Blocks Ads + Adult Content + SafeSearch)',
+                  host: 'family.adguard-dns.com',
+                  desc: 'Blocks Adult domains + System-wide Ads & Trackers + SafeSearch',
+                },
+              ].map((provider) => (
+                <div
+                  key={provider.id}
+                  className="border border-zinc-800 bg-zinc-950 p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-mono-tech font-semibold text-zinc-100">
+                      {provider.title}
+                    </div>
+                    <div className="text-[11px] font-mono-tech text-zinc-300 mt-0.5">
+                      Hostname: <strong className="text-white select-all">{provider.host}</strong>
+                    </div>
+                    <div className="text-[10px] text-zinc-400 mt-0.5">{provider.desc}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyAndOpenPrivateDns(provider.host)}
+                    className="px-3 py-2 bg-zinc-100 text-black font-mono-tech text-[11px] font-bold uppercase tracking-wider hover:bg-white cursor-pointer shrink-0"
+                  >
+                    📋 Copy & Open DNS →
+                  </button>
+                </div>
+              ))}
+            </div>
+
             {copiedHost && (
-              <div className="p-2.5 border border-zinc-300 bg-zinc-900 text-[11px] font-mono-tech text-zinc-100">
-                ✓ Copied <span className="underline font-semibold">{copiedHost}</span>! Now select
-                "Private DNS provider hostname" in your phone's Network Settings and paste it.
+              <div className="p-2.5 border border-zinc-200 bg-zinc-900 text-[11px] font-mono-tech text-zinc-100">
+                ✓ Auto-copied <strong>{copiedHost}</strong> & opened Network Settings! Tap{' '}
+                <strong>“Private DNS” → “Private DNS provider hostname”</strong> → Paste → Save.
+              </div>
+            )}
+
+            {dnsStatusMessage && (
+              <div className="p-2.5 border border-zinc-700 bg-zinc-950 text-[11px] font-mono-tech text-zinc-200">
+                {dnsStatusMessage}
               </div>
             )}
           </div>

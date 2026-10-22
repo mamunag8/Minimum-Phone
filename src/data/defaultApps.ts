@@ -1,17 +1,43 @@
 import type { AppItem, NotificationItem } from '../types/app';
 
 export const DEFAULT_APPS: AppItem[] = [
-  // Essential & Utility Apps (Instant / Zero-Dopamine)
+  // Core Essential Calling & Messaging Apps (Always Normal / Instant 0-Delay)
   {
     id: 'phone',
-    name: 'Phone',
+    name: 'Phone Calls',
     nameBn: 'ফোন কল',
     category: 'communication',
     tier: 'essential',
     dailyOpens: 4,
     dailyMinutesUsed: 12,
     pinnedProfiles: ['work', 'personal', 'sunset'],
+    nightQrLocked: false,
   },
+  {
+    id: 'messages',
+    name: 'Messages (SMS)',
+    nameBn: 'মেসেজ (SMS)',
+    category: 'communication',
+    tier: 'essential',
+    dailyOpens: 3,
+    dailyMinutesUsed: 5,
+    pinnedProfiles: ['work', 'personal', 'sunset'],
+    nightQrLocked: false,
+  },
+  {
+    id: 'whatsapp',
+    name: 'WhatsApp',
+    nameBn: 'হোয়াটসঅ্যাপ (WhatsApp)',
+    packageName: 'com.whatsapp',
+    category: 'communication',
+    tier: 'essential',
+    dailyOpens: 5,
+    dailyMinutesUsed: 14,
+    pinnedProfiles: ['work', 'personal', 'sunset'],
+    nightQrLocked: false,
+  },
+
+  // Essential & Utility Apps (Instant / Zero-Dopamine)
   {
     id: 'calendar',
     name: 'Calendar',
@@ -21,6 +47,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 3,
     dailyMinutesUsed: 6,
     pinnedProfiles: ['work'],
+    nightQrLocked: false,
   },
   {
     id: 'notes',
@@ -31,6 +58,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 5,
     dailyMinutesUsed: 24,
     pinnedProfiles: ['work', 'personal', 'sunset'],
+    nightQrLocked: false,
   },
   {
     id: 'maps',
@@ -41,6 +69,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 1,
     dailyMinutesUsed: 8,
     pinnedProfiles: ['personal'],
+    nightQrLocked: false,
   },
   {
     id: 'authenticator',
@@ -51,6 +80,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 6,
     dailyMinutesUsed: 2,
     pinnedProfiles: ['work'],
+    nightQrLocked: false,
   },
   {
     id: 'quran-reader',
@@ -61,6 +91,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 3,
     dailyMinutesUsed: 35,
     pinnedProfiles: ['personal', 'sunset'],
+    nightQrLocked: false,
   },
   {
     id: 'alarm',
@@ -71,6 +102,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 2,
     dailyMinutesUsed: 2,
     pinnedProfiles: ['sunset'],
+    nightQrLocked: false,
   },
   {
     id: 'calculator',
@@ -81,6 +113,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 2,
     dailyMinutesUsed: 3,
     pinnedProfiles: ['work'],
+    nightQrLocked: false,
   },
   {
     id: 'camera',
@@ -91,6 +124,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 1,
     dailyMinutesUsed: 4,
     pinnedProfiles: ['personal'],
+    nightQrLocked: false,
   },
   {
     id: 'banking',
@@ -101,6 +135,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 1,
     dailyMinutesUsed: 5,
     pinnedProfiles: [],
+    nightQrLocked: false,
   },
   {
     id: 'audible-books',
@@ -111,9 +146,10 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 1,
     dailyMinutesUsed: 20,
     pinnedProfiles: ['sunset'],
+    nightQrLocked: false,
   },
 
-  // Restricted / Dopamine-Loop Apps (Protected by Inhale + Calm Mind Trigger + Habit Wall)
+  // Restricted / Dopamine-Loop & Night-QR-Locked Apps (Browsers & Social Media)
   {
     id: 'instagram',
     name: 'Instagram',
@@ -123,6 +159,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 2,
     dailyMinutesUsed: 6,
     pinnedProfiles: [],
+    nightQrLocked: true,
   },
   {
     id: 'tiktok',
@@ -133,6 +170,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 0,
     dailyMinutesUsed: 0,
     pinnedProfiles: [],
+    nightQrLocked: true,
   },
   {
     id: 'youtube',
@@ -143,6 +181,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 1,
     dailyMinutesUsed: 5,
     pinnedProfiles: [],
+    nightQrLocked: true,
   },
   {
     id: 'facebook',
@@ -153,6 +192,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 1,
     dailyMinutesUsed: 3,
     pinnedProfiles: [],
+    nightQrLocked: true,
   },
   {
     id: 'x-twitter',
@@ -163,6 +203,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 1,
     dailyMinutesUsed: 4,
     pinnedProfiles: [],
+    nightQrLocked: true,
   },
   {
     id: 'reddit',
@@ -173,16 +214,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 0,
     dailyMinutesUsed: 0,
     pinnedProfiles: [],
-  },
-  {
-    id: 'whatsapp',
-    name: 'WhatsApp',
-    nameBn: 'হোয়াটসঅ্যাপ (WhatsApp)',
-    category: 'communication',
-    tier: 'restricted',
-    dailyOpens: 3,
-    dailyMinutesUsed: 9,
-    pinnedProfiles: ['personal'],
+    nightQrLocked: true,
   },
   {
     id: 'browser',
@@ -193,6 +225,7 @@ export const DEFAULT_APPS: AppItem[] = [
     dailyOpens: 1,
     dailyMinutesUsed: 5,
     pinnedProfiles: [],
+    nightQrLocked: true,
   },
 ];
 

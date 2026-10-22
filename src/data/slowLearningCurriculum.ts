@@ -653,3 +653,21 @@ export function getLessonsForTrack(track: SlowLearningTrack): SlowLearningLesson
   const filtered = SLOW_LEARNING_CURRICULUM.filter((item) => item.track === track);
   return filtered.length > 0 ? filtered : SLOW_LEARNING_CURRICULUM;
 }
+
+/**
+ * Returns a compact, easy-to-read 1-2 sentence micro-passage so the user can read
+ * and answer the comprehension quiz comfortably within 15–20 seconds.
+ */
+export function getShortLessonPassage(
+  lesson: SlowLearningLesson,
+  lang: LanguageCode
+): string {
+  const full = lesson.readingText[lang] || lesson.readingText.en || '';
+  const firstSentenceMatch = full.match(/^[^.!?।؟]+[.!?।؟]?/);
+  const firstSentence = firstSentenceMatch ? firstSentenceMatch[0].trim() : full.slice(0, 140);
+  if (firstSentence.length <= 165) {
+    return firstSentence;
+  }
+  return firstSentence.slice(0, 160).trim() + '…';
+}
+

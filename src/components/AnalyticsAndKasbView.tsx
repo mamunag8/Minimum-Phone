@@ -20,7 +20,10 @@ import {
   HOW_TO_USE_SUBTITLE,
   HOW_TO_USE_TITLE,
 } from '../data/howToUseGuide';
-import { getLessonsForTrack } from '../data/slowLearningCurriculum';
+import {
+  getLessonsForTrack,
+  getShortLessonPassage,
+} from '../data/slowLearningCurriculum';
 import { SUPPORTED_LANGUAGES, TRANSLATIONS } from '../i18n/translations';
 import { NativeBridge } from '../services/nativeBridge';
 import {
@@ -119,6 +122,9 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
 
   // Active Apps Manager local search, staged draft & explicit Save button state
   const [appFilterQuery, setAppFilterQuery] = useState<string>('');
+  const [appQuickFilter, setAppQuickFilter] = useState<
+    'all' | 'home' | 'normal' | 'quiz' | 'night-qr'
+  >('all');
   const [newCustomAppName, setNewCustomAppName] = useState<string>('');
   const [newCustomAppTier, setNewCustomAppTier] = useState<AppFrictionTier>('restricted');
   const [draftApps, setDraftApps] = useState<AppItem[]>(apps);
@@ -126,7 +132,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   const [savedAppsFeedback, setSavedAppsFeedback] = useState<string | null>(null);
 
   // Background Safe App List & Auto-Clean Engine State
-  const defaultSafeIds = ['phone', 'calendar', 'notes', 'maps', 'authenticator', 'whatsapp'];
+  const defaultSafeIds = ['phone', 'messages', 'whatsapp', 'calendar', 'notes', 'maps', 'authenticator'];
   const [draftSafeAppIds, setDraftSafeAppIds] = useState<string[]>(
     vault.backgroundSafeAppIds || defaultSafeIds
   );
@@ -137,10 +143,10 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
     setDraftApps(apps);
   }, [apps]);
 
-  // Slow Learning Practice Modal State
+  // Slow Learning Practice Modal State (Compact 12s Read -> Answer within 20s)
   const [practiceModalOpen, setPracticeModalOpen] = useState<boolean>(false);
   const [practiceSecondsLeft, setPracticeSecondsLeft] = useState<number>(
-    slowLearning.readingDurationSeconds || 30
+    Math.min(15, slowLearning.readingDurationSeconds || 12)
   );
   const [practiceSelectedOption, setPracticeSelectedOption] = useState<number | null>(null);
   const [practicePassed, setPracticePassed] = useState<boolean>(false);
@@ -206,7 +212,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   };
 
   const handleOpenPracticeQuiz = () => {
-    setPracticeSecondsLeft(slowLearning.readingDurationSeconds || 30);
+    setPracticeSecondsLeft(Math.min(15, slowLearning.readingDurationSeconds || 12));
     setPracticeSelectedOption(null);
     setPracticePassed(false);
     setPracticeErrorMsg(null);
@@ -231,14 +237,38 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
       setPracticePassed(false);
       setPracticeErrorMsg(
         lang === 'bn'
-          ? 'উত্তরটি সঠিক নয়। অনুচ্ছেদটি আরও ১০ সেকেন্ড মনোযোগ দিয়ে পড়ে আবার চেষ্টা করুন।'
-          : 'Incorrect answer. Re-read the passage for 10 seconds and try again.'
+          ? 'সঠিক নয়। ৫ সেকেন্ড পড়ে আবার সঠিক উত্তরটি ট্যাপ করুন।'
+          : 'Not quite right. Re-read for 5 seconds and tap the correct answer.'
       );
-      setPracticeSecondsLeft(10);
+      setPracticeSecondsLeft(5);
     }
   };
 
+  const isNightLockedByDefault = (a: AppItem) =>
+    a.nightQrLocked ??
+    (a.category === 'browser' ||
+      a.category === 'social' ||
+      a.category === 'entertainment' ||
+      a.id === 'browser' ||
+      a.id === 'instagram' ||
+      a.id === 'facebook' ||
+      a.id === 'youtube' ||
+      a.id === 'tiktok' ||
+      a.id === 'x-twitter' ||
+      a.id === 'reddit');
+
   const filteredApps = draftApps.filter((a) => {
+    if (appQuickFilter === 'home' && !a.pinnedProfiles.includes(homeProfile)) return false;
+    if (
+      appQuickFilter === 'normal' &&
+      a.tier !== 'essential' &&
+      a.tier !== 'utility'
+    ) {
+      return false;
+    }
+    if (appQuickFilter === 'quiz' && a.tier !== 'restricted') return false;
+    if (appQuickFilter === 'night-qr' && !isNightLockedByDefault(a)) return false;
+
     if (!appFilterQuery.trim()) return true;
     const q = appFilterQuery.trim().toLowerCase();
     return (
@@ -273,6 +303,69 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
     );
     setHasUnsavedAppChanges(true);
     setSavedAppsFeedback(null);
+  };
+
+  const handleStageToggleNightQr = (appId: string) => {
+    setDraftApps((prev) =>
+      prev.map((a) => {
+        if (a.id !== appId) return a;
+        const currentNightLock = isNightLockedByDefault(a);
+        return { ...a, nightQrLocked: !currentNightLock };
+      })
+    );
+    setHasUnsavedAppChanges(true);
+    setSavedAppsFeedback(null);
+  };
+
+  const handleMakeCallsSmsWhatsAppNormal = () => {
+    const updated = draftApps.map((a) => {
+      const lower = a.name.toLowerCase();
+      if (
+        a.id === 'phone' ||
+        a.id === 'messages' ||
+        a.id === 'whatsapp' ||
+        lower.includes('whatsapp') ||
+        lower.includes('phone') ||
+        lower.includes('message')
+      ) {
+        return {
+          ...a,
+          tier: 'essential' as AppFrictionTier,
+          nightQrLocked: false,
+          pinnedProfiles: ['work', 'personal', 'sunset'] as HomeProfileType[],
+        };
+      }
+      return a;
+    });
+    setDraftApps(updated);
+    onSaveAppsBatch?.(updated);
+    setHasUnsavedAppChanges(false);
+    setSavedAppsFeedback(
+      '✓ Phone Calls, Messages (SMS), and WhatsApp are now set as Normal Calling/Messaging Apps & Pinned on Home!'
+    );
+  };
+
+  const handleLockAllSocialAndBrowsersAtNight = () => {
+    const updated = draftApps.map((a) => {
+      if (
+        a.category === 'browser' ||
+        a.category === 'social' ||
+        a.category === 'entertainment'
+      ) {
+        return {
+          ...a,
+          tier: 'restricted' as AppFrictionTier,
+          nightQrLocked: true,
+        };
+      }
+      return a;
+    });
+    setDraftApps(updated);
+    onSaveAppsBatch?.(updated);
+    setHasUnsavedAppChanges(false);
+    setSavedAppsFeedback(
+      '🌙 All Browsers & Social Media apps now require Mandatory Emergency QR Scan at night (10 PM – 6 AM)!'
+    );
   };
 
   const handleSaveAppsSelection = () => {
@@ -341,53 +434,109 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-10">
-      {/* TOP BAR: SETTINGS & IMPACT REPORT HEADER + LOCK SETTINGS (15S QUIZ GATE) + HOW TO USE GUIDE BUTTON */}
-      <div className="border border-zinc-700 bg-zinc-950 p-4 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div className="w-full max-w-full overflow-x-hidden space-y-5 pb-10">
+      {/* TOP BAR: SETTINGS & IMPACT REPORT HEADER + QUICK OS HARDWARE TOGGLES (WIFI, BT, DNS, ETC.) */}
+      <div className="border border-zinc-700 bg-zinc-950 p-3.5 sm:p-4 space-y-3">
+        <div className="flex flex-col gap-2.5">
           <div>
             <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
-              IMPACT REPORT, REFER FRIENDS & ALL PHONE/LAUNCHER SETTINGS (15S QUIZ GATED)
+              NATIVE OS CONTROL CENTER // REPORT & SETTINGS
             </span>
             <h2 className="text-base font-mono-tech font-semibold text-zinc-100 mt-0.5">
               {t.settingsMenuTitle}
             </h2>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {onLockSettingsNow && (
               <button
                 type="button"
                 onClick={onLockSettingsNow}
-                className="px-3 py-2.5 border border-zinc-500 text-zinc-200 font-mono-tech text-xs uppercase tracking-wider hover:bg-zinc-900 cursor-pointer"
+                className="w-full py-2.5 px-3 border border-zinc-500 text-zinc-200 font-mono-tech text-xs uppercase tracking-wider hover:bg-zinc-900 cursor-pointer text-center"
               >
-                🔒 Lock Settings (15s Quiz)
+                🔒 Lock Settings (20s Quiz)
               </button>
             )}
             <button
               type="button"
               onClick={() => setShowHowToGuideModal(true)}
-              className="px-4 py-2.5 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer shrink-0"
+              className="w-full py-2.5 px-3 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer text-center"
             >
               {t.howToUseGuideBtn}
             </button>
           </div>
         </div>
 
+        {/* EASY 1-TAP ACCESS TO WI-FI, BLUETOOTH, PRIVATE DNS, DISPLAY, SOUND & ALL SETTINGS */}
+        <div className="pt-2.5 border-t border-zinc-800 space-y-2">
+          <div className="flex items-center justify-between text-[10px] font-mono-tech uppercase tracking-wider text-zinc-400">
+            <span>⚡ EASY 1-TAP PHONE SETTINGS (WI-FI · BT · DNS · DISPLAY · SOUND):</span>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+            {(
+              [
+                { target: 'wifi', label: '📶 Wi-Fi' },
+                { target: 'bluetooth', label: '🦷 Bluetooth' },
+                { target: 'dns', label: '🌐 Private DNS' },
+                { target: 'data', label: '📱 Mobile Data' },
+                { target: 'display', label: '🔆 Display' },
+                { target: 'sound', label: '🔊 Sound' },
+                { target: 'battery', label: '🔋 Battery' },
+                { target: 'main', label: '⚙️ All Settings' },
+              ] as const
+            ).map((btn) => (
+              <button
+                key={btn.target}
+                type="button"
+                onClick={() => handleOpenPhoneSetting(btn.target, btn.label)}
+                className="py-2.5 px-2 border border-zinc-700 bg-black hover:border-zinc-300 text-center text-xs font-mono-tech text-zinc-100 font-medium transition cursor-pointer"
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 1-Tap Easy Private Safe DNS Copy + Open Button */}
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard?.writeText('family.cloudflare-dns.com');
+              } catch {
+                // ignore
+              }
+              setNativeStatusLog(
+                'Copied family.cloudflare-dns.com & opened Network/DNS Settings! Paste into Private DNS Hostname.'
+              );
+              await openPhoneMainSetting('dns');
+            }}
+            className="w-full py-2.5 px-3 border border-zinc-400 bg-zinc-900 text-zinc-100 font-mono-tech text-xs font-semibold hover:bg-zinc-800 cursor-pointer text-center"
+          >
+            🛡️ 1-Tap Set Private Safe DNS (Copy family.cloudflare-dns.com & Open DNS)
+          </button>
+
+          {nativeStatusLog && (
+            <div className="p-2 border border-zinc-700 bg-black text-[11px] font-mono-tech text-zinc-200">
+              ✓ {nativeStatusLog}
+            </div>
+          )}
+        </div>
+
         {/* SUB-VIEW SWITCHER: IMPACT REPORT & REFERRAL VS ALL SETTINGS */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-zinc-800">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-2 border-t border-zinc-800">
           {(
             [
               {
                 id: 'both',
-                label: '📑 Full View (Impact Report + All Settings)',
+                label: '📑 Full View (Report + Settings)',
               },
               {
                 id: 'report',
-                label: '📊 Impact Graphics, Time Saved & Refer Friends',
+                label: '📊 Impact Graphics & Refer Friends',
               },
               {
                 id: 'settings',
-                label: '⚙️ All Phone, Apps & Protection Settings',
+                label: '⚙️ App List & Protection Settings',
               },
             ] as const
           ).map((tab) => (
@@ -395,7 +544,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setSettingsSubTab(tab.id)}
-              className={`py-2.5 px-3 border text-xs font-mono-tech text-left sm:text-center cursor-pointer transition ${
+              className={`py-2 px-2.5 border text-xs font-mono-tech text-center cursor-pointer transition ${
                 settingsSubTab === tab.id
                   ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
                   : 'border-zinc-800 bg-black text-zinc-300 hover:border-zinc-600'
@@ -422,51 +571,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
       )}
 
       {(settingsSubTab === 'both' || settingsSubTab === 'settings') && (
-        <div className="space-y-6">
-          {/* 1. PHONE MAIN SETTINGS BRIDGE (DIRECT ANDROID SYSTEM SETTINGS ACCESS) */}
-      <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-3.5">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
-              NATIVE OS HARDWARE BRIDGE // ANDROID SYSTEM SETTINGS
-            </div>
-            <h3 className="text-sm font-mono-tech font-semibold text-zinc-100 mt-0.5">
-              {t.phoneMainSettingsTitle}
-            </h3>
-            <p className="text-xs text-zinc-400 mt-0.5">{t.phoneMainSettingsSubtitle}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {(
-            [
-              { target: 'main', label: t.btnMainPhoneSettings },
-              { target: 'wifi', label: t.btnWifiSettings },
-              { target: 'bluetooth', label: t.btnBluetoothSettings },
-              { target: 'display', label: t.btnDisplaySettings },
-              { target: 'sound', label: t.btnSoundSettings },
-              { target: 'apps', label: t.btnAppsSettings },
-              { target: 'dns', label: t.btnDnsSettings },
-              { target: 'home', label: t.btnHomeLauncherSettings },
-            ] as const
-          ).map((btn) => (
-            <button
-              key={btn.target}
-              type="button"
-              onClick={() => handleOpenPhoneSetting(btn.target, btn.label)}
-              className="py-2.5 px-3 border border-zinc-800 bg-black hover:border-zinc-500 hover:bg-zinc-900 text-left text-xs font-mono-tech text-zinc-200 transition cursor-pointer"
-            >
-              {btn.label}
-            </button>
-          ))}
-        </div>
-
-        {nativeStatusLog && (
-          <div className="p-2 border border-zinc-800 bg-black text-[11px] font-mono-tech text-zinc-300">
-            ✓ {nativeStatusLog}
-          </div>
-        )}
-      </div>
+        <div className="space-y-5">
 
       {/* 2. LANGUAGE SWITCHER (FULL APP TRANSLATION: ENGLISH, BANGLA, ARABIC, URDU, INDONESIAN) */}
       <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-3">
@@ -692,13 +797,13 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
           ))}
         </div>
 
-        {/* Choose Mandatory Reading Timer Duration */}
-        <div className="flex items-center justify-between pt-2 border-t border-zinc-900">
-          <span className="text-xs font-mono-tech text-zinc-400">
-            Mandatory Reading Timer Before Quiz:
+        {/* Choose Mandatory Reading Timer Duration (Compact 10s-15s so total quiz <= 20s) */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-900">
+          <span className="text-xs font-mono-tech text-zinc-300">
+            Quick Read Timer (Answer within 20s):
           </span>
           <div className="flex gap-1.5">
-            {[15, 30, 45].map((sec) => (
+            {[10, 12, 15, 20].map((sec) => (
               <button
                 key={sec}
                 type="button"
@@ -725,37 +830,59 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
           onClick={handleOpenPracticeQuiz}
           className="w-full py-3 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer"
         >
-          🎓 Practice {slowLearning.readingDurationSeconds}s Read + Play Quiz Lesson Now
+          🎓 Practice Quick 20s Micro-Learning & Quiz Now
         </button>
       </div>
 
-      {/* 5. ACTIVE APPS & HOME SCREEN MANAGER */}
-      <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-zinc-900 pb-3">
-          <div>
-            <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
-              CUSTOMIZE HOME SCREEN & APP RESTRICTIONS
+      {/* 5. EASY APP LIST, CALLING/WHATSAPP & SLEEPING-TIME NIGHT QR MANAGER */}
+      <div className="border-2 border-zinc-300 bg-zinc-950 p-4 space-y-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-zinc-800 pb-3">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
+              EASY APP LIST & SLEEPING-TIME NIGHT QR LOCK
             </span>
             <h3 className="text-sm font-mono-tech font-semibold text-zinc-100 mt-0.5">
               {t.activeAppsManagerTitle}
             </h3>
-            <p className="text-xs text-zinc-400 mt-0.5">{t.activeAppsManagerSubtitle}</p>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              1-Tap control: Set apps as <strong>⚡ Normal</strong> (Calls, SMS, WhatsApp),{' '}
+              <strong>📚 20s Quiz</strong>, or <strong>🌙 Night QR Lock</strong> (mandatory
+              emergency QR scan during sleeping hours 10 PM – 6 AM).
+            </p>
           </div>
           <button
             type="button"
             onClick={onRefreshInstalledApps}
-            className="px-3 py-1.5 border border-zinc-700 text-xs font-mono-tech text-zinc-200 hover:bg-zinc-900 cursor-pointer shrink-0"
+            className="px-3 py-2 border border-zinc-600 text-xs font-mono-tech text-zinc-100 hover:bg-zinc-900 cursor-pointer"
           >
             ↻ Sync Phone Apps ({apps.length})
           </button>
         </div>
 
-        {/* Select Home Profile to Pin Apps For */}
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-mono-tech text-zinc-400">
-            Active Profile ({pinnedInCurrentProfileCount}/7 Pinned):
+        {/* 1-TAP SMART PRESETS FOR CALLS/WHATSAPP & NIGHT SLEEP LOCK */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={handleMakeCallsSmsWhatsAppNormal}
+            className="py-2.5 px-3 border border-zinc-400 bg-zinc-900 text-zinc-100 font-mono-tech text-xs font-semibold text-left hover:bg-zinc-800 cursor-pointer"
+          >
+            📞 Set Phone, SMS & WhatsApp as Normal + Pinned on Home
+          </button>
+          <button
+            type="button"
+            onClick={handleLockAllSocialAndBrowsersAtNight}
+            className="py-2.5 px-3 border border-zinc-400 bg-zinc-900 text-zinc-100 font-mono-tech text-xs font-semibold text-left hover:bg-zinc-800 cursor-pointer"
+          >
+            🌙 Lock Browsers & Social Media at Night (Emergency QR Required)
+          </button>
+        </div>
+
+        {/* Select Home Profile + Quick Category Filter Pills */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <span className="text-xs font-mono-tech text-zinc-300">
+            Home Profile ({pinnedInCurrentProfileCount} on Home):
           </span>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1">
             {(
               [
                 { id: 'work', label: t.profileWork },
@@ -767,7 +894,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                 key={prof.id}
                 type="button"
                 onClick={() => onChangeHomeProfile(prof.id)}
-                className={`px-3 py-1 border text-xs font-mono-tech cursor-pointer ${
+                className={`px-2.5 py-1 border text-xs font-mono-tech cursor-pointer ${
                   homeProfile === prof.id
                     ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                     : 'border-zinc-800 text-zinc-400'
@@ -779,73 +906,134 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
           </div>
         </div>
 
+        {/* Easy 1-Tap Category Filter Tabs */}
+        <div className="grid grid-cols-5 gap-1 text-[10px] font-mono-tech">
+          {(
+            [
+              { id: 'all', label: `All (${draftApps.length})` },
+              { id: 'home', label: '★ Home' },
+              { id: 'normal', label: '⚡ Normal' },
+              { id: 'quiz', label: '📚 20s Quiz' },
+              { id: 'night-qr', label: '🌙 Night QR' },
+            ] as const
+          ).map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setAppQuickFilter(f.id)}
+              className={`py-2 px-1 border text-center cursor-pointer truncate ${
+                appQuickFilter === f.id
+                  ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                  : 'border-zinc-800 bg-black text-zinc-400'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
         {/* Filter Apps Input */}
         <input
           type="text"
           value={appFilterQuery}
           onChange={(e) => setAppFilterQuery(e.target.value)}
-          placeholder="Filter apps by name to Pin or Lock..."
-          className="w-full bg-black border border-zinc-800 px-3 py-2 text-xs font-mono-tech text-zinc-100 focus:outline-none focus:border-zinc-500"
+          placeholder="Search app name (e.g. WhatsApp, YouTube, Chrome)..."
+          className="w-full bg-black border border-zinc-700 px-3 py-2 text-xs font-mono-tech text-zinc-100 focus:outline-none focus:border-zinc-300"
         />
 
-        {/* Scrollable Active Apps List */}
-        <div className="max-h-72 overflow-y-auto divide-y divide-zinc-900 border border-zinc-900 bg-black">
+        {/* Scrollable Easy App Cards */}
+        <div className="max-h-80 overflow-y-auto divide-y divide-zinc-800 border border-zinc-800 bg-black">
           {filteredApps.map((app) => {
             const isPinned = app.pinnedProfiles.includes(homeProfile);
+            const isNightLocked = isNightLockedByDefault(app);
+            const isNormal = app.tier === 'essential' || app.tier === 'utility';
             return (
-              <div
-                key={app.id}
-                className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-              >
-                <div>
-                  <div className="text-xs font-medium text-zinc-100">
-                    {lang === 'bn' && app.nameBn ? `${app.nameBn} (${app.name})` : app.name}
+              <div key={app.id} className="p-3 space-y-2">
+                {/* Row 1: App Name + Home Toggle + Night QR Toggle */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-zinc-100 truncate">
+                      {lang === 'bn' && app.nameBn ? `${app.nameBn} (${app.name})` : app.name}
+                    </div>
+                    <div className="text-[10px] font-mono-tech text-zinc-400">
+                      {app.category.toUpperCase()} ·{' '}
+                      {isNormal ? '⚡ Normal App' : '📚 20s Quiz App'}
+                      {isNightLocked ? ' · 🌙 Night QR Lock' : ''}
+                    </div>
                   </div>
-                  <div className="text-[10px] font-mono-tech text-zinc-500">
-                    {app.category.toUpperCase()} · {app.dailyOpens} opens today
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleStageTogglePinApp(app.id, homeProfile)}
+                      className={`px-2 py-1 border text-[10px] font-mono-tech cursor-pointer ${
+                        isPinned
+                          ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                          : 'border-zinc-700 text-zinc-300'
+                      }`}
+                    >
+                      {isPinned ? '★ On Home' : '+ Home'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleStageToggleNightQr(app.id)}
+                      className={`px-2 py-1 border text-[10px] font-mono-tech cursor-pointer ${
+                        isNightLocked
+                          ? 'border-zinc-200 bg-zinc-800 text-white font-bold'
+                          : 'border-zinc-800 text-zinc-500'
+                      }`}
+                      title="Require Emergency Physical QR Code scan at night (10 PM - 6 AM)"
+                    >
+                      {isNightLocked ? '🌙 Night QR: ON' : '🌙 Night: OFF'}
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {/* Pin to Home Toggle */}
+                {/* Row 2: 3 Simple Mode Buttons */}
+                <div className="grid grid-cols-3 gap-1.5">
                   <button
                     type="button"
-                    onClick={() => handleStageTogglePinApp(app.id, homeProfile)}
-                    className={`px-2.5 py-1 border text-[10px] font-mono-tech cursor-pointer ${
-                      isPinned
-                        ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
-                        : 'border-zinc-800 text-zinc-400 hover:border-zinc-600'
+                    onClick={() =>
+                      handleStageChangeAppTier(
+                        app.id,
+                        app.id === 'phone' || app.id === 'messages' || app.id === 'whatsapp'
+                          ? 'essential'
+                          : 'utility'
+                      )
+                    }
+                    className={`py-1.5 px-2 border text-[10px] font-mono-tech text-center cursor-pointer ${
+                      isNormal
+                        ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                        : 'border-zinc-800 text-zinc-400'
                     }`}
                   >
-                    {isPinned ? '★ Pinned Home' : '+ Pin Home'}
+                    ⚡ Normal (Instant)
                   </button>
 
-                  {/* Tier Selector: Instant vs 30s Quiz Gate vs Blocked */}
-                  {(
-                    [
-                      { id: 'utility', label: 'Instant' },
-                      { id: 'restricted', label: '30s Quiz Gate' },
-                      { id: 'adult-blocked', label: 'Blocked' },
-                    ] as const
-                  ).map((tierBtn) => {
-                    const active =
-                      app.tier === tierBtn.id ||
-                      (tierBtn.id === 'utility' && app.tier === 'essential');
-                    return (
-                      <button
-                        key={tierBtn.id}
-                        type="button"
-                        onClick={() => handleStageChangeAppTier(app.id, tierBtn.id)}
-                        className={`px-2 py-1 border text-[10px] font-mono-tech cursor-pointer ${
-                          active
-                            ? 'border-zinc-300 bg-zinc-800 text-white font-semibold'
-                            : 'border-zinc-900 text-zinc-500 hover:text-zinc-300'
-                        }`}
-                      >
-                        {tierBtn.label}
-                      </button>
-                    );
-                  })}
+                  <button
+                    type="button"
+                    onClick={() => handleStageChangeAppTier(app.id, 'restricted')}
+                    className={`py-1.5 px-2 border text-[10px] font-mono-tech text-center cursor-pointer ${
+                      app.tier === 'restricted'
+                        ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                        : 'border-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    📚 20s Quiz Gate
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleStageChangeAppTier(app.id, 'adult-blocked')}
+                    className={`py-1.5 px-2 border text-[10px] font-mono-tech text-center cursor-pointer ${
+                      app.tier === 'adult-blocked'
+                        ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                        : 'border-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    🚫 Block App
+                  </button>
                 </div>
               </div>
             );
@@ -858,10 +1046,10 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
             <button
               type="button"
               onClick={handleSaveAppsSelection}
-              className="flex-1 py-3 px-4 bg-zinc-100 text-black font-mono-tech text-xs font-semibold uppercase tracking-wider hover:bg-white cursor-pointer"
+              className="flex-1 py-3 px-4 bg-zinc-100 text-black font-mono-tech text-xs font-bold uppercase tracking-wider hover:bg-white cursor-pointer"
             >
-              💾 Save Active Apps & Home Screen Selection
-              {hasUnsavedAppChanges ? ' (Unsaved Changes *)' : ''}
+              💾 Save App List & Night Lock Settings
+              {hasUnsavedAppChanges ? ' *' : ''}
             </button>
             {hasUnsavedAppChanges && (
               <button
@@ -869,7 +1057,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                 onClick={handleDiscardAppsChanges}
                 className="py-3 px-4 border border-zinc-700 text-xs font-mono-tech text-zinc-300 hover:bg-zinc-900 cursor-pointer"
               >
-                ↺ Discard Changes
+                ↺ Discard
               </button>
             )}
           </div>
@@ -1132,15 +1320,15 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
           </button>
         </div>
 
-        {/* Night Browser QR Lock */}
-        <div className="flex items-center justify-between py-2 border-b border-zinc-900">
-          <div className="pr-3">
+        {/* Night Browser & Social Media Emergency QR Lock */}
+        <div className="flex items-center justify-between gap-2 py-2 border-b border-zinc-900">
+          <div className="min-w-0 flex-1 pr-2">
             <div className="text-xs font-semibold text-zinc-100">
-              🌙 Mandatory QR Code Scan for Any Browser at Night
+              🌙 Mandatory Emergency QR Scan at Night (Browser & Social Apps)
             </div>
             <div className="text-[11px] text-zinc-400 font-mono-tech mt-0.5">
-              Without physically scanning your QR code, no browser can be used at night (10 PM – 6
-              AM)
+              During sleeping hours (10 PM – 6 AM), Browsers & Social Media require scanning your
+              physical Emergency QR code
             </div>
           </div>
           <button
@@ -1151,7 +1339,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                 nightBrowserQrRequired: !(prev.nightBrowserQrRequired ?? true),
               }))
             }
-            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer shrink-0 ${
               vault.nightBrowserQrRequired ?? true
                 ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                 : 'border-zinc-700 text-zinc-400'
@@ -1170,8 +1358,8 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
             {(
               [
                 { id: 'easy', label: 'EASY (6-Char)' },
-                { id: 'medium', label: 'MEDIUM (+Checksum)' },
-                { id: 'hard', label: 'HARD (Crypto + Math)' },
+                { id: 'medium', label: 'MEDIUM (+Check)' },
+                { id: 'hard', label: 'HARD (Crypto)' },
               ] as const
             ).map((lvl) => (
               <button
@@ -1183,7 +1371,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                     qrComplexity: lvl.id as QrComplexityLevel,
                   }))
                 }
-                className={`py-2 px-2 border text-xs font-mono-tech cursor-pointer ${
+                className={`py-2 px-1.5 border text-[11px] font-mono-tech cursor-pointer ${
                   (vault.qrComplexity || 'hard') === lvl.id
                     ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                     : 'border-zinc-800 text-zinc-400'
@@ -1197,24 +1385,24 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
       </div>
 
       {/* 6. DISPLAY, SYSTEM GRAYSCALE & DEFAULT HABIT-WALL */}
-      <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
+      <div className="border border-zinc-800 bg-zinc-950/60 p-4 sm:p-5 space-y-4">
         <div className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
           ANTI-DOPAMINE VISUAL ENGINE
         </div>
 
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1 pr-2">
             <div className="text-xs font-medium text-zinc-200">{t.grayscaleToggleLabel}</div>
             <div className="text-[11px] font-mono-tech text-zinc-500">
               {platform === 'android'
-                ? 'Uses Android ZenDeviceEffects.setShouldDisplayGrayscale(true)'
-                : 'Uses iOS Accessibility Grayscale Filter + Focus Automation'}
+                ? 'Native Android OS Monochrome Display Filter'
+                : 'iOS Accessibility Grayscale Filter + Focus Mode'}
             </div>
           </div>
           <button
             type="button"
             onClick={onToggleGrayscale}
-            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer shrink-0 ${
               grayscaleEnabled
                 ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                 : 'border-zinc-800 text-zinc-400'
@@ -1635,14 +1823,14 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
       )}
 
       {/* =====================================================================
-          MODAL 2: INTERACTIVE 30-SEC SLOW LEARNING & QUIZ PRACTICE MODAL
+          MODAL 2: COMPACT 20-SEC SLOW LEARNING & QUIZ PRACTICE MODAL
          ===================================================================== */}
       {practiceModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
-          <div className="max-w-md w-full border border-zinc-700 bg-zinc-950 p-5 space-y-4 my-auto">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-3 overflow-y-auto">
+          <div className="max-w-md w-full border border-zinc-700 bg-zinc-950 p-4 space-y-3 my-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
               <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
-                SLOW LEARNING HUB // {slowLearning.readingDurationSeconds}S READ + QUIZ
+                20-SEC QUICK QUIZ // {Math.min(15, slowLearning.readingDurationSeconds || 12)}S READ
               </span>
               <button
                 type="button"
@@ -1654,22 +1842,22 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
             </div>
 
             <div>
-              <h4 className="text-sm font-mono-tech font-semibold text-zinc-100">
+              <h4 className="text-xs font-mono-tech font-semibold text-zinc-100">
                 {activePracticeLesson.title[lang]}
               </h4>
               {activePracticeLesson.arabicHeader && (
                 <p
                   dir="rtl"
-                  className="font-arabic text-base text-zinc-200 mt-2 bg-black border border-zinc-900 px-3 py-2 leading-relaxed"
+                  className="font-arabic text-sm text-zinc-200 mt-1.5 bg-black border border-zinc-900 px-2.5 py-1.5 leading-snug"
                 >
                   {activePracticeLesson.arabicHeader}
                 </p>
               )}
             </div>
 
-            <div className="bg-black border border-zinc-800 p-3.5 text-xs sm:text-sm text-zinc-200 leading-relaxed space-y-2">
-              <p>{activePracticeLesson.readingText[lang]}</p>
-              <div className="pt-2 border-t border-zinc-900 text-xs font-mono-tech text-zinc-300">
+            <div className="bg-black border border-zinc-800 p-2.5 text-xs text-zinc-200 leading-snug space-y-1.5">
+              <p>{getShortLessonPassage(activePracticeLesson, lang)}</p>
+              <div className="pt-1.5 border-t border-zinc-900 text-[11px] font-mono-tech text-zinc-300">
                 ★ {activePracticeLesson.keyTakeaway[lang]}
               </div>
             </div>
@@ -1678,8 +1866,8 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
             <div className="flex items-center justify-between text-xs font-mono-tech">
               <span className="text-zinc-300">
                 {practiceSecondsLeft > 0
-                  ? `${t.read30sCountdownText} ${practiceSecondsLeft}s...`
-                  : t.quizReadyText}
+                  ? `⏳ Read (${practiceSecondsLeft}s)...`
+                  : '✓ Quiz Ready — Tap Answer:'}
               </span>
               <button
                 type="button"
@@ -1688,7 +1876,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                     ...prev,
                     currentLessonIndex: prev.currentLessonIndex + 1,
                   }));
-                  setPracticeSecondsLeft(slowLearning.readingDurationSeconds || 30);
+                  setPracticeSecondsLeft(Math.min(15, slowLearning.readingDurationSeconds || 12));
                   setPracticeSelectedOption(null);
                   setPracticePassed(false);
                   setPracticeErrorMsg(null);
@@ -1701,13 +1889,13 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
 
             {/* Quiz */}
             <div
-              className={`border p-3.5 space-y-2 ${
+              className={`border p-2.5 space-y-1.5 ${
                 practiceSecondsLeft > 0
                   ? 'border-zinc-900 bg-black/40 opacity-60'
                   : 'border-zinc-700 bg-black'
               }`}
             >
-              <p className="text-xs font-medium text-zinc-100">
+              <p className="text-xs font-medium text-zinc-100 leading-snug">
                 Q: {activePracticeLesson.quizQuestion[lang]}
               </p>
               <div className="space-y-1.5">
@@ -1717,7 +1905,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                     type="button"
                     disabled={practiceSecondsLeft > 0}
                     onClick={() => handleSelectPracticeQuizAnswer(idx)}
-                    className={`w-full text-left p-2.5 border text-xs font-mono-tech ${
+                    className={`w-full text-left px-2.5 py-2 border text-xs font-mono-tech leading-snug ${
                       practiceSecondsLeft > 0
                         ? 'border-zinc-900 text-zinc-600 cursor-not-allowed'
                         : practiceSelectedOption === idx &&
