@@ -433,8 +433,8 @@ export const CALM_MIND_TRIGGERS: CalmTrigger[] = [
 
 export interface ReadingPassage {
   page: number;
-  title: { en: string; bn: string };
-  content: { en: string; bn: string };
+  title: { en: string; bn: string; ar: string; ur: string; id: string };
+  content: { en: string; bn: string; ar: string; ur: string; id: string };
 }
 
 export const FOCUS_READER_PASSAGES: ReadingPassage[] = [
@@ -443,10 +443,16 @@ export const FOCUS_READER_PASSAGES: ReadingPassage[] = [
     title: {
       en: 'Page 1/3: The Anatomy of an Impulse',
       bn: 'পৃষ্ঠা ১/৩: তাৎক্ষণিক তাড়নার স্বরূপ',
+      ar: 'صفحة ١/٣: تشريح الاندفاع اللحظي',
+      ur: 'صفحہ 1/3: فوری خواہش کی حقیقت',
+      id: 'Halaman 1/3: Anatomi Dorongan Impulsif',
     },
     content: {
       en: 'An urge to check a screen or chase artificial stimulation is like an ocean wave: it rises rapidly, peaks for 60 to 90 seconds, and then naturally subsides if you do not feed it. When you pause and breathe, you allow your prefrontal cortex to regain authority over the limbic dopamine loop.',
       bn: 'ফোনের স্ক্রিনে ডুবে যাওয়ার তাড়না সমুদ্রের ঢেউয়ের মতো—এটি দ্রুত ওঠে, ৬০ থেকে ৯০ সেকেন্ড স্থায়ী হয় এবং আপনি যদি এতে সাড়া না দেন তবে তা আপনাআপনি শান্ত হয়ে যায়। একটু থেমে শ্বাস নিলে মস্তিষ্কের যৌক্তিক অংশ পুনরায় নিয়ন্ত্রণ ফিরে পায়।',
+      ar: 'الرغبة في تفقد الشاشة تشبه موجة البحر: ترتفع بسرعة، وتبلغ ذروتها لمدة ٦٠ إلى ٩٠ ثانية، ثم تهدأ تلقائياً إذا لم تغذِّها. عندما تتوقف وتتنفس، تستعيد قشرة الدماغ المنطقية السيطرة على دائرة الدوبامين.',
+      ur: 'اسکرین دیکھنے کی خواہش سمندر کی لہر کی طرح ہے: یہ تیزی سے اٹھتی ہے، 60 سے 90 سیکنڈ تک عروج پر رہتی ہے، اور اگر آپ اس پر عمل نہ کریں تو خود بخود ختم ہو جاتی ہے۔ رک کر سانس لینے سے دماغ کا منطقی حصہ دوبارہ کنٹرول سنبھال لیتا ہے۔',
+      id: 'Dorongan untuk memeriksa layar bagaikan gelombang laut: naik cepat, memuncak selama 60 hingga 90 detik, lalu mereda secara alami jika tidak diikuti. Saat Anda berhenti dan bernapas, korteks prefrontal mengambil alih kendali atas siklus dopamin.',
     },
   },
   {
@@ -454,10 +460,16 @@ export const FOCUS_READER_PASSAGES: ReadingPassage[] = [
     title: {
       en: 'Page 2/3: Guarding the Heart’s Stillness (Sakīnah)',
       bn: 'পৃষ্ঠা ২/৩: হৃদয়ের প্রশান্তি (সাকীনাহ) রক্ষা করা',
+      ar: 'صفحة ٢/٣: حفظ سكينة القلب',
+      ur: 'صفحہ 2/3: دل کے سکون (سکینہ) کی حفاظت',
+      id: 'Halaman 2/3: Menjaga Ketenangan Hati (Sakinah)',
     },
     content: {
       en: 'Every image and notification you consume leaves a residue on your attention. True peace of mind is not achieved by consuming more comforting content, but by protecting the quiet space inside your chest from unnecessary noise.',
       bn: 'প্রতিটি অপ্রয়োজনীয় দৃশ্য ও নোটিফিকেশন আপনার মনোযোগের ওপর ছাপ ফেলে। অধিক তথ্য বা বিনোদন দেখে মনের শান্তি আসে না; বরং হৃদয়ের ভেতরের নীরবতাকে বাহ্যিক কোলাহল থেকে রক্ষা করার মাধ্যমেই প্রকৃত প্রশান্তি অর্জিত হয়।',
+      ar: 'كل صورة وإشعار تستهلكه يترك أثراً على انتباهك. راحة البال الحقيقية لا تتحقق بمزيد من التصفح، بل بحماية المساحة الهادئة داخل صدرك من الضوضاء غير الضرورية.',
+      ur: 'ہر تصویر اور نوٹیفکیشن آپ کی توجہ پر اثر چھوڑتا ہے۔ حقیقی ذہنی سکون زیادہ مواد دیکھنے سے نہیں بلکہ اپنے دل کی خاموشی کو غیر ضروری شور سے بچانے سے حاصل ہوتا ہے۔',
+      id: 'Setiap gambar dan notifikasi yang Anda konsumsi meninggalkan jejak pada perhatian Anda. Ketenangan sejati dicapai dengan melindungi ruang hening di dalam dada dari kebisingan yang tidak perlu.',
     },
   },
   {
@@ -465,10 +477,16 @@ export const FOCUS_READER_PASSAGES: ReadingPassage[] = [
     title: {
       en: 'Page 3/3: Returning to Intentional Action',
       bn: 'পৃষ্ঠা ৩/৩: সচেতন কাজে প্রত্যাবর্তন',
+      ar: 'صفحة ٣/٣: العودة إلى العمل الواعي',
+      ur: 'صفحہ 3/3: باوقار اور بامقصد عمل کی طرف واپسی',
+      id: 'Halaman 3/3: Kembali pada Tindakan Sadar',
     },
     content: {
       en: 'You have now paused long enough for the automatic habit loop to break. Ask yourself honestly: do you still need to open this app for a specific, beneficial purpose, or would closing the screen right now leave you lighter and freer?',
       bn: 'আপনি ইতিমধ্যে স্বয়ংক্রিয় অভ্যাসের চক্রটি ভেঙে ফেলেছেন। এখন নিজেকে সততার সাথে প্রশ্ন করুন: সত্যিই কি কোনো কল্যাণকর কাজে অ্যাপটি খোলা প্রয়োজন, নাকি এখনই ফিরে গেলে আপনার মন আরও হালকা ও মুক্ত থাকবে?',
+      ar: 'لقد توقفت الآن بما يكفي لكسر حلقة العادة التلقائية. اسأل نفسك بصدق: هل ما زلت بحاجة لفتح هذا التطبيق لغرض نافع ومحدد، أم أن إغلاق الشاشة الآن سيجعلك أخف وأكثر حرية؟',
+      ur: 'آپ نے خودکار عادت کا تسلسل توڑنے کے لیے کافی وقفہ لے لیا ہے۔ اب خود سے ایمانداری سے پوچھیں: کیا واقعی کسی مفید مقصد کے لیے یہ ایپ کھولنا ضروری ہے، یا ابھی اسکرین بند کرنا آپ کو زیادہ ہلکا اور آزاد رکھے گا؟',
+      id: 'Anda telah berhenti cukup lama untuk memutus siklus kebiasaan otomatis. Tanyakan dengan jujur: apakah Anda benar-benar perlu membuka aplikasi ini untuk tujuan bermanfaat, atau menutup layar sekarang membuat hati lebih ringan?',
     },
   },
 ];
@@ -480,5 +498,22 @@ export function getTriggerText(trigger: CalmTrigger, lang: LanguageCode): string
 export function getTriggerSource(trigger: CalmTrigger, lang: LanguageCode): string {
   if (lang === 'bn') return trigger.source.bn;
   if (lang === 'ar' && trigger.source.ar) return trigger.source.ar;
-  return trigger.source.en;
+  const enSrc = trigger.source.en;
+  if (lang === 'ur') {
+    if (enSrc.includes('Surah')) return enSrc.replace('Surah', 'سورۃ');
+    if (enSrc.includes('Sahih')) return enSrc.replace('Sahih al-Bukhari', 'صحیح بخاری').replace('Sahih Muslim', 'صحیح مسلم');
+    if (enSrc.includes('Sunan')) return enSrc.replace('Sunan at-Tirmidhi', 'سنن ترمذی').replace('Sunan Ibn Majah', 'سنن ابن ماجہ');
+    if (enSrc === 'Mindful Stillness') return 'ذہنی سکون و خاموشی';
+    if (enSrc === 'Dopamine Mastery') return 'ڈوپامائن توازن';
+    if (enSrc === 'Intentional Living') return 'بامقصد زندگی';
+  }
+  if (lang === 'id') {
+    if (enSrc.includes('Surah')) return enSrc.replace('Surah', 'QS.');
+    if (enSrc.includes('Sahih')) return enSrc.replace('Sahih al-Bukhari', 'HR. Bukhari').replace('Sahih Muslim', 'HR. Muslim');
+    if (enSrc.includes('Sunan')) return enSrc.replace('Sunan at-Tirmidhi', 'HR. Tirmidzi').replace('Sunan Ibn Majah', 'HR. Ibnu Majah');
+    if (enSrc === 'Mindful Stillness') return 'Ketenangan Sadar';
+    if (enSrc === 'Dopamine Mastery') return 'Kendali Dopamin';
+    if (enSrc === 'Intentional Living') return 'Hidup Berkesadaran';
+  }
+  return enSrc;
 }

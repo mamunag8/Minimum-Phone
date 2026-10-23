@@ -31,6 +31,7 @@ import {
 import {
   getAppDisplayName,
   getSelfMasteryRank,
+  localizeDynamicUserText,
   SUPPORTED_LANGUAGES,
   TRANSLATIONS,
   tx,
@@ -112,38 +113,53 @@ function normalizeAppsForCallingAndNightLock(list: AppItem[]): AppItem[] {
   });
 }
 
+function loadInitialSavedState(): Record<string, any> {
+  try {
+    const raw =
+      localStorage.getItem(STORAGE_KEY) ||
+      localStorage.getItem('minimum_phone_kasb_state_v4') ||
+      localStorage.getItem('minimum_phone_kasb_state_v3');
+    if (raw) {
+      return JSON.parse(raw) || {};
+    }
+  } catch {
+    // ignore storage parse errors
+  }
+  return {};
+}
+
 export function App() {
-  // Persistent state initialization
-  const [lang, setLang] = useState<LanguageCode>('en');
+  const initialSaved = useMemo(() => loadInitialSavedState(), []);
+
+  // Persistent state initialization (lazily hydrated so mount save never overwrites language)
+  const [lang, setLang] = useState<LanguageCode>(() => initialSaved.lang || 'en');
   const [platform, setPlatform] = useState<PlatformMode>('android');
   const [visualTheme, setVisualTheme] = useState<VisualTheme>('oled-black');
-  const [grayscaleEnabled, setGrayscaleEnabled] = useState<boolean>(true);
-  const [inspirationMode, setInspirationMode] = useState<InspirationMode>('blended');
-  const [wisdomPack, setWisdomPack] = useState<WisdomPackSource>('blended');
+  const [grayscaleEnabled, setGrayscaleEnabled] = useState<boolean>(() =>
+    typeof initialSaved.grayscaleEnabled === 'boolean'
+      ? initialSaved.grayscaleEnabled
+      : true
+  );
+  const [inspirationMode, setInspirationMode] = useState<InspirationMode>(
+    () => initialSaved.inspirationMode || 'blended'
+  );
+  const [wisdomPack, setWisdomPack] = useState<WisdomPackSource>(
+    () => initialSaved.wisdomPack || 'blended'
+  );
   const [showArabicScript, setShowArabicScript] = useState<boolean>(true);
-  const [defaultHabitWall, setDefaultHabitWall] =
-    useState<HabitWallType>('read-30s-quiz');
-
-  // First-Time Step-by-Step Setup Wizard state
-  const [firstTimeSetupCompleted, setFirstTimeSetupCompleted] = useState<boolean>(() => {
-    try {
-      const saved =
-        localStorage.getItem(STORAGE_KEY) ||
-        localStorage.getItem('minimum_phone_kasb_state_v4');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return Boolean(parsed.firstTimeSetupCompleted);
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  });
-  const [showFirstTimeSetupModal, setShowFirstTimeSetupModal] = useState<boolean>(
-    () => !firstTimeSetupCompleted
+  const [defaultHabitWall, setDefaultHabitWall] = useState<HabitWallType>(
+    () => initialSaved.defaultHabitWall || 'read-30s-quiz'
   );
 
-  const [slowLearning, setSlowLearning] = useState<SlowLearningState>({
+  // First-Time Step-by-Step Setup Wizard state
+  const [firstTimeSetupCompleted, setFirstTimeSetupCompleted] = useState<boolean>(() =>
+    Boolean(initialSaved.firstTimeSetupCompleted)
+  );
+  const [showFirstTimeSetupModal, setShowFirstTimeSetupModal] = useState<boolean>(
+    () => !Boolean(initialSaved.firstTimeSetupCompleted)
+  );
+
+  const [slowLearning, setSlowLearning] = useState<SlowLearningState>(() => ({
     track: 'islam',
     require30sQuizToOpenApps: true,
     readingDurationSeconds: 12,
@@ -160,7 +176,8 @@ export function App() {
       tired: 1,
     },
     ifThenReplacementHabit: 'Drink Water / Dhikr / Deep Sigh',
-  });
+    ...(initialSaved.slowLearning || {}),
+  }));
 
   const [activeTab, setActiveTab] = useState<
     'home' | 'drawer' | 'purity' | 'digest-focus' | 'system-kasb'
@@ -168,25 +185,37 @@ export function App() {
 
   const [homeProfile, setHomeProfile] = useState<HomeProfileType>('work');
   const [apps, setApps] = useState<AppItem[]>(() =>
-    normalizeAppsForCallingAndNightLock(DEFAULT_APPS)
+    normalizeAppsForCallingAndNightLock(
+      Array.isArray(initialSaved.apps) && initialSaved.apps.length > 0
+        ? initialSaved.apps
+        : DEFAULT_APPS
+    )
   );
   const [notifications, setNotifications] =
     useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
 
-  const [scratchpadNotes, setScratchpadNotes] = useState<ScratchpadNote[]>([
-    {
-      id: 'note-1',
-      text: 'Finalize Q4 product architecture note before 4 PM',
-      createdAt: '09:15',
-      done: false,
-      pinned: true,
-    },
-  ]);
+  const [scratchpadNotes, setScratchpadNotes] = useState<ScratchpadNote[]>(() =>
+    Array.isArray(initialSaved.scratchpadNotes) && initialSaved.scratchpadNotes.length > 0
+      ? initialSaved.scratchpadNotes
+      : [
+          {
+            id: 'note-1',
+            text: 'Finalize Q4 product architecture note before 4 PM',
+            createdAt: '09:15',
+            done: false,
+            pinned: true,
+          },
+        ]
+  );
   const [scratchpadInput, setScratchpadInput] = useState<string>('');
   const [showScratchpad, setShowScratchpad] = useState<boolean>(false);
 
-  const [impulsesStopped, setImpulsesStopped] = useState<number>(18);
-  const [reclaimedMinutes, setReclaimedMinutes] = useState<number>(270);
+  const [impulsesStopped, setImpulsesStopped] = useState<number>(
+    () => initialSaved.impulsesStopped || 18
+  );
+  const [reclaimedMinutes, setReclaimedMinutes] = useState<number>(
+    () => initialSaved.reclaimedMinutes || 270
+  );
 
   // Purity & Anti-Porn State
   const [purity, setPurity] = useState<PurityState>(() => ({
@@ -205,10 +234,11 @@ export function App() {
     emergencyBrowserLockUntilMs: null,
     pledgedToday: null,
     logs: [],
+    ...(initialSaved.purity || {}),
   }));
 
   // Focus, QR Complexity, Settings Gate, Notification Control & Background Safe List State
-  const [vault, setVault] = useState<FocusVaultState>({
+  const [vault, setVault] = useState<FocusVaultState>(() => ({
     monkModeActive: false,
     monkTaskTitle: 'Deep Focus Architecture Work',
     monkRemainingSeconds: 50 * 60,
@@ -242,7 +272,8 @@ export function App() {
     uninstallProtectionEnabled: true,
     uninstallCooldownStartedIso: null,
     friendAccountabilitySecret: 'KASB2026',
-  });
+    ...(initialSaved.vault || {}),
+  }));
 
   // Live Clock, Battery & Native Core Launcher Control State
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
@@ -369,7 +400,7 @@ export function App() {
 
   useEffect(() => {
     refreshNativeStatus();
-    loadRealInstalledApps(DEFAULT_APPS).then((merged) => {
+    loadRealInstalledApps(apps).then((merged) => {
       setApps(normalizeAppsForCallingAndNightLock(merged));
     });
 
@@ -1124,7 +1155,15 @@ export function App() {
   });
 
   const formattedDate = currentTime.toLocaleDateString(
-    lang === 'bn' ? 'bn-BD' : lang === 'ar' ? 'ar-SA' : 'en-US',
+    lang === 'bn'
+      ? 'bn-BD'
+      : lang === 'ar'
+      ? 'ar-SA'
+      : lang === 'ur'
+      ? 'ur-PK'
+      : lang === 'id'
+      ? 'id-ID'
+      : 'en-US',
     {
       weekday: 'short',
       month: 'short',
@@ -1302,12 +1341,12 @@ export function App() {
       )}
 
       {/* MAIN 100% DEVICE-FIT LAUNCHER VIEWPORT */}
-      <main className="w-full max-w-full min-w-0 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto overflow-x-hidden px-3.5 sm:px-8 md:px-12 py-3">
+      <main className="w-full max-w-full min-w-0 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto overflow-x-hidden px-2.5 sm:px-6 md:px-10 py-2.5">
         {/* =========================================================
             TAB 1: THE PURE MINIMALIST HOME SCREEN (ZERO SETTINGS CLUTTER)
            ========================================================= */}
         {activeTab === 'home' && (
-          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 flex flex-col justify-between space-y-3 overflow-x-hidden">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 flex flex-col justify-between space-y-3">
             {/* Top Status Row: Clean Clock, Date, Battery %, Circadian Wind-Down & 1-Tap Wi-Fi/BT/DNS/Setup Quick Bar */}
             <div className="space-y-2">
               <div className="flex items-baseline justify-between gap-2">
@@ -1317,14 +1356,15 @@ export function App() {
                 <div className="text-right font-mono-tech text-xs opacity-75">
                   <div>{formattedDate}</div>
                   <div className="mt-0.5">
-                    BAT {batteryLevel}% {isCharging ? '⚡' : ''}
+                    {tx(lang, 'BAT', 'ব্যাটারি', 'بطارية', 'بیٹری', 'BAT')} {batteryLevel}%{' '}
+                    {isCharging ? '⚡' : ''}
                     {isCircadianSunsetActive ? ' · 🌇' : ''}
                   </div>
                 </div>
               </div>
 
-              {/* 1-Tap Hardware Quick Access Bar: Wi-Fi, Bluetooth, Private DNS, Data, Display, Sound + Easy Setup */}
-              <div className="grid grid-cols-7 gap-1 pt-0.5">
+              {/* 1-Tap Hardware Quick Access Bar: Wi-Fi, Bluetooth, Private DNS, Data, Display, Sound + Easy Setup + Language */}
+              <div className="grid grid-cols-4 sm:grid-cols-8 gap-1 pt-0.5">
                 {(
                   [
                     {
@@ -1362,6 +1402,25 @@ export function App() {
                     {qs.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const order: LanguageCode[] = ['en', 'bn', 'ar', 'ur', 'id'];
+                    const nextIdx = (order.indexOf(lang) + 1) % order.length;
+                    setLang(order[nextIdx]);
+                  }}
+                  className="py-1.5 px-1 border border-zinc-700 bg-zinc-950 text-[10px] font-mono-tech text-zinc-200 hover:border-zinc-400 text-center truncate cursor-pointer"
+                  title={tx(
+                    lang,
+                    'Switch Language (English / বাংলা / العربية / اردو / Indonesia)',
+                    'ভাষা পরিবর্তন করুন (বাংলা / English / العربية / اردو / Indonesia)',
+                    'تغيير اللغة',
+                    'زبان تبدیل کریں',
+                    'Ganti Bahasa'
+                  )}
+                >
+                  🌐 {currentLangMeta.nativeName}
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowFirstTimeSetupModal(true)}
@@ -1423,7 +1482,9 @@ export function App() {
                     'MODE FOKUS MENDALAM AKTIF'
                   )}
                 </div>
-                <div className="text-base font-medium">{vault.monkTaskTitle}</div>
+                <div className="text-base font-medium">
+                  {localizeDynamicUserText(vault.monkTaskTitle, lang)}
+                </div>
                 <div className="text-5xl font-mono-tech font-light py-2">
                   {Math.floor(vault.monkRemainingSeconds / 60)}:
                   {String(vault.monkRemainingSeconds % 60).padStart(2, '0')}
@@ -1577,7 +1638,7 @@ export function App() {
                                 n.done ? 'line-through opacity-45' : 'opacity-90'
                               }`}
                             >
-                              {n.text}
+                              {localizeDynamicUserText(n.text, lang)}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
@@ -1682,14 +1743,14 @@ export function App() {
             TAB 2: ASYMMETRIC SEARCH-FIRST APP DRAWER
            ========================================================= */}
         {activeTab === 'drawer' && (
-          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 flex flex-col space-y-3 overflow-x-hidden">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 flex flex-col space-y-3">
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500 truncate">
                   {tx(
                     lang,
                     'ASYMMETRIC FRICTION // CALLS & WHATSAPP NORMAL · GATED SOCIAL',
-                    'কল, SMS ও WhatsApp সাধারণ · সোশ্যাল মিডিয়ায় ২০ সেকেন্ড কুইজ সুরক্ষা',
+                    'কল, SMS ও হোয়াটসঅ্যাপ সাধারণ · সোশ্যাল মিডিয়ায় ২০ সেকেন্ড কুইজ সুরক্ষা',
                     'المكالمات وواتساب فورية · تطبيقات التواصل محمية باختبار ٢٠ث',
                     'کالز اور واٹس ایپ نارمل · سوشل میڈیا پر ٢٠ سیکنڈ کوئز گیٹ',
                     'TELEPON & WHATSAPP NORMAL · MEDIA SOSIAL KUIS 20 DETIK'
@@ -1729,7 +1790,7 @@ export function App() {
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-zinc-900">
+            <div className="flex-1 divide-y divide-zinc-900">
               {drawerSearchResults.map((app) => {
                 const isReopenLocked = reopenLockedAppIds.includes(app.id);
                 const isNightQrLocked =
@@ -1778,7 +1839,7 @@ export function App() {
                   {tx(
                     lang,
                     '(e.g., type “Instagram”, “Facebook”, “YouTube”, or tap “Show All Apps” above).',
-                    '(যেমন: “Instagram”, “Facebook”, “YouTube” লিখুন অথবা ওপরে “সব অ্যাপ দেখান”-এ ট্যাপ করুন)।',
+                    '(যেমন: “ইনস্টাগ্রাম”, “ফেসবুক”, “ইউটিউব” লিখুন অথবা ওপরে “সব অ্যাপ দেখান”-এ ট্যাপ করুন)।',
                     '(اكتب اسم التطبيق أو اضغط "عرض كل التطبيقات" أعلاه).',
                     '(مثلاً ایپ کا نام لکھیں یا اوپر "تمام ایپس دکھائیں" پر ٹیپ کریں)۔',
                     '(ketik nama aplikasi atau ketuk "Tampilkan Semua" di atas).'
@@ -1793,7 +1854,7 @@ export function App() {
             TAB 3: PURITY & ANTI-PORN GUARD + PRIVATE DNS + URGE SOS
            ========================================================= */}
         {activeTab === 'purity' && (
-          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 overflow-x-hidden">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1">
             <PurityGuardView
               purity={purity}
               lang={lang}
@@ -1811,7 +1872,7 @@ export function App() {
             TAB 4: NOTIFICATION DIGEST + MONK FOCUS + QR COMPLEXITY & NIGHT BROWSER QR LOCK
            ========================================================= */}
         {activeTab === 'digest-focus' && (
-          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 overflow-x-hidden">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1">
             <DigestAndFocusView
               lang={lang}
               notifications={notifications}
@@ -1844,7 +1905,7 @@ export function App() {
             TAB 5: COMPLETE SETTINGS PAGE (ALL SETTINGS IN ONE PLACE)
            ========================================================= */}
         {activeTab === 'system-kasb' && (
-          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 overflow-x-hidden">
+          <div className="w-full max-w-4xl min-w-0 mx-auto flex-1">
             <AnalyticsAndKasbView
               lang={lang}
               onChangeLanguage={setLang}
@@ -1997,7 +2058,7 @@ export function App() {
                   'Butuh Wi-Fi, Bluetooth, DNS atau Panduan Cepat? (Tanpa Kuis):'
                 )}
               </div>
-              <div className="grid grid-cols-5 gap-1">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
                 {(
                   [
                     { target: 'wifi', label: '📶 Wi-Fi' },
@@ -2015,6 +2076,17 @@ export function App() {
                     {item.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const order: LanguageCode[] = ['en', 'bn', 'ar', 'ur', 'id'];
+                    const nextIdx = (order.indexOf(lang) + 1) % order.length;
+                    setLang(order[nextIdx]);
+                  }}
+                  className="py-1.5 px-1 border border-zinc-600 bg-zinc-950 text-[10px] text-zinc-100 cursor-pointer truncate"
+                >
+                  🌐 {currentLangMeta.nativeName}
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -2062,7 +2134,7 @@ export function App() {
 
             <div className="space-y-1.5">
               <div className="text-xs font-semibold text-zinc-100 leading-snug">
-                Q:{' '}
+                {tx(lang, 'Q:', 'প্রশ্ন:', 'س:', 'سوال:', 'P:')}{' '}
                 {activeSettingsGateLesson.quizQuestion[lang] ||
                   activeSettingsGateLesson.quizQuestion.en}
               </div>
@@ -2143,10 +2215,18 @@ export function App() {
                   {tx(
                     lang,
                     `SLEEPING-TIME EMERGENCY QR FORTRESS (${(vault.qrComplexity || 'hard').toUpperCase()})`,
-                    `রাতের ঘুমানোর সময় জরুরি QR দুর্গ (${(vault.qrComplexity || 'hard').toUpperCase()})`,
-                    `قلعة رمز QR الليلي للطوارئ (${(vault.qrComplexity || 'hard').toUpperCase()})`,
-                    `رات کے وقت ایمرجنسی QR قلعہ (${(vault.qrComplexity || 'hard').toUpperCase()})`,
-                    `BENTENG QR DARURAT MALAM HARI (${(vault.qrComplexity || 'hard').toUpperCase()})`
+                    `রাতের ঘুমানোর সময় জরুরি QR দুর্গ (${
+                      (vault.qrComplexity || 'hard') === 'hard' ? 'কঠিন' : 'সহজ'
+                    })`,
+                    `قلعة رمز QR الليلي للطوارئ (${
+                      (vault.qrComplexity || 'hard') === 'hard' ? 'صعب' : 'سهل'
+                    })`,
+                    `رات کے وقت ایمرجنسی QR قلعہ (${
+                      (vault.qrComplexity || 'hard') === 'hard' ? 'سخت' : 'آسان'
+                    })`,
+                    `BENTENG QR DARURAT MALAM HARI (${
+                      (vault.qrComplexity || 'hard') === 'hard' ? 'SULIT' : 'MUDAH'
+                    })`
                   )}
                 </div>
                 <h3 className="text-sm font-semibold text-zinc-100 mt-0.5">
@@ -2187,7 +2267,11 @@ export function App() {
               <div className="flex items-center justify-between text-xs">
                 <span className="text-zinc-400">
                   {tx(lang, 'Complexity', 'কাঠিন্য', 'المستوى', 'سختی', 'Tingkat')}:{' '}
-                  <strong>{(vault.qrComplexity || 'hard').toUpperCase()}</strong>
+                  <strong>
+                    {(vault.qrComplexity || 'hard') === 'hard'
+                      ? tx(lang, 'HARD', 'কঠিন (QR)', 'صعب (QR)', 'سخت (QR)', 'SULIT (QR)')
+                      : tx(lang, 'EASY', 'সহজ (QR)', 'سهل (QR)', 'آسان (QR)', 'MUDAH (QR)')}
+                  </strong>
                 </span>
                 {!nightQrCameraActive ? (
                   <button
@@ -2471,7 +2555,15 @@ export function App() {
             </div>
           </div>
           <div className="text-[11px] text-zinc-600">
-            MINIMUM PHONE // PROGRESSIVE DOPAMINE GUARD
+            {t.appName} //{' '}
+            {tx(
+              lang,
+              'PROGRESSIVE DOPAMINE GUARD',
+              'ধাপে ধাপে ডোপামিন সুরক্ষা গার্ড',
+              'حارس الدوبامين التدريجي',
+              'تدریجی ڈوپامین گارڈ',
+              'PENJAGA DOPAMIN PROGRESIF'
+            )}
           </div>
         </div>
       )}
@@ -2601,7 +2693,7 @@ export function App() {
             </div>
           </div>
           <div className="text-[11px] font-mono-tech text-zinc-600">
-            MINIMUM PHONE // KASB LLC
+            {t.appName} // KASB LLC
           </div>
         </div>
       )}
@@ -2745,7 +2837,14 @@ export function App() {
                 type="text"
                 value={escapePhraseInput}
                 onChange={(e) => setEscapePhraseInput(e.target.value)}
-                placeholder="UNLOCK CORE"
+                placeholder={tx(
+                  lang,
+                  'Type UNLOCK CORE...',
+                  'UNLOCK CORE লিখুন...',
+                  'اكتب UNLOCK CORE...',
+                  'UNLOCK CORE لکھیں...',
+                  'Ketik UNLOCK CORE...'
+                )}
                 className="w-full bg-zinc-950 border border-zinc-700 px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-300"
               />
             </div>
@@ -2898,15 +2997,36 @@ export function App() {
                 <div className="space-y-2">
                   {[
                     {
-                      name: 'Minimum Phone Accountability',
+                      name: tx(
+                        lang,
+                        'Minimum Phone Accountability',
+                        'মিনিমাম ফোন জবাবদিহিতা লক',
+                        'قفل المساءلة في الهاتف الأدنى',
+                        'منیمم فون احتساب لاک',
+                        'Kunci Akuntabilitas Minimum Phone'
+                      ),
                       code: String((currentTime.getMinutes() * 14731 + 294819) % 900000 + 100000),
                     },
                     {
-                      name: 'Primary Work Workspace (TOTP)',
+                      name: tx(
+                        lang,
+                        'Primary Work Workspace (2FA)',
+                        'প্রধান কর্মক্ষেত্র অ্যাকাউন্ট (2FA)',
+                        'مساحة العمل الأساسية (2FA)',
+                        'بنیادی ورک اسپیس اکاؤنٹ (2FA)',
+                        'Akun Kerja Utama (2FA)'
+                      ),
                       code: String((currentTime.getMinutes() * 38197 + 518273) % 900000 + 100000),
                     },
                     {
-                      name: 'Cloud Vault / GitHub 2FA',
+                      name: tx(
+                        lang,
+                        'Cloud Vault Security (2FA)',
+                        'ক্লাউড ভল্ট সিকিউরিটি (2FA)',
+                        'خزنة السحابة الأمنية (2FA)',
+                        'کلاؤڈ والٹ سیکیورٹی (2FA)',
+                        'Brankas Cloud (2FA)'
+                      ),
                       code: String((currentTime.getMinutes() * 72931 + 109482) % 900000 + 100000),
                     },
                   ].map((item) => (

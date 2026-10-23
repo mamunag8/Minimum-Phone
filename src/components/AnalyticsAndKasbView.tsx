@@ -744,7 +744,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
       {(settingsSubTab === 'both' || settingsSubTab === 'settings') && (
         <div className="space-y-5">
           {/* 2. LANGUAGE SWITCHER (FULL APP TRANSLATION: ENGLISH, BANGLA, ARABIC, URDU, INDONESIAN) */}
-          <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-3">
+          <div className="border border-zinc-800 bg-zinc-950/60 p-3.5 sm:p-5 space-y-3">
             <div className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
               {tx(
                 lang,
@@ -771,7 +771,6 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                   }`}
                 >
                   <div>{item.nativeName}</div>
-                  <div className="text-[10px] opacity-70">{item.englishName}</div>
                 </button>
               ))}
             </div>
@@ -908,7 +907,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               <button
                 type="button"
                 onClick={onToggleArabicScript}
-                className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+                className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer shrink-0 whitespace-nowrap ${
                   showArabicScript
                     ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                     : 'border-zinc-800 text-zinc-400'
@@ -1154,7 +1153,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
           </div>
 
           {/* 5. EASY APP LIST, CALLING/WHATSAPP & SLEEPING-TIME NIGHT QR MANAGER */}
-          <div className="border-2 border-zinc-300 bg-zinc-950 p-4 space-y-3.5">
+          <div className="border-2 border-zinc-300 bg-zinc-950 p-3 sm:p-4 space-y-3 overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-zinc-800 pb-3">
               <div className="min-w-0 flex-1">
                 <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
@@ -1269,7 +1268,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
             </div>
 
             {/* Easy 1-Tap Category Filter Tabs */}
-            <div className="grid grid-cols-5 gap-1 text-[10px] font-mono-tech">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 text-[10px] font-mono-tech">
               {(
                 [
                   {
@@ -1298,7 +1297,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                   key={f.id}
                   type="button"
                   onClick={() => setAppQuickFilter(f.id)}
-                  className={`py-2 px-1 border text-center cursor-pointer truncate ${
+                  className={`py-2 px-1.5 border text-center cursor-pointer truncate ${
                     appQuickFilter === f.id
                       ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
                       : 'border-zinc-800 bg-black text-zinc-400'
@@ -1325,66 +1324,63 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               className="w-full bg-black border border-zinc-700 px-3 py-2 text-xs font-mono-tech text-zinc-100 focus:outline-none focus:border-zinc-300"
             />
 
-            {/* Scrollable Easy App Cards */}
-            <div className="max-h-80 overflow-y-auto divide-y divide-zinc-800 border border-zinc-800 bg-black">
+            {/* Scrollable Easy App Cards (100% Mobile Screen Fit - Zero Horizontal Overflow) */}
+            <div className="max-h-80 overflow-y-auto overflow-x-hidden divide-y divide-zinc-800 border border-zinc-800 bg-black">
               {filteredApps.map((app) => {
                 const isPinned = app.pinnedProfiles.includes(homeProfile);
                 const isNightLocked = isNightLockedByDefault(app);
                 const isNormal = app.tier === 'essential' || app.tier === 'utility';
                 const displayName = getAppDisplayName(app, lang);
                 return (
-                  <div key={app.id} className="p-3 space-y-2">
-                    {/* Row 1: App Name + Home Toggle + Night QR Toggle */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-semibold text-zinc-100 truncate">
-                          {lang !== 'en' && displayName !== app.name
-                            ? `${displayName} (${app.name})`
-                            : displayName}
-                        </div>
-                        <div className="text-[10px] font-mono-tech text-zinc-400">
-                          {isNormal
-                            ? tx(lang, '⚡ Normal App', '⚡ সাধারণ অ্যাপ (সরাসরি খোলে)', '⚡ تطبيق عادي', '⚡ نارمل ایپ', '⚡ Aplikasi Normal')
-                            : tx(lang, '📚 20s Quiz App', '📚 ২০ সেকেন্ড কুইজ অ্যাপ', '📚 تطبيق باختبار ٢٠ث', '📚 ٢٠ سیکنڈ کوئز ایپ', '📚 Aplikasi Kuis 20d')}
-                          {isNightLocked
-                            ? tx(lang, ' · 🌙 Night QR Lock', ' · 🌙 রাতে জরুরি QR লক', ' · 🌙 قفل QR ليلي', ' · 🌙 رات کا QR لاک', ' · 🌙 Kunci QR Malam')
-                            : ''}
-                        </div>
+                  <div key={app.id} className="p-2.5 sm:p-3 space-y-2 overflow-hidden">
+                    {/* Row 1: App Name & Current Protection Status */}
+                    <div className="w-full min-w-0">
+                      <div className="text-xs font-semibold text-zinc-100 truncate">
+                        {displayName}
                       </div>
-
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleStageTogglePinApp(app.id, homeProfile)}
-                          className={`px-2 py-1 border text-[10px] font-mono-tech cursor-pointer ${
-                            isPinned
-                              ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
-                              : 'border-zinc-700 text-zinc-300'
-                          }`}
-                        >
-                          {isPinned
-                            ? tx(lang, '★ On Home', '★ হোমে আছে', '★ بالرئيسية', '★ ہوم پر', '★ Di Utama')
-                            : tx(lang, '+ Home', '+ হোমে রাখুন', '+ للرئيسية', '+ ہوم', '+ Utama')}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleStageToggleNightQr(app.id)}
-                          className={`px-2 py-1 border text-[10px] font-mono-tech cursor-pointer ${
-                            isNightLocked
-                              ? 'border-zinc-200 bg-zinc-800 text-white font-bold'
-                              : 'border-zinc-800 text-zinc-500'
-                          }`}
-                        >
-                          {isNightLocked
-                            ? tx(lang, '🌙 Night QR: ON', '🌙 রাতের QR: চালু', '🌙 QR ليلي: مفعل', '🌙 رات کا QR: آن', '🌙 QR Malam: ON')
-                            : tx(lang, '🌙 Night: OFF', '🌙 রাত: বন্ধ', '🌙 ليلي: متوقف', '🌙 رات: آف', '🌙 Malam: OFF')}
-                        </button>
+                      <div className="text-[10px] font-mono-tech text-zinc-400 leading-tight mt-0.5">
+                        {isNormal
+                          ? tx(lang, '⚡ Normal App', '⚡ সাধারণ অ্যাপ (সরাসরি খোলে)', '⚡ تطبيق عادي', '⚡ نارمل ایپ', '⚡ Aplikasi Normal')
+                          : tx(lang, '📚 20s Quiz App', '📚 ২০ সেকেন্ড কুইজ অ্যাপ', '📚 تطبيق باختبار ٢٠ث', '📚 ٢٠ سیکنڈ کوئز ایپ', '📚 Aplikasi Kuis 20d')}
+                        {isNightLocked
+                          ? tx(lang, ' · 🌙 Night QR Lock', ' · 🌙 রাতে জরুরি QR লক', ' · 🌙 قفل QR ليلي', ' · 🌙 رات کا QR لاک', ' · 🌙 Kunci QR Malam')
+                          : ''}
                       </div>
                     </div>
 
-                    {/* Row 2: 3 Simple Mode Buttons */}
-                    <div className="grid grid-cols-3 gap-1.5">
+                    {/* Row 2: 2-Column Home Pin & Night QR Toggles */}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleStageTogglePinApp(app.id, homeProfile)}
+                        className={`py-1.5 px-2 border text-[10px] font-mono-tech text-center truncate cursor-pointer ${
+                          isPinned
+                            ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                            : 'border-zinc-700 text-zinc-300'
+                        }`}
+                      >
+                        {isPinned
+                          ? tx(lang, '★ On Home', '★ হোমে আছে', '★ بالرئيسية', '★ ہوم پر', '★ Di Utama')
+                          : tx(lang, '+ Home', '+ হোমে রাখুন', '+ للرئيسية', '+ ہوم', '+ Utama')}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleStageToggleNightQr(app.id)}
+                        className={`py-1.5 px-2 border text-[10px] font-mono-tech text-center truncate cursor-pointer ${
+                          isNightLocked
+                            ? 'border-zinc-200 bg-zinc-800 text-white font-bold'
+                            : 'border-zinc-800 text-zinc-500'
+                        }`}
+                      >
+                        {isNightLocked
+                          ? tx(lang, '🌙 Night QR: ON', '🌙 রাতের QR: চালু', '🌙 QR ليلي: مفعل', '🌙 رات کا QR: آن', '🌙 QR Malam: ON')
+                          : tx(lang, '🌙 Night: OFF', '🌙 রাত: বন্ধ', '🌙 ليلي: متوقف', '🌙 رات: آف', '🌙 Malam: OFF')}
+                      </button>
+                    </div>
+
+                    {/* Row 3: 3 Simple Mode Buttons */}
+                    <div className="grid grid-cols-3 gap-1">
                       <button
                         type="button"
                         onClick={() =>
@@ -1395,7 +1391,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                               : 'utility'
                           )
                         }
-                        className={`py-1.5 px-2 border text-[10px] font-mono-tech text-center cursor-pointer ${
+                        className={`py-1.5 px-1 border text-[10px] font-mono-tech text-center truncate cursor-pointer ${
                           isNormal
                             ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
                             : 'border-zinc-800 text-zinc-400'
@@ -1404,18 +1400,18 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                         ⚡{' '}
                         {tx(
                           lang,
-                          'Normal (Instant)',
-                          'সাধারণ (সরাসরি)',
-                          'عادي (فوري)',
-                          'نارمل (فوری)',
-                          'Normal (Langsung)'
+                          'Normal',
+                          'সাধারণ',
+                          'عادي',
+                          'نارمل',
+                          'Normal'
                         )}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleStageChangeAppTier(app.id, 'restricted')}
-                        className={`py-1.5 px-2 border text-[10px] font-mono-tech text-center cursor-pointer ${
+                        className={`py-1.5 px-1 border text-[10px] font-mono-tech text-center truncate cursor-pointer ${
                           app.tier === 'restricted'
                             ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
                             : 'border-zinc-800 text-zinc-400'
@@ -1424,24 +1420,24 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                         📚{' '}
                         {tx(
                           lang,
-                          '20s Quiz Gate',
-                          '২০ সে. কুইজ গেট',
-                          'بوابة اختبار ٢٠ث',
-                          '٢٠ سیکنڈ کوئز',
-                          'Gerbang Kuis 20d'
+                          '20s Quiz',
+                          '২০সে. কুইজ',
+                          'اختبار ٢٠ث',
+                          '٢٠س کوئز',
+                          'Kuis 20d'
                         )}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleStageChangeAppTier(app.id, 'adult-blocked')}
-                        className={`py-1.5 px-2 border text-[10px] font-mono-tech text-center cursor-pointer ${
+                        className={`py-1.5 px-1 border text-[10px] font-mono-tech text-center truncate cursor-pointer ${
                           app.tier === 'adult-blocked'
                             ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
                             : 'border-zinc-800 text-zinc-400'
                         }`}
                       >
-                        🚫 {tx(lang, 'Block App', 'সম্পূর্ণ ব্লক', 'حجب التطبيق', 'بلاک کریں', 'Blokir')}
+                        🚫 {tx(lang, 'Block', 'ব্লক', 'حجب', 'بلاک', 'Blokir')}
                       </button>
                     </div>
                   </div>
@@ -1486,7 +1482,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
             </div>
 
             {/* Add Custom App Form */}
-            <form onSubmit={handleCreateCustomApp} className="flex flex-wrap gap-2 pt-1">
+            <form onSubmit={handleCreateCustomApp} className="flex flex-col sm:flex-row gap-2 pt-1">
               <input
                 type="text"
                 value={newCustomAppName}
@@ -1499,29 +1495,31 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                   'نئی ایپ کا نام شامل کریں...',
                   'Tambahkan nama aplikasi kustom...'
                 )}
-                className="flex-1 min-w-[160px] bg-black border border-zinc-800 px-3 py-2 text-xs font-mono-tech text-zinc-200"
+                className="w-full sm:flex-1 bg-black border border-zinc-800 px-3 py-2 text-xs font-mono-tech text-zinc-200"
               />
-              <select
-                value={newCustomAppTier}
-                onChange={(e) => setNewCustomAppTier(e.target.value as AppFrictionTier)}
-                className="bg-black border border-zinc-800 px-2.5 py-2 text-xs font-mono-tech text-zinc-300"
-              >
-                <option value="utility">
-                  {tx(lang, 'Normal (Instant)', 'সাধারণ (সরাসরি)', 'عادي (فوري)', 'نارمل (فوری)', 'Normal (Langsung)')}
-                </option>
-                <option value="restricted">
-                  {tx(lang, '20s Quiz Gate', '২০ সে. কুইজ গেট', 'اختبار ٢٠ث', '٢٠ سیکنڈ کوئز', 'Kuis 20d')}
-                </option>
-                <option value="adult-blocked">
-                  {tx(lang, 'Completely Blocked', 'সম্পূর্ণ ব্লক', 'محجوب تماماً', 'مکمل بلاک', 'Diblokir Penuh')}
-                </option>
-              </select>
-              <button
-                type="submit"
-                className="px-3 py-2 border border-zinc-600 bg-zinc-900 text-xs font-mono-tech text-zinc-100 hover:bg-zinc-800 cursor-pointer"
-              >
-                + {tx(lang, 'Add App', 'যোগ করুন', 'إضافة', 'شامل کریں', 'Tambah')}
-              </button>
+              <div className="flex gap-2">
+                <select
+                  value={newCustomAppTier}
+                  onChange={(e) => setNewCustomAppTier(e.target.value as AppFrictionTier)}
+                  className="flex-1 bg-black border border-zinc-800 px-2.5 py-2 text-xs font-mono-tech text-zinc-300"
+                >
+                  <option value="utility">
+                    {tx(lang, 'Normal (Instant)', 'সাধারণ (সরাসরি)', 'عادي (فوري)', 'نارمل (فوری)', 'Normal (Langsung)')}
+                  </option>
+                  <option value="restricted">
+                    {tx(lang, '20s Quiz Gate', '২০ সে. কুইজ গেট', 'اختبار ٢٠ث', '٢٠ سیکنڈ کوئز', 'Kuis 20d')}
+                  </option>
+                  <option value="adult-blocked">
+                    {tx(lang, 'Completely Blocked', 'সম্পূর্ণ ব্লক', 'محجوب تماماً', 'مکمل بلاک', 'Diblokir Penuh')}
+                  </option>
+                </select>
+                <button
+                  type="submit"
+                  className="px-3 py-2 border border-zinc-600 bg-zinc-900 text-xs font-mono-tech text-zinc-100 hover:bg-zinc-800 cursor-pointer shrink-0 whitespace-nowrap"
+                >
+                  + {tx(lang, 'Add App', 'যোগ করুন', 'إضافة', 'شامل کریں', 'Tambah')}
+                </button>
+              </div>
             </form>
           </div>
 
@@ -1559,7 +1557,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                     autoCleanBackgroundApps: !(prev.autoCleanBackgroundApps ?? true),
                   }))
                 }
-                className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+                className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer shrink-0 whitespace-nowrap ${
                   vault.autoCleanBackgroundApps ?? true
                     ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                     : 'border-zinc-700 text-zinc-400'
@@ -1575,7 +1573,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               {tx(
                 lang,
                 'Select the essential apps allowed to stay alive in the background. Any app outside this Background Safe List (such as Facebook, Instagram, YouTube, TikTok, or browsers) is automatically cleaned and closed when you return Home or when you tap Clean below.',
-                'ব্যাকগ্রাউন্ডে সচল থাকার জন্য জরুরি অ্যাপগুলো নির্বাচন করুন। এই নিরাপদ তালিকার বাইরের যেকোনো অ্যাপ (যেমন: Facebook, Instagram, YouTube, TikTok বা ব্রাউজার) হোম স্ক্রিনে ফিরলে বা নিচের বাটনে ট্যাপ করলে স্বয়ংক্রিয়ভাবে পরিষ্কার ও বন্ধ হয়ে যাবে।',
+                'ব্যাকগ্রাউন্ডে সচল থাকার জন্য জরুরি অ্যাপগুলো নির্বাচন করুন। এই নিরাপদ তালিকার বাইরের যেকোনো অ্যাপ (যেমন: ফেসবুক, ইনস্টাগ্রাম, ইউটিউব, টিকটক বা ব্রাউজার) হোম স্ক্রিনে ফিরলে বা নিচের বাটনে ট্যাপ করলে স্বয়ংক্রিয়ভাবে পরিষ্কার ও বন্ধ হয়ে যাবে।',
                 'حدد التطبيقات الضرورية المسموح لها بالعمل في الخلفية. أي تطبيق خارج هذه القائمة سيتم تنظيفه وإغلاقه تلقائياً عند العودة للشاشة الرئيسية.',
                 'وہ ضروری ایپس منتخب کریں جنہیں بیک گراؤنڈ میں چلنے کی اجازت ہے۔ اس فہرست سے باہر کی تمام ایپس ہوم پر آنے پر خودکار طور پر بند ہو جائیں گی۔',
                 'Pilih aplikasi penting yang diizinkan berjalan di latar belakang. Aplikasi di luar daftar ini akan dibersihkan & ditutup otomatis.'
@@ -2086,9 +2084,18 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               <div className="grid grid-cols-3 gap-2">
                 {(
                   [
-                    { id: 'android', label: '🤖 Android' },
-                    { id: 'ios', label: '🍎 iOS / iPad' },
-                    { id: 'web', label: '🌐 Web / Desktop' },
+                    {
+                      id: 'android',
+                      label: tx(lang, '🤖 Android', '🤖 অ্যানড্রয়েড', '🤖 أندرويد', '🤖 اینڈرائیڈ', '🤖 Android'),
+                    },
+                    {
+                      id: 'ios',
+                      label: tx(lang, '🍎 iOS / iPad', '🍎 আইফোন / iOS', '🍎 آيفون / iOS', '🍎 آئی فون / iOS', '🍎 iOS / iPad'),
+                    },
+                    {
+                      id: 'web',
+                      label: tx(lang, '🌐 Web / Desktop', '🌐 ওয়েব / ডেস্কটপ', '🌐 ويب / سطح مكتب', '🌐 ویب / ڈیسک ٹاپ', '🌐 Web / Desktop'),
+                    },
                   ] as const
                 ).map((pl) => (
                   <button
@@ -2777,7 +2784,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               }`}
             >
               <p className="text-xs font-medium text-zinc-100 leading-snug">
-                Q: {activePracticeLesson.quizQuestion[lang]}
+                {tx(lang, 'Q:', 'প্রশ্ন:', 'س:', 'سوال:', 'P:')} {activePracticeLesson.quizQuestion[lang]}
               </p>
               <div className="space-y-1.5">
                 {activePracticeLesson.quizOptions[lang].map((opt, idx) => (
@@ -2819,7 +2826,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
         <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-6">
           <div className="max-w-xs w-full bg-zinc-100 text-black p-6 font-mono-tech space-y-4 shadow-2xl">
             <div className="text-center border-b-2 border-dashed border-black pb-3">
-              <div className="text-sm font-bold tracking-widest">MINIMUM PHONE</div>
+              <div className="text-sm font-bold tracking-widest">{t.appName}</div>
               <div className="text-[10px]">
                 {tx(
                   lang,
@@ -2846,13 +2853,17 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                 <span>
                   {tx(lang, 'DEEP FOCUS RECLAIMED:', 'ফিরে পাওয়া সময়:', 'الوقت المستعاد:', 'بچایا گیا وقت:', 'WAKTU DIHEMAT:')}
                 </span>
-                <strong>{hoursReclaimed} HRS</strong>
+                <strong>
+                  {hoursReclaimed} {tx(lang, 'HRS', 'ঘণ্টা', 'ساعة', 'گھنٹے', 'JAM')}
+                </strong>
               </div>
               <div className="flex justify-between">
                 <span>
                   {tx(lang, 'CLARITY / PURITY STREAK:', 'পবিত্রতা স্ট্রিক:', 'أيام النقاء:', 'پاکیزگی اسٹریک:', 'HARI BERSIH:')}
                 </span>
-                <strong>{purityDays} DAYS</strong>
+                <strong>
+                  {purityDays} {tx(lang, 'DAYS', 'দিন', 'يوم', 'دن', 'HARI')}
+                </strong>
               </div>
               <div className="flex justify-between">
                 <span>
@@ -2882,7 +2893,14 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
             </div>
 
             <div className="text-center text-[10px] border-t border-black pt-2">
-              100% FREE · MINIMUMPHONE BY KASB LLC
+              {tx(
+                lang,
+                '100% FREE · MINIMUMPHONE BY KASB LLC',
+                '১০০% ফ্রি · KASB LLC কর্তৃক নির্মিত',
+                'مجاني ١٠٠٪ · مقدم من KASB LLC',
+                '١٠٠٪ مفت · پیشکش KASB LLC',
+                '100% GRATIS · OLEH KASB LLC'
+              )}
             </div>
 
             <button

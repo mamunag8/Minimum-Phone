@@ -622,14 +622,12 @@ export const InhaleInterceptModal: React.FC<InhaleInterceptModalProps> = ({
               <div className="bg-black border border-zinc-900 p-3 text-xs leading-relaxed text-zinc-200">
                 <p className="font-mono-tech text-zinc-400 mb-1">
                   {tx(lang, 'Card', 'কার্ড', 'بطاقة', 'کارڈ', 'Kartu')} {readerPage} / 3 —{' '}
-                  {lang === 'bn'
-                    ? FOCUS_READER_PASSAGES[readerPage - 1].title.bn
-                    : FOCUS_READER_PASSAGES[readerPage - 1].title.en}
+                  {FOCUS_READER_PASSAGES[readerPage - 1].title[lang] ||
+                    FOCUS_READER_PASSAGES[readerPage - 1].title.en}
                 </p>
                 <p>
-                  {lang === 'bn'
-                    ? FOCUS_READER_PASSAGES[readerPage - 1].content.bn
-                    : FOCUS_READER_PASSAGES[readerPage - 1].content.en}
+                  {FOCUS_READER_PASSAGES[readerPage - 1].content[lang] ||
+                    FOCUS_READER_PASSAGES[readerPage - 1].content.en}
                 </p>
               </div>
               {readerPage < 3 && (

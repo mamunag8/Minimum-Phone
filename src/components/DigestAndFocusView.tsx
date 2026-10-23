@@ -5,7 +5,11 @@ import type {
   NotificationItem,
   QrComplexityLevel,
 } from '../types/app';
-import { TRANSLATIONS, tx } from '../i18n/translations';
+import {
+  localizeDynamicUserText,
+  TRANSLATIONS,
+  tx,
+} from '../i18n/translations';
 
 interface DigestAndFocusViewProps {
   lang: LanguageCode;
@@ -41,18 +45,28 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
   const t = TRANSLATIONS[lang];
 
   const [activeSlot, setActiveSlot] = useState<'12:00 PM' | '06:00 PM'>('06:00 PM');
-  const [monkInputTitle, setMonkInputTitle] = useState<string>(
-    vault.monkTaskTitle || 'Deep Focus Work Block'
+  const [monkInputTitle, setMonkInputTitle] = useState<string>(() =>
+    localizeDynamicUserText(vault.monkTaskTitle || 'Deep Focus Work Block', lang)
   );
   const [monkMinutes, setMonkMinutes] = useState<number>(50);
   const [simSender] = useState<string>('Coworker Alex');
   const [simMessage] = useState<string>('Check out this link when you get a chance');
+
+  useEffect(() => {
+    setMonkInputTitle((prev) => localizeDynamicUserText(prev, lang));
+  }, [lang]);
 
   const [selectedNotif, setSelectedNotif] = useState<NotificationItem | null>(null);
   const [notifBlockedFeedback, setNotifBlockedFeedback] = useState<string | null>(null);
 
   // QR Scanner & Complexity State
   const qrComplexity: QrComplexityLevel = vault.qrComplexity || 'hard';
+  const qrComplexityLabel =
+    qrComplexity === 'easy'
+      ? tx(lang, 'EASY', 'সহজ', 'سهل', 'آسان', 'MUDAH')
+      : qrComplexity === 'medium'
+      ? tx(lang, 'MEDIUM', 'মাঝারি', 'متوسط', 'درمیانہ', 'SEDANG')
+      : tx(lang, 'HARD', 'কঠিন', 'صعب', 'سخت', 'SULIT');
   const expectedQrToken = getRequiredQrTokenForComplexity(
     vault.physicalBrickAnchorCode,
     qrComplexity
@@ -437,15 +451,19 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
             <div className="text-xs space-y-1">
               <div className="text-zinc-300">
                 {tx(lang, 'Source App', 'অ্যাপ', 'التطبيق', 'ایپ', 'Aplikasi')}:{' '}
-                <strong className="text-zinc-100">{selectedNotif.appName}</strong> ·{' '}
-                {selectedNotif.timestamp}
+                <strong className="text-zinc-100">
+                  {localizeDynamicUserText(selectedNotif.appName, lang)}
+                </strong>{' '}
+                · {selectedNotif.timestamp}
               </div>
               <div className="text-zinc-300">
                 {tx(lang, 'From', 'প্রেরক', 'من', 'مرسل', 'Dari')}:{' '}
-                <strong className="text-zinc-100">{selectedNotif.sender}</strong>
+                <strong className="text-zinc-100">
+                  {localizeDynamicUserText(selectedNotif.sender, lang)}
+                </strong>
               </div>
               <div className="p-3 border border-zinc-800 bg-zinc-950 text-zinc-100 mt-2 leading-relaxed">
-                “{selectedNotif.message}”
+                “{localizeDynamicUserText(selectedNotif.message, lang)}”
               </div>
             </div>
 
@@ -538,11 +556,17 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
                 className="border-t border-zinc-900 pt-2 text-xs flex justify-between items-start cursor-pointer hover:bg-zinc-950 p-1"
               >
                 <div>
-                  <span className="font-mono-tech text-zinc-200 font-medium">{u.sender}</span>{' '}
+                  <span className="font-mono-tech text-zinc-200 font-medium">
+                    {localizeDynamicUserText(u.sender, lang)}
+                  </span>{' '}
                   <span className="text-[10px] font-mono-tech px-1.5 py-0.5 bg-zinc-800 text-zinc-300 ml-1">
-                    {u.breakthroughReason}
+                    {u.breakthroughReason
+                      ? localizeDynamicUserText(u.breakthroughReason, lang)
+                      : ''}
                   </span>
-                  <p className="text-zinc-300 mt-0.5">{u.message}</p>
+                  <p className="text-zinc-300 mt-0.5">
+                    {localizeDynamicUserText(u.message, lang)}
+                  </p>
                 </div>
                 <span className="text-[10px] font-mono-tech text-zinc-500">{u.timestamp}</span>
               </div>
@@ -567,7 +591,8 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
                     : 'border-zinc-800 text-zinc-500'
                 }`}
               >
-                {slot} {tx(lang, 'Batch', 'ব্যাচ', 'دفعة', 'بیچ', 'Batch')} ({count})
+                {localizeDynamicUserText(slot, lang)}{' '}
+                {tx(lang, 'Batch', 'ব্যাচ', 'دفعة', 'بیچ', 'Batch')} ({count})
               </button>
             );
           })}
@@ -580,10 +605,10 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
               {tx(
                 lang,
                 `0 notifications waiting in ${activeSlot} digest. Peace of mind intact.`,
-                `${activeSlot} ডাইজেস্টে কোনো নোটিফিকেশন অপেক্ষা করছে না। আপনার মানসিক প্রশান্তি অটুট রয়েছে।`,
-                `لا توجد إشعارات في دفعة ${activeSlot}. سكينتك محفوظة.`,
-                `${activeSlot} ڈائجسٹ میں کوئی نوٹیفکیشن نہیں۔ ذہنی سکون برقرار ہے۔`,
-                `0 notifikasi di kumpulan ${activeSlot}. Ketenangan pikiran terjaga.`
+                `${localizeDynamicUserText(activeSlot, lang)} ডাইজেস্টে কোনো নোটিফিকেশন অপেক্ষা করছে না। আপনার মানসিক প্রশান্তি অটুট রয়েছে।`,
+                `لا توجد إشعارات في دفعة ${localizeDynamicUserText(activeSlot, lang)}. سكينتك محفوظة.`,
+                `${localizeDynamicUserText(activeSlot, lang)} ڈائجسٹ میں کوئی نوٹیفکیشن نہیں۔ ذہنی سکون برقرار ہے۔`,
+                `0 notifikasi di kumpulan ${localizeDynamicUserText(activeSlot, lang)}. Ketenangan pikiran terjaga.`
               )}
             </div>
           ) : (
@@ -595,12 +620,17 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
               >
                 <div>
                   <div className="text-xs font-mono-tech text-zinc-300">
-                    [{item.appName}] <span className="text-zinc-400">{item.sender}</span>
+                    [{localizeDynamicUserText(item.appName, lang)}]{' '}
+                    <span className="text-zinc-400">
+                      {localizeDynamicUserText(item.sender, lang)}
+                    </span>
                     <span className="ml-2 text-[10px] text-zinc-500 underline">
                       [{tx(lang, 'Tap to Read Safely', 'নিরাপদে পড়তে ট্যাপ করুন', 'اضغط للقراءة بأمان', 'محفوظ طریقے سے پڑھیں', 'Ketuk untuk Baca Aman')}]
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-400 mt-1">{item.message}</p>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    {localizeDynamicUserText(item.message, lang)}
+                  </p>
                 </div>
                 <span className="text-[10px] font-mono-tech text-zinc-600 shrink-0">
                   {item.timestamp}
@@ -620,10 +650,10 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
             {tx(
               lang,
               `Mark ${activeSlot} Digest as Reviewed & Clear`,
-              `${activeSlot} ডাইজেস্ট পড়া সম্পন্ন হিসেবে চিহ্নিত ও পরিষ্কার করুন`,
-              `تحديد دفعة ${activeSlot} كمقروءة ومسحها`,
-              `${activeSlot} ڈائجسٹ کو پڑھا ہوا نشان زد کریں اور صاف کریں`,
-              `Tandai kumpulan ${activeSlot} selesai & bersihkan`
+              `${localizeDynamicUserText(activeSlot, lang)} ডাইজেস্ট পড়া সম্পন্ন হিসেবে চিহ্নিত ও পরিষ্কার করুন`,
+              `تحديد دفعة ${localizeDynamicUserText(activeSlot, lang)} كمقروءة ومسحها`,
+              `${localizeDynamicUserText(activeSlot, lang)} ڈائجسٹ کو پڑھا ہوا نشان زد کریں اور صاف کریں`,
+              `Tandai kumpulan ${localizeDynamicUserText(activeSlot, lang)} selesai & bersihkan`
             )}
           </button>
         )}
@@ -705,7 +735,7 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
               )}
             </span>
             <h3 className="text-sm font-mono-tech font-semibold text-zinc-100">
-              {t.physicalBrickTitle} ({qrComplexity.toUpperCase()})
+              {t.physicalBrickTitle} ({qrComplexityLabel})
             </h3>
           </div>
           <span
@@ -916,11 +946,11 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
                 🔒{' '}
                 {tx(
                   lang,
-                  `PHYSICAL QR LOCK ACTIVE (${qrComplexity.toUpperCase()} COMPLEXITY)`,
-                  `ফিজিক্যাল QR লক সক্রিয় (${qrComplexity.toUpperCase()} মোড)`,
-                  `قفل QR الفعلي نشط (${qrComplexity.toUpperCase()})`,
-                  `فزیکل QR لاک فعال ہے (${qrComplexity.toUpperCase()})`,
-                  `KUNCI QR FISIK AKTIF (${qrComplexity.toUpperCase()})`
+                  `PHYSICAL QR LOCK ACTIVE (${qrComplexityLabel} COMPLEXITY)`,
+                  `ফিজিক্যাল QR লক সক্রিয় (${qrComplexityLabel} মোড)`,
+                  `قفل QR الفعلي نشط (${qrComplexityLabel})`,
+                  `فزیکل QR لاک فعال ہے (${qrComplexityLabel})`,
+                  `KUNCI QR FISIK AKTIF (${qrComplexityLabel})`
                 )}
               </span>
               {!cameraActive ? (
@@ -1001,11 +1031,11 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
             <div className="text-[11px] text-zinc-400">
               {tx(
                 lang,
-                `Required Physical QR Token (${qrComplexity.toUpperCase()}):`,
-                `প্রয়োজনীয় ফিজিক্যাল QR কোড (${qrComplexity.toUpperCase()}):`,
-                `رمز QR المطلوب (${qrComplexity.toUpperCase()}):`,
-                `مطلوبہ فزیکل QR کوڈ (${qrComplexity.toUpperCase()}):`,
-                `Kode QR Fisik Wajib (${qrComplexity.toUpperCase()}):`
+                `Required Physical QR Token (${qrComplexityLabel}):`,
+                `প্রয়োজনীয় ফিজিক্যাল QR কোড (${qrComplexityLabel}):`,
+                `رمز QR المطلوب (${qrComplexityLabel}):`,
+                `مطلوبہ فزیکل QR کوڈ (${qrComplexityLabel}):`,
+                `Kode QR Fisik Wajib (${qrComplexityLabel}):`
               )}{' '}
               <span className="text-zinc-200 font-semibold">{expectedQrToken}</span>
             </div>
@@ -1061,7 +1091,14 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
         {showPrintableCard && (
           <div className="border border-zinc-500 bg-white text-black p-5 text-center space-y-3">
             <div className="text-[10px] font-mono-tech uppercase tracking-widest">
-              MINIMUM PHONE // PHYSICAL QR ANCHOR ({qrComplexity.toUpperCase()})
+              {tx(
+                lang,
+                `MINIMUM PHONE // PHYSICAL QR ANCHOR (${qrComplexityLabel})`,
+                `মিনিমাম ফোন // ফিজিক্যাল QR কার্ড (${qrComplexityLabel})`,
+                `الهاتف الأدنى // بطاقة رمز QR الفعلي (${qrComplexityLabel})`,
+                `منیمم فون // فزیکل QR کارڈ (${qrComplexityLabel})`,
+                `MINIMUM PHONE // KARTU QR FISIK (${qrComplexityLabel})`
+              )}
             </div>
             <div className="w-36 h-36 mx-auto border-4 border-black p-2 grid grid-cols-7 grid-rows-7 gap-1 bg-white">
               {Array.from({ length: 49 }).map((_, i) => {

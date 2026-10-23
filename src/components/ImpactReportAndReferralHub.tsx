@@ -252,7 +252,7 @@ export const ImpactReportAndReferralHub: React.FC<ImpactReportAndReferralHubProp
     },
   ];
 
-  // Referral Message Builder (Multilingual)
+  // Referral Message Builder (Multilingual across all 5 languages)
   const referralMessage = useMemo(() => {
     const hoursStr = (effectiveReclaimedMinutes / 60).toFixed(1);
     if (lang === 'bn') {
@@ -263,6 +263,36 @@ export const ImpactReportAndReferralHub: React.FC<ImpactReportAndReferralHubProp
         return `🛡️ আপনাকে এবং আপনার পরিবারকে মোবাইল আসক্তি ও ক্ষতিকর অশ্লীল কনটেন্ট থেকে রক্ষা করতে ব্যবহার করুন *Minimum Phone* — ১০০% ফ্রি এবং বিজ্ঞাপনমুক্ত!\n\n• প্রাইভেট সেফ DNS দিয়ে সকল ব্রাউজারে অশ্লীল ওয়েবসাইট ব্লক করে\n• রাতে ব্রাউজার ও সোশ্যাল অ্যাপ খুলতে ফিজিক্যাল QR কোড স্ক্যান বাধ্যতামূলক\n• ২০ মিনিট পর ফেসবুক, ইউটিউব ও ইনস্টাগ্রাম স্বয়ংক্রিয়ভাবে বন্ধ করে\n• অকারণ স্ক্রলিংকে ২০ সেকেন্ডের ধারাবাহিক শিক্ষায় রূপান্তর করে\n\nডাউনলোড লিংক:\n${PLAY_STORE_URL}`;
       }
       return `📚 আপনার স্মার্টফোনকে আসক্তির যন্ত্র থেকে *ধারাবাহিক শিক্ষা ও প্রশান্তিময় জীবনের* হাতিয়ারে পরিণত করুন *Minimum Phone* দিয়ে (১০০% ফ্রি, শূন্য বিজ্ঞাপন)!\n\nপ্রতিবার সোশ্যাল অ্যাপ বা সেটিংস খোলার সময় আপনি ২০ সেকেন্ডে কুরআনের আয়াত, সহীহ হাদীস, ভাষা ও প্রজ্ঞা শিখতে পারবেন।\n\nবন্ধু ও পরিবারের সাথে শেয়ার করুন:\n${PLAY_STORE_URL}`;
+    }
+
+    if (lang === 'ar') {
+      if (referralTemplate === 'personal-success') {
+        return `🌱 لقد استعدت ${hoursStr}+ ساعة من وقتي، وأوقفت ${effectiveImpulsesStopped} نزوة تصفح عشوائي، وأكملت ${effectiveLessonsCompleted} درساً تعليمياً باستخدام تطبيق *Minimum Phone*!\n\n✅ مجاني ١٠٠٪ للأبد وبدون أي إعلانات\n✅ بوابة قراءة واختبار ٢٠ ثانية قبل فتح تطبيقات التواصل (قرآن، حديث، لغات وحكمة)\n✅ إغلاق تلقائي بعد ٢٠ دقيقة لفيسبوك ويوتيوب وإنستغرام\n✅ درع DNS العائلي + قفل QR الليلي\n\nحمله مجاناً لك ولعائلتك:\n${PLAY_STORE_URL}`;
+      }
+      if (referralTemplate === 'family-protection') {
+        return `🛡️ احمِ نفسك وعائلتك من إدمان الشاشات والمحتوى الضار مع تطبيق *Minimum Phone* — مجاني ١٠٠٪ وبدون إعلانات!\n\n• يحجب المواقع الإباحية عبر DNS الآمن\n• يتطلب مسح رمز QR فعلي لفتح المتصفح ليلاً\n• يغلق فيسبوك ويوتيوب تلقائياً بعد ٢٠ دقيقة\n\nرابط التحميل المجاني:\n${PLAY_STORE_URL}`;
+      }
+      return `📚 حوّل هاتفك من أداة تشتيت إلى وسيلة *للتعلم المستمر والسكينة* مع *Minimum Phone* (مجاني ١٠٠٪ وبدون إعلانات)!\n\nشاركه مع أصدقائك وعائلتك:\n${PLAY_STORE_URL}`;
+    }
+
+    if (lang === 'ur') {
+      if (referralTemplate === 'personal-success') {
+        return `🌱 میں نے *Minimum Phone* استعمال کر کے اپنی زندگی کے ${hoursStr}+ گھنٹے بچائے، ${effectiveImpulsesStopped} بے مقصد اسکرولنگ کی خواہشات کو روکا اور ${effectiveLessonsCompleted} تعلیمی اسباق مکمل کیے!\n\n✅ ١٠٠٪ مفت اور صفر اشتہارات\n✅ سوشل ایپس کھولنے سے پہلے ٢٠ سیکنڈ کا سبق اور کوئز (قرآن، حدیث، زبان اور حکمت)\n✅ فیس بک، یوٹیوب اور انسٹاگرام پر ٢٠ منٹ آٹو کلوز\n✅ پرائیویٹ سیف DNS + رات کا ایمرجنسی QR لاک\n\nاپنے اور فیملی کے لیے مفت ڈاؤن لوڈ کریں:\n${PLAY_STORE_URL}`;
+      }
+      if (referralTemplate === 'family-protection') {
+        return `🛡️ اپنے آپ کو اور اپنی فیملی کو اسکرین کی لت اور نقصان دہ مواد سے بچانے کے لیے *Minimum Phone* استعمال کریں — ١٠٠٪ مفت اور اشتہارات سے پاک!\n\nمفت ڈاؤن لوڈ لنک:\n${PLAY_STORE_URL}`;
+      }
+      return `📚 اپنے اسمارٹ فون کو بے مقصد اسکرولنگ کی بجائے *مسلسل علم اور ذہنی سکون* کا ذریعہ بنائیں *Minimum Phone* کے ساتھ (١٠٠٪ مفت، صفر اشتہارات)!\n\nدوستوں اور فیملی کے ساتھ شیئر کریں:\n${PLAY_STORE_URL}`;
+    }
+
+    if (lang === 'id') {
+      if (referralTemplate === 'personal-success') {
+        return `🌱 Saya telah menghemat ${hoursStr}+ jam waktu hidup saya, menghentikan ${effectiveImpulsesStopped} dorongan scrolling impulsif, dan menyelesaikan ${effectiveLessonsCompleted} kuis belajar dengan *Minimum Phone*!\n\n✅ 100% Gratis Selamanya & Tanpa Iklan\n✅ Kuis 20 detik sebelum membuka aplikasi sosial (Al-Qur'an, Hadis, Bahasa & Hikmah)\n✅ Tutup otomatis 20 menit untuk Facebook, YouTube & Instagram\n✅ DNS Aman + Kunci QR Malam\n\nUnduh gratis untuk Anda & keluarga:\n${PLAY_STORE_URL}`;
+      }
+      if (referralTemplate === 'family-protection') {
+        return `🛡️ Lindungi diri Anda dan keluarga dari kecanduan layar & konten berbahaya dengan *Minimum Phone* — 100% Gratis & Tanpa Iklan!\n\nUnduh gratis di sini:\n${PLAY_STORE_URL}`;
+      }
+      return `📚 Ubah ponsel Anda dari mesin pengalih perhatian menjadi alat *Belajar Berkelanjutan & Ketenangan* dengan *Minimum Phone* (100% Gratis, Tanpa Iklan)!\n\nBagikan ke teman & keluarga:\n${PLAY_STORE_URL}`;
     }
 
     if (referralTemplate === 'personal-success') {
@@ -688,12 +718,12 @@ export const ImpactReportAndReferralHub: React.FC<ImpactReportAndReferralHubProp
                     <div
                       style={{ height: `${screenHeightPct}%` }}
                       className="w-1/2 bg-zinc-800 border border-zinc-700 transition-all"
-                      title={`Screen Time: ${day.actualScreenMinutes}m`}
+                      title={`${tx(lang, 'Screen Time', 'স্ক্রিন ব্যবহার', 'وقت الشاشة', 'اسکرین ٹائم', 'Waktu Layar')}: ${day.actualScreenMinutes}m`}
                     />
                     <div
                       style={{ height: `${savedHeightPct}%` }}
                       className="w-1/2 bg-zinc-100 transition-all"
-                      title={`Saved: +${day.savedMinutes}m`}
+                      title={`${tx(lang, 'Saved', 'সাশ্রয়', 'الوقت الموفر', 'بچت', 'Dihemat')}: +${day.savedMinutes}m`}
                     />
                   </div>
                   <div

@@ -45,36 +45,66 @@ const REWIRING_MILESTONES = [
     day: 3,
     titleEn: 'Day 3 · Prefrontal Awakening',
     titleBn: '৩য় দিন · প্রাথমিক আত্মনিয়ন্ত্রণ জাগরণ',
+    titleAr: 'اليوم ٣ · يقظة التحكم الذاتي',
+    titleUr: 'تیسرا دن · ابتدائی خود ضابطگی کی بیداری',
+    titleId: 'Hari 3 · Kebangkitan Kendali Diri',
     descEn: 'Acute craving wave peaks and begins subsiding.',
     descBn: 'প্রাথমিক তীব্র তাড়নার ঢেউ কমে আসতে শুরু করে।',
+    descAr: 'تبلغ موجة الرغبة الحادة ذروتها وتبدأ في الانحسار.',
+    descUr: 'ابتدائی شدید خواہش کی لہر کم ہونا شروع ہو جاتی ہے۔',
+    descId: 'Gelombang dorongan awal memuncak dan mulai mereda.',
   },
   {
     day: 7,
     titleEn: 'Day 7 · Dopamine Sensitivity',
     titleBn: '৭ম দিন · ডোপামিন সংবেদনশীলতা বৃদ্ধি',
+    titleAr: 'اليوم ٧ · استعادة حساسية الدوبامين',
+    titleUr: 'ساتواں دن · ڈوپامائن کی حساسیت میں بہتری',
+    titleId: 'Hari 7 · Pemulihan Sensitivitas Dopamin',
     descEn: 'Everyday focus and natural motivation begin returning.',
     descBn: 'স্বাভাবিক কাজে মনোযোগ ও প্রশান্তি ফিরে আসতে শুরু করে।',
+    descAr: 'يبدأ التركيز اليومي والدافع الطبيعي في العودة.',
+    descUr: 'روزمرہ کے کاموں میں توجہ اور فطری جذبہ واپس آنے لگتا ہے۔',
+    descId: 'Fokus harian dan motivasi alami mulai kembali.',
   },
   {
     day: 14,
     titleEn: 'Day 14 · Mental Fog Lifting',
     titleBn: '১৪তম দিন · মানসিক জড়তা মুক্তি',
+    titleAr: 'اليوم ١٤ · انقشاع الضباب الذهني',
+    titleUr: 'چودہواں دن · ذہنی دھند کا خاتمہ',
+    titleId: 'Hari 14 · Hilangnya Kabut Pikiran',
     descEn: 'Sharper memory, calmer eye contact, and deeper sleep.',
     descBn: 'মস্তিষ্কের ধোঁয়াশা কাটে, ঘুম ও আত্মবিশ্বাস গভীর হয়।',
+    descAr: 'ذاكرة أقوى، نوم أعمق، وثقة هادئة بالنفس.',
+    descUr: 'بہتر یادداشت، پرسکون نیند اور خود اعتمادی میں اضافہ۔',
+    descId: 'Ingatan lebih tajam, tidur lebih nyenyak, dan percaya diri tenang.',
   },
   {
     day: 30,
     titleEn: 'Day 30 · Heart & Habit Stability',
     titleBn: '৩০তম দিন · হৃদয়ের স্থিরতা ও অভ্যাস গঠন',
+    titleAr: 'اليوم ٣٠ · استقرار القلب والعادات',
+    titleUr: 'تیسواں دن · دل کا قرار اور پختہ عادت',
+    titleId: 'Hari 30 · Stabilitas Hati & Kebiasaan',
     descEn: 'Impulse loops weaken significantly; inner peace deepens.',
     descBn: 'পুরোনো আসক্তির পথ দুর্বল হয়ে হৃদয়ে স্থায়ী প্রশান্তি আসে।',
+    descAr: 'تضعف مسارات الإدمان القديمة وتترسخ السكينة الداخلية.',
+    descUr: 'پرانی لت کی راہیں کمزور ہو کر دل میں مستقل سکون آتا ہے۔',
+    descId: 'Siklus impuls melemah secara signifikan; ketenangan batin mendalam.',
   },
   {
     day: 90,
     titleEn: 'Day 90 · Full Baseline Neuro-Reset',
     titleBn: '৯০তম দিন · সম্পূর্ণ ডোপামিন রিসেট',
+    titleAr: 'اليوم ٩٠ · إعادة ضبط الدماغ بالكامل',
+    titleUr: 'نوے واں دن · مکمل ڈوپامائن ری سیٹ',
+    titleId: 'Hari 90 · Pemulihan Penuh Sistem Saraf',
     descEn: 'Brain reward circuitry restored to natural baseline.',
     descBn: 'মস্তিষ্কের ডোপামিন চক্র সম্পূর্ণ স্বাভাবিক ও সুস্থ অবস্থায় ফেরে।',
+    descAr: 'عودة نظام المكافأة في الدماغ إلى فطرته الطبيعية السليمة.',
+    descUr: 'دماغ کا نظامِ انعام مکمل طور پر اپنی فطری اور صحت مند حالت میں لوٹ آتا ہے۔',
+    descId: 'Sistem penghargaan otak pulih sepenuhnya ke kondisi alami.',
   },
 ];
 
@@ -762,7 +792,7 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
                   title: tx(
                     lang,
                     '🔒 2. CleanBrowsing Strict Adult + Proxy/VPN Block (Strongest)',
-                    '🔒 ২. CleanBrowsing Strict Adult + Proxy/VPN Block (সবচেয়ে কঠোর)',
+                    '🔒 ২. CleanBrowsing Strict Adult (সবচেয়ে কঠোর — প্রক্সি ও অশ্লীল সাইট ব্লক)',
                     '🔒 ٢. CleanBrowsing Strict Adult (الأقوى ضد الإباحية والبروكسي)',
                     '🔒 ٢. CleanBrowsing Strict Adult (سب سے مضبوط فلٹر)',
                     '🔒 2. CleanBrowsing Strict Adult (Terkuat + Blokir Proxy)'
@@ -807,7 +837,8 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
                       {provider.title}
                     </div>
                     <div className="text-[11px] font-mono-tech text-zinc-300 mt-0.5">
-                      Hostname: <strong className="text-white select-all">{provider.host}</strong>
+                      {tx(lang, 'Hostname:', 'হোস্টনেম (DNS):', 'العنوان (DNS):', 'ہوسٹ نیم (DNS):', 'Hostname:')}{' '}
+                      <strong className="text-white select-all">{provider.host}</strong>
                     </div>
                     <div className="text-[10px] text-zinc-400 mt-0.5">{provider.desc}</div>
                   </div>
@@ -1060,7 +1091,7 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
               >
                 <div className="flex items-center justify-between text-xs font-mono-tech">
                   <span className="font-medium">
-                    {lang === 'bn' ? m.titleBn : m.titleEn}
+                    {tx(lang, m.titleEn, m.titleBn, m.titleAr, m.titleUr, m.titleId)}
                   </span>
                   <span>
                     {reached
@@ -1069,7 +1100,7 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
                   </span>
                 </div>
                 <p className="text-xs mt-1 text-zinc-400">
-                  {lang === 'bn' ? m.descBn : m.descEn}
+                  {tx(lang, m.descEn, m.descBn, m.descAr, m.descUr, m.descId)}
                 </p>
               </div>
             );
