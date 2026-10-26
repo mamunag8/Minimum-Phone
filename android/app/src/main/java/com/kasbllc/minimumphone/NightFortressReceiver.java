@@ -6,8 +6,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.net.VpnService;
-import android.os.Build;
 
 import java.util.Calendar;
 
@@ -28,7 +26,7 @@ public class NightFortressReceiver extends BroadcastReceiver {
             FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE
         );
         boolean watchdogEnabled = prefs.getBoolean(FortressWatchdogService.KEY_WATCHDOG_ENABLED, true);
-        boolean autoNightVpn = prefs.getBoolean(FortressWatchdogService.KEY_AUTO_NIGHT_DNS_VPN, true);
+        boolean autoNightDns = prefs.getBoolean(FortressWatchdogService.KEY_AUTO_NIGHT_DNS_VPN, true);
         int nightStartHour = prefs.getInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, 22);
         int nightEndHour = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
 
@@ -37,22 +35,15 @@ public class NightFortressReceiver extends BroadcastReceiver {
             scheduleNightAlarm(context, nightStartHour);
         }
 
-        // If it's currently Night Fortress hours and Auto-Night DNS VPN is enabled, ensure VPN is active
+        // If it's currently Night Fortress hours and Auto-Night DNS is enabled, enforce Private DNS
         Calendar cal = Calendar.getInstance();
         int hour = cal.get(Calendar.HOUR_OF_DAY);
         boolean isNightNow = (nightStartHour > nightEndHour)
             ? (hour >= nightStartHour || hour < nightEndHour)
             : (hour >= nightStartHour && hour < nightEndHour);
 
-        if (isNightNow && autoNightVpn && !FamilyDnsVpnService.isRunning()) {
-            try {
-                if (VpnService.prepare(context) == null) {
-                    Intent vpnIntent = new Intent(context, FamilyDnsVpnService.class);
-                    vpnIntent.setAction(FamilyDnsVpnService.ACTION_START_VPN);
-                    vpnIntent.putExtra(FamilyDnsVpnService.EXTRA_AUTO_NIGHT, true);
-                    context.startService(vpnIntent);
-                }
-            } catch (Exception ignored) {}
+        if (isNightNow && autoNightDns) {
+            FortressWatchdogService.ensurePrivateDnsActiveAtNight(context);
         }
     }
 

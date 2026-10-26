@@ -16,7 +16,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
-import android.net.VpnService;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Handler;
@@ -89,11 +88,11 @@ public class MinimumPhoneNativePlugin extends Plugin {
             }
         } catch (Exception ignored) {}
 
-        // Live Private DNS status from Android Settings.Global (readable on Android 9+) + Local Family DNS VPN Shield
+        // Live Private DNS status from Android Settings.Global (readable on Android 9+) + Fortress DNS Shield
         String dnsMode = "unknown";
         String dnsSpecifier = "";
         boolean dnsHostnameActive = false;
-        boolean localVpnActive = FamilyDnsVpnService.isRunning();
+        boolean localVpnActive = FortressWatchdogService.isDnsShieldPrefActive(ctx);
         boolean watchdogActive = FortressWatchdogService.isWatchdogActive();
         try {
             String rawMode = Settings.Global.getString(ctx.getContentResolver(), "private_dns_mode");
@@ -107,13 +106,13 @@ public class MinimumPhoneNativePlugin extends Plugin {
             dnsHostnameActive = ("hostname".equalsIgnoreCase(dnsMode) && !dnsSpecifier.isEmpty()) || localVpnActive;
             if (localVpnActive && dnsSpecifier.isEmpty()) {
                 dnsMode = "hostname";
-                dnsSpecifier = "1.1.1.3 (Built-In Family DNS VPN)";
+                dnsSpecifier = "family.cloudflare-dns.com (1.1.1.3 Shield)";
             }
         } catch (Exception ignored) {
             if (localVpnActive) {
                 dnsHostnameActive = true;
                 dnsMode = "hostname";
-                dnsSpecifier = "1.1.1.3 (Built-In Family DNS VPN)";
+                dnsSpecifier = "family.cloudflare-dns.com (1.1.1.3 Shield)";
             }
         }
 
@@ -383,7 +382,7 @@ public class MinimumPhoneNativePlugin extends Plugin {
             String currentSpec = Settings.Global.getString(ctx.getContentResolver(), "private_dns_specifier");
             boolean isCurrentlyValid = ("hostname".equalsIgnoreCase(currentMode) &&
                                        currentSpec != null && !currentSpec.trim().isEmpty()) ||
-                                       FamilyDnsVpnService.isRunning();
+                                       FortressWatchdogService.isDnsShieldPrefActive(ctx);
 
             if (!isCurrentlyValid && autoRestore) {
                 try {
@@ -394,17 +393,10 @@ public class MinimumPhoneNativePlugin extends Plugin {
                     autoRestoredNatively = false;
                 }
 
-                // If Settings.Global couldn't be written, automatically engage Built-In Family DNS VPN (1.1.1.3)
                 if (!autoRestoredNatively) {
-                    try {
-                        if (VpnService.prepare(ctx) == null) {
-                            Intent vpnIntent = new Intent(ctx, FamilyDnsVpnService.class);
-                            vpnIntent.setAction(FamilyDnsVpnService.ACTION_START_VPN);
-                            vpnIntent.putExtra(FamilyDnsVpnService.EXTRA_AUTO_NIGHT, true);
-                            ctx.startService(vpnIntent);
-                            autoRestoredNatively = true;
-                        }
-                    } catch (Exception ignored) {}
+                    FortressWatchdogService.ensurePrivateDnsActiveAtNight(ctx);
+                    NightFortressReceiver.startWatchdogSafely(ctx);
+                    autoRestoredNatively = true;
                 }
             }
         } catch (Exception ignored) {}
@@ -431,51 +423,27 @@ public class MinimumPhoneNativePlugin extends Plugin {
     }
 
     /**
-     * 1-Tap Built-In Family DNS (1.1.1.3 / 1.0.0.3 / CleanBrowsing Family) Local VPN Shield.
-     * Enables OS-wide Family DNS filtration directly inside Minimum Phone without needing manual Android Settings edits.
+     * 1-Tap Family DNS (1.1.1.3 / family.cloudflare-dns.com) & OS Watchdog Shield (Google Play Compliant).
      */
     @PluginMethod
     public void toggleLocalFamilyDnsVpn(PluginCall call) {
         Context ctx = getContext();
-        Activity activity = getActivity();
         boolean enable = Boolean.TRUE.equals(call.getBoolean("enabled", true));
-        boolean autoNight = Boolean.TRUE.equals(call.getBoolean("autoNight", false));
+        boolean autoNight = Boolean.TRUE.equals(call.getBoolean("autoNight", true));
 
-        if (!enable) {
-            try {
-                Intent stopIntent = new Intent(ctx, FamilyDnsVpnService.class);
-                stopIntent.setAction(FamilyDnsVpnService.ACTION_STOP_VPN);
-                ctx.startService(stopIntent);
-            } catch (Exception ignored) {}
-            new Handler(Looper.getMainLooper()).postDelayed(() -> call.resolve(buildStatusObject(ctx)), 300);
-            return;
+        FortressWatchdogService.setDnsShieldPrefActive(ctx, enable);
+        if (enable) {
+            FortressWatchdogService.ensurePrivateDnsActiveAtNight(ctx);
+            SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit()
+                .putBoolean(FortressWatchdogService.KEY_WATCHDOG_ENABLED, true)
+                .putBoolean(FortressWatchdogService.KEY_AUTO_NIGHT_DNS_VPN, autoNight)
+                .apply();
+            NightFortressReceiver.startWatchdogSafely(ctx);
+            NightFortressReceiver.scheduleNightAlarm(ctx, 22);
         }
 
-        try {
-            Intent prepareIntent = VpnService.prepare(ctx);
-            if (prepareIntent != null && activity != null) {
-                activity.startActivityForResult(prepareIntent, 9095);
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    if (VpnService.prepare(ctx) == null) {
-                        startLocalVpnNow(ctx, autoNight);
-                    }
-                    call.resolve(buildStatusObject(ctx));
-                }, 2500);
-                return;
-            }
-            startLocalVpnNow(ctx, autoNight);
-        } catch (Exception ignored) {}
-
-        new Handler(Looper.getMainLooper()).postDelayed(() -> call.resolve(buildStatusObject(ctx)), 350);
-    }
-
-    private void startLocalVpnNow(Context ctx, boolean autoNight) {
-        try {
-            Intent vpnIntent = new Intent(ctx, FamilyDnsVpnService.class);
-            vpnIntent.setAction(FamilyDnsVpnService.ACTION_START_VPN);
-            vpnIntent.putExtra(FamilyDnsVpnService.EXTRA_AUTO_NIGHT, autoNight);
-            ctx.startService(vpnIntent);
-        } catch (Exception ignored) {}
+        new Handler(Looper.getMainLooper()).postDelayed(() -> call.resolve(buildStatusObject(ctx)), 200);
     }
 
     /**
