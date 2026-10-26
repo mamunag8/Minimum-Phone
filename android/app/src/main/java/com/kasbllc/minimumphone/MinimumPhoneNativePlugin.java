@@ -401,11 +401,7 @@ public class MinimumPhoneNativePlugin extends Plugin {
                             Intent vpnIntent = new Intent(ctx, FamilyDnsVpnService.class);
                             vpnIntent.setAction(FamilyDnsVpnService.ACTION_START_VPN);
                             vpnIntent.putExtra(FamilyDnsVpnService.EXTRA_AUTO_NIGHT, true);
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                ctx.startForegroundService(vpnIntent);
-                            } else {
-                                ctx.startService(vpnIntent);
-                            }
+                            ctx.startService(vpnIntent);
                             autoRestoredNatively = true;
                         }
                     } catch (Exception ignored) {}
@@ -478,11 +474,7 @@ public class MinimumPhoneNativePlugin extends Plugin {
             Intent vpnIntent = new Intent(ctx, FamilyDnsVpnService.class);
             vpnIntent.setAction(FamilyDnsVpnService.ACTION_START_VPN);
             vpnIntent.putExtra(FamilyDnsVpnService.EXTRA_AUTO_NIGHT, autoNight);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ctx.startForegroundService(vpnIntent);
-            } else {
-                ctx.startService(vpnIntent);
-            }
+            ctx.startService(vpnIntent);
         } catch (Exception ignored) {}
     }
 

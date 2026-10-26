@@ -50,11 +50,7 @@ public class NightFortressReceiver extends BroadcastReceiver {
                     Intent vpnIntent = new Intent(context, FamilyDnsVpnService.class);
                     vpnIntent.setAction(FamilyDnsVpnService.ACTION_START_VPN);
                     vpnIntent.putExtra(FamilyDnsVpnService.EXTRA_AUTO_NIGHT, true);
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        context.startForegroundService(vpnIntent);
-                    } else {
-                        context.startService(vpnIntent);
-                    }
+                    context.startService(vpnIntent);
                 }
             } catch (Exception ignored) {}
         }
@@ -63,11 +59,7 @@ public class NightFortressReceiver extends BroadcastReceiver {
     public static void startWatchdogSafely(Context context) {
         try {
             Intent serviceIntent = new Intent(context, FortressWatchdogService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent);
-            } else {
-                context.startService(serviceIntent);
-            }
+            context.startService(serviceIntent);
         } catch (Exception ignored) {}
     }
 

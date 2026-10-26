@@ -41,7 +41,6 @@ public class FamilyDnsVpnService extends VpnService {
             return START_NOT_STICKY;
         }
 
-        startForegroundNotification();
         startDnsTunnel();
         return START_STICKY;
     }
