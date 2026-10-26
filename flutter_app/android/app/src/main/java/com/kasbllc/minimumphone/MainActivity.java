@@ -1,5 +1,6 @@
 package com.kasbllc.minimumphone;
 
+import android.Manifest;
 import android.app.ActivityManager;
 import android.app.AppOpsManager;
 import android.app.role.RoleManager;
@@ -22,13 +23,24 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
 import android.provider.AlarmClock;
 import android.provider.CalendarContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
+import com.google.zxing.qrcode.QRCodeWriter;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -48,6 +60,9 @@ public class MainActivity extends FlutterActivity {
     private static final String CHANNEL = "com.kasbllc.minimumphone/native";
     private final Handler sessionHandler = new Handler(Looper.getMainLooper());
     private Runnable activeReturnRunnable = null;
+    private MethodChannel.Result pendingQrScanResult = null;
+    private String pendingScanPrompt = null;
+    private WebView printWebView = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -265,6 +280,33 @@ public class MainActivity extends FlutterActivity {
                             res.put("cleanedCount", cleaned);
                             res.put("freedMb", cleaned * 18);
                             result.success(res);
+                            break;
+                        }
+
+                        case "scanQrCode": {
+                            String prompt = call.argument("prompt");
+                            startQrScanFromFlutter(prompt, result);
+                            break;
+                        }
+
+                        case "generateQrMatrix": {
+                            String data = call.argument("data");
+                            if (data == null || data.trim().isEmpty()) {
+                                data = "KASB-BRICK-77";
+                            }
+                            result.success(buildIsoQrMatrixMap(data.trim()));
+                            break;
+                        }
+
+                        case "printQrCodeSheet": {
+                            String data = call.argument("data");
+                            String title = call.argument("title");
+                            String subtitle = call.argument("subtitle");
+                            if (data == null || data.trim().isEmpty()) {
+                                data = "KASB-BRICK-77";
+                            }
+                            printPhysicalQrSheet(data.trim(), title, subtitle);
+                            result.success(true);
                             break;
                         }
 
@@ -634,5 +676,165 @@ public class MainActivity extends FlutterActivity {
     @Override
     public void onBackPressed() {
         // Stay inside Minimum Phone when Back is pressed on Home
+    }
+
+    private void startQrScanFromFlutter(String prompt, MethodChannel.Result result) {
+        if (pendingQrScanResult != null) {
+            try {
+                pendingQrScanResult.success("");
+            } catch (Exception ignored) {}
+            pendingQrScanResult = null;
+        }
+        pendingQrScanResult = result;
+        pendingScanPrompt = (prompt != null && !prompt.trim().isEmpty())
+            ? prompt.trim()
+            : "Scan your Physical Minimum Phone QR Card / আপনার ফিজিক্যাল QR কোড স্ক্যান করুন";
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.CAMERA}, 801);
+                return;
+            }
+        }
+        launchZxingScannerForFlutter();
+    }
+
+    private void launchZxingScannerForFlutter() {
+        try {
+            IntentIntegrator integrator = new IntentIntegrator(this);
+            integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
+            integrator.setPrompt(pendingScanPrompt != null ? pendingScanPrompt : "Scan Physical QR Code");
+            integrator.setBeepEnabled(true);
+            integrator.setOrientationLocked(true);
+            integrator.initiateScan();
+        } catch (Exception e) {
+            if (pendingQrScanResult != null) {
+                pendingQrScanResult.success("");
+                pendingQrScanResult = null;
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 801) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                launchZxingScannerForFlutter();
+            } else {
+                Toast.makeText(this, "Camera permission is required to scan QR code.", Toast.LENGTH_LONG).show();
+                if (pendingQrScanResult != null) {
+                    pendingQrScanResult.success("");
+                    pendingQrScanResult = null;
+                }
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        IntentResult scanRes = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if (scanRes != null) {
+            String contents = scanRes.getContents();
+            if (pendingQrScanResult != null) {
+                MethodChannel.Result res = pendingQrScanResult;
+                pendingQrScanResult = null;
+                res.success(contents != null ? contents.trim() : "");
+            }
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    private Map<String, Object> buildIsoQrMatrixMap(String text) {
+        Map<String, Object> out = new HashMap<>();
+        try {
+            QRCodeWriter writer = new QRCodeWriter();
+            BitMatrix matrix = writer.encode(text, BarcodeFormat.QR_CODE, 0, 0);
+            int w = matrix.getWidth();
+            int h = matrix.getHeight();
+            StringBuilder bits = new StringBuilder(w * h);
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    bits.append(matrix.get(x, y) ? '1' : '0');
+                }
+            }
+            out.put("size", w);
+            out.put("bits", bits.toString());
+        } catch (Exception e) {
+            out.put("size", 0);
+            out.put("bits", "");
+        }
+        return out;
+    }
+
+    private void printPhysicalQrSheet(String qrData, String titleText, String subtitleText) {
+        try {
+            SharedPreferences prefs = getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit()
+                .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 60000L)
+                .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "print_qr")
+                .apply();
+
+            QRCodeWriter writer = new QRCodeWriter();
+            BitMatrix matrix = writer.encode(qrData, BarcodeFormat.QR_CODE, 0, 0);
+            int w = matrix.getWidth();
+            int h = matrix.getHeight();
+
+            StringBuilder svg = new StringBuilder();
+            svg.append("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ").append(w + 4).append(" ").append(h + 4)
+               .append("' width='280' height='280' shape-rendering='crispEdges'>");
+            svg.append("<rect width='100%' height='100%' fill='#ffffff'/>");
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    if (matrix.get(x, y)) {
+                        svg.append("<rect x='").append(x + 2).append("' y='").append(y + 2)
+                           .append("' width='1' height='1' fill='#000000'/>");
+                    }
+                }
+            }
+            svg.append("</svg>");
+
+            String safeTitle = (titleText != null && !titleText.isEmpty())
+                ? titleText
+                : "Minimum Phone — Physical QR Fortress Key";
+            String safeSub = (subtitleText != null && !subtitleText.isEmpty())
+                ? subtitleText
+                : "Keep this printed QR sheet in ANOTHER ROOM (away from your bed & desk). Scan it when you need emergency access at night.";
+
+            String html = "<!DOCTYPE html><html><head><meta charset='utf-8'/>"
+                + "<style>body{font-family:sans-serif;text-align:center;padding:36px;color:#111;}"
+                + ".card{border:3px solid #10B981;border-radius:20px;padding:32px;max-width:460px;margin:0 auto;}"
+                + "h1{font-size:22px;margin-bottom:8px;}p{font-size:14px;color:#444;line-height:1.5;}"
+                + ".code{font-family:monospace;font-size:18px;font-weight:bold;background:#f3f4f6;padding:8px 16px;border-radius:8px;display:inline-block;margin-top:14px;}"
+                + "</style></head><body><div class='card'>"
+                + "<h1>🛡️ " + safeTitle + "</h1>"
+                + "<p>" + safeSub + "</p>"
+                + "<div style='margin:20px 0;'>" + svg.toString() + "</div>"
+                + "<div class='code'>" + qrData + "</div>"
+                + "<p style='margin-top:18px;font-size:12px;color:#666;'>Minimum Phone: Detox & Focus • OS Fortress</p>"
+                + "</div></body></html>";
+
+            WebView webView = new WebView(this);
+            printWebView = webView;
+            webView.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onPageFinished(WebView view, String url) {
+                    try {
+                        PrintManager printManager = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+                        if (printManager != null) {
+                            String jobName = "MinimumPhone_Physical_QR_Key";
+                            PrintDocumentAdapter adapter = view.createPrintDocumentAdapter(jobName);
+                            printManager.print(jobName, adapter, new PrintAttributes.Builder().build());
+                        }
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "Print error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+            webView.loadDataWithBaseURL(null, html, "text/HTML", "UTF-8", null);
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not prepare QR print sheet: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 }

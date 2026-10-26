@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'i18n.dart';
+import 'wisdom_bank.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -144,7 +145,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Navigation State (No Bottom Bar — 100% Sidebar Driven!)
-  // 0: Home, 1: Apps, 2: Purity & DNS, 3: Focus, 4: Settings, 5: Keep Notes
+  // 0: Home, 1: Apps, 2: Purity & DNS, 3: Focus, 4: Settings, 5: Keep Notes, 6: User Guide
   int _currentTab = 0;
   int _appsSubTab = 0; // 0: All, 1: Essential, 2: Utility, 3: Restricted, 4: Night QR
   int _puritySubTab = 0; // 0: DNS & Night Lock, 1: SOS & Streak, 2: Keywords, 3: All
@@ -171,6 +172,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   String _dnsHost = 'family.cloudflare-dns.com';
   bool _phoneSettingsLocked = true;
   bool _nightAutoDnsEnabled = true;
+  bool _strictQrSettingsLock = true;
+  bool _qrSetupVerified = false;
+  int _qrMatrixSize = 0;
+  String _qrMatrixBits = '';
   String _qrSecret = 'KASB-BRICK-77';
   int _cleanStreakDays = 7;
   int _emergencyLockdownUntil = 0;
@@ -207,7 +212,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   bool _hasUsageAccess = false;
   bool _hasOverlayPermission = false;
   bool _isKioskPinned = false;
-  String _osDnsMode = 'off';
   String _osDnsSpecifier = '';
   bool _osDnsIsFamilySafe = false;
   int _batteryLevel = 100;
@@ -254,6 +258,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     _initDefaultKeepNotes();
     _loadPersistedState();
     _refreshNativeStatus();
+    _loadQrMatrix();
     _clockTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         setState(() {
@@ -451,6 +456,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           _dnsHost = data['dnsHost'] ?? 'family.cloudflare-dns.com';
           _phoneSettingsLocked = data['phoneSettingsLocked'] ?? true;
           _nightAutoDnsEnabled = data['nightAutoDnsEnabled'] ?? true;
+          _strictQrSettingsLock = data['strictQrSettingsLock'] ?? true;
+          _qrSetupVerified = data['qrSetupVerified'] == true;
           _qrSecret = data['qrSecret'] ?? 'KASB-BRICK-77';
           _cleanStreakDays = data['cleanStreakDays'] ?? 7;
           _reclaimedMinutes = data['reclaimedMinutes'] ?? 145;
@@ -505,6 +512,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'dnsHost': _dnsHost,
         'phoneSettingsLocked': _phoneSettingsLocked,
         'nightAutoDnsEnabled': _nightAutoDnsEnabled,
+        'strictQrSettingsLock': _strictQrSettingsLock,
+        'qrSetupVerified': _qrSetupVerified,
         'qrSecret': _qrSecret,
         'cleanStreakDays': _cleanStreakDays,
         'reclaimedMinutes': _reclaimedMinutes,
@@ -549,9 +558,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           _hasOverlayPermission = (status['isOverlayGranted'] == true) ||
               (status['hasOverlayPermission'] == true);
           _isKioskPinned = status['isKioskPinned'] == true;
-          _osDnsMode =
-              (status['privateDnsMode'] ?? status['osDnsMode'] ?? 'off')
-                  .toString();
           _osDnsSpecifier =
               (status['privateDnsHost'] ?? status['osDnsSpecifier'] ?? '')
                   .toString();
@@ -890,33 +896,144 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     } catch (_) {}
   }
 
+  Future<void> _loadQrMatrix() async {
+    try {
+      final Map<dynamic, dynamic>? res = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>(
+              'generateQrMatrix', {'content': _qrSecret});
+      if (res != null && mounted) {
+        setState(() {
+          _qrMatrixSize = (res['size'] as int?) ?? 0;
+          _qrMatrixBits = (res['bits'] ?? '').toString();
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<bool> _scanPhysicalQrWithCamera(BuildContext ctx) async {
+    try {
+      final String? scanned = await _channel.invokeMethod<String>('scanQrCode');
+      if (scanned == null || scanned.trim().isEmpty) return false;
+      final String clean = scanned.trim().toUpperCase();
+      final String target = _qrSecret.trim().toUpperCase();
+      if (clean == target || clean.contains(target)) {
+        setState(() => _qrSetupVerified = true);
+        _saveState();
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(
+              content: Text(_tr('qrVerifiedMsg')),
+              backgroundColor: const Color(0xFF10B981),
+            ),
+          );
+        }
+        return true;
+      } else {
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(
+              content: Text(_tr('invalidQrMsg')),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  Future<void> _printPhysicalQrSheet() async {
+    try {
+      await _channel.invokeMethod('printQrCodeSheet', {'qrSecret': _qrSecret});
+    } catch (_) {}
+  }
+
+  void _requireProtectionUnlock(
+    BuildContext ctx, {
+    required String targetTitle,
+    required VoidCallback onUnlocked,
+  }) {
+    // At night (22:00-06:00) OR when Strict QR Lock is active, any attempt to weaken
+    // restrictions or settings MUST first pass the Physical QR Code Camera Scan,
+    // followed by the 15-second Mindful Reflection Gate!
+    final bool needsPhysicalQr = _isNightWindow || _strictQrSettingsLock;
+    if (needsPhysicalQr) {
+      _showQrUnlockDialog(
+        ctx,
+        onUnlocked: () {
+          _showMindfulGateModal(
+            ctx,
+            targetTitle: targetTitle,
+            onPassed: onUnlocked,
+          );
+        },
+      );
+    } else {
+      _showMindfulGateModal(
+        ctx,
+        targetTitle: targetTitle,
+        onPassed: onUnlocked,
+      );
+    }
+  }
+
   void _showQrUnlockDialog(BuildContext ctx, {required VoidCallback onUnlocked}) {
     final TextEditingController qrCtrl = TextEditingController();
     showDialog(
       context: ctx,
       builder: (dCtx) => AlertDialog(
         backgroundColor: const Color(0xFF14151C),
-        title: const Text(
-          '🌙 Night Physical QR Key Required',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFF10B981), width: 1.4),
+        ),
+        title: Text(
+          _tr('qrModalTitle'),
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'This app or setting is locked by your Night Fortress rule. Scan or enter your physical QR key to proceed:',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+            Text(
+              _tr('qrModalSub'),
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                ),
+                icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+                label: Text(
+                  _tr('qrScanPrimaryBtn'),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                onPressed: () async {
+                  final bool ok = await _scanPhysicalQrWithCamera(ctx);
+                  if (ok && dCtx.mounted) {
+                    Navigator.pop(dCtx);
+                    onUnlocked();
+                  }
+                },
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: qrCtrl,
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'Enter QR code (e.g. $_qrSecret)',
-                hintStyle: const TextStyle(color: Colors.white38),
+                hintText: _tr('qrInputHint'),
+                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
                 filled: true,
                 fillColor: Colors.black38,
+                isDense: true,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -934,12 +1051,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               _saveState();
               Navigator.pop(dCtx);
             },
-            child: const Text('Stay Focused'),
+            child: Text(_tr('stayFocusedBtn')),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.black,
+              backgroundColor: Colors.white12,
+              foregroundColor: Colors.white,
             ),
             onPressed: () {
               if (qrCtrl.text.trim().toUpperCase() ==
@@ -948,14 +1065,14 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 onUnlocked();
               } else {
                 ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(
-                    content: Text('Invalid Physical QR Code Key!'),
+                  SnackBar(
+                    content: Text(_tr('invalidQrMsg')),
                     backgroundColor: Colors.redAccent,
                   ),
                 );
               }
             },
-            child: const Text('Unlock'),
+            child: Text(_tr('unlockBtn')),
           ),
         ],
       ),
@@ -967,8 +1084,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     required String targetTitle,
     required VoidCallback onPassed,
   }) {
-    final WisdomEntry wisdom = AppDataDefaults
-        .wisdomList[_now.second % AppDataDefaults.wisdomList.length];
+    final List<WisdomEntry> wList = AppDataDefaults.getWisdomList(_lang);
+    final int qIdx =
+        (_now.second + _now.minute * 60 + _wisdomIndex) % wList.length;
+    final WisdomEntry wisdom = wList[qIdx];
+    final WisdomEntry altTranslation = _lang == 'bn'
+        ? WisdomBank.entriesEn[qIdx % WisdomBank.entriesEn.length]
+        : WisdomBank.entriesBn[qIdx % WisdomBank.entriesBn.length];
     int secondsLeft = 15;
     int? selectedOption;
     String? errorMsg;
@@ -1024,8 +1146,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           ),
                           child: Text(
                             secondsLeft > 0
-                                ? '⏳ ${secondsLeft}s Mindful Pause'
-                                : '✅ Pause Complete • Answer Quiz',
+                                ? '⏳ ${secondsLeft}s'
+                                : '✅ 15s',
                             style: TextStyle(
                               color: secondsLeft > 0
                                   ? Colors.amber
@@ -1046,9 +1168,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                             _saveState();
                             Navigator.pop(mCtx);
                           },
-                          child: const Text(
-                            'Close & Reclaim Time',
-                            style: TextStyle(color: Color(0xFF10B981)),
+                          child: Text(
+                            _tr('closeReclaimBtn'),
+                            style: const TextStyle(color: Color(0xFF10B981)),
                           ),
                         ),
                       ],
@@ -1089,9 +1211,18 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                               height: 1.4,
                             ),
                           ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '"${altTranslation.text}"',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              height: 1.35,
+                            ),
+                          ),
                           const SizedBox(height: 8),
                           Text(
-                            '— ${wisdom.ref}',
+                            '— ${wisdom.ref} (#${qIdx + 1}/${wList.length})',
                             style: const TextStyle(
                               color: Color(0xFF10B981),
                               fontSize: 12,
@@ -1185,15 +1316,14 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                                   onPassed();
                                 } else {
                                   setModalState(() {
-                                    errorMsg =
-                                        'Please reflect on the quote and select the matching answer.';
+                                    errorMsg = _tr('wrongQuizError');
                                   });
                                 }
                               },
                         child: Text(
                           secondsLeft > 0
-                              ? 'Wait ${secondsLeft}s while reflecting...'
-                              : 'Confirm Reflection & Proceed',
+                              ? '${_tr('waitReflecting')} (${secondsLeft}s)'
+                              : _tr('confirmReflectionBtn'),
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -1253,9 +1383,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 borderRadius: BorderRadius.circular(20),
                 side: const BorderSide(color: Color(0xFF10B981), width: 1.5),
               ),
-              title: const Text(
-                '🛡️ Emergency Purity SOS Active',
-                style: TextStyle(
+              title: Text(
+                '🛡️ ${_tr('sosTitle')}',
+                style: const TextStyle(
                   color: Color(0xFF10B981),
                   fontWeight: FontWeight.bold,
                 ),
@@ -1269,9 +1399,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       color: Colors.redAccent.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Text(
-                      '🔒 ALL Web Browsers & Settings are now locked at the Android OS level for 15 minutes.',
-                      style: TextStyle(
+                    child: Text(
+                      _tr('sosSubtitle'),
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -1348,6 +1478,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             final int completedSteps = (_hasUsageAccess ? 1 : 0) +
                 (_hasOverlayPermission ? 1 : 0) +
                 (_osDnsIsFamilySafe ? 1 : 0) +
+                (_qrSetupVerified ? 1 : 0) +
                 (_isDefaultLauncher ? 1 : 0);
 
             return Padding(
@@ -1359,12 +1490,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   children: [
                     Row(
                       children: [
-                        const Expanded(
+                        Expanded(
                           child: Text(
-                            '🛡️ Step-by-Step Protection Setup Guide',
-                            style: TextStyle(
+                            _tr('wizardTitle'),
+                            style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 18,
+                              fontSize: 17,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -1374,9 +1505,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                             foregroundColor: const Color(0xFF10B981),
                           ),
                           icon: const Icon(Icons.refresh_rounded, size: 16),
-                          label: const Text(
-                            'Refresh',
-                            style: TextStyle(
+                          label: Text(
+                            _tr('refreshBtn'),
+                            style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                             ),
@@ -1390,7 +1521,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Completed $completedSteps of 4 steps • Follow these 4 steps once so DNS Protection & Phone Settings Lock work 100% reliably:',
+                      '($completedSteps / 5) • ${_tr('wizardSubtitle')}',
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,
@@ -1398,7 +1529,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     ),
                     const SizedBox(height: 8),
                     LinearProgressIndicator(
-                      value: completedSteps / 4.0,
+                      value: completedSteps / 5.0,
                       minHeight: 6,
                       backgroundColor: Colors.white12,
                       color: const Color(0xFF10B981),
@@ -1407,15 +1538,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     const SizedBox(height: 14),
                     _buildWizardStepTile(
                       step: '1',
-                      title: 'Step 1: Grant Usage Access (অ্যাপ ইউসেজ পারমিশন)',
+                      title: _tr('wizStep1Title'),
                       subtitle: _hasUsageAccess
-                          ? '✅ ACTIVE! Minimum Phone can now detect when Phone Settings or Browsers open.'
-                          : 'How to enable:\n'
-                              '1. Tap "Grant Usage" → Find "Minimum Phone" in the list.\n'
-                              '2. Turn ON "Permit usage access" / "Allow usage tracking".\n'
-                              '3. Press Back to return to Minimum Phone.',
+                          ? _tr('wizStep1SubDone')
+                          : _tr('wizStep1SubTodo'),
                       isDone: _hasUsageAccess,
-                      buttonLabel: _hasUsageAccess ? 'Granted ✓' : 'Grant Usage',
+                      buttonLabel:
+                          _hasUsageAccess ? _tr('grantedBtn') : _tr('grantBtn'),
                       onTap: () async {
                         await _channel
                             .invokeMethod('requestUsageStatsPermission');
@@ -1427,17 +1556,14 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     const SizedBox(height: 10),
                     _buildWizardStepTile(
                       step: '2',
-                      title:
-                          'Step 2: Allow "Appear on Top" (লক স্ক্রিন পারমিশন)',
+                      title: _tr('wizStep2Title'),
                       subtitle: _hasOverlayPermission
-                          ? '✅ ACTIVE! Lock Screen can immediately pop up over Phone Settings.'
-                          : 'Why needed: Android 10–15 requires this so our Lock Screen can block Phone Settings.\n'
-                              '1. Tap "Allow Overlay" → Select "Minimum Phone".\n'
-                              '2. Turn ON "Allow display over other apps" / "Appear on top".\n'
-                              '3. Press Back to return here.',
+                          ? _tr('wizStep2SubDone')
+                          : _tr('wizStep2SubTodo'),
                       isDone: _hasOverlayPermission,
-                      buttonLabel:
-                          _hasOverlayPermission ? 'Granted ✓' : 'Allow Overlay',
+                      buttonLabel: _hasOverlayPermission
+                          ? _tr('grantedBtn')
+                          : _tr('grantBtn'),
                       onTap: () async {
                         await _channel.invokeMethod('requestOverlayPermission');
                         await Future.delayed(const Duration(seconds: 1));
@@ -1448,17 +1574,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     const SizedBox(height: 10),
                     _buildWizardStepTile(
                       step: '3',
-                      title: 'Step 3: Activate Safe Private DNS ($_dnsHost)',
+                      title: '${_tr('wizStep3Title')} ($_dnsHost)',
                       subtitle: _osDnsIsFamilySafe
-                          ? '✅ ACTIVE ($_osDnsSpecifier)! Adult sites & malware are blocked across all browsers & apps.'
-                          : 'How to enable:\n'
-                              '1. Tap "1-Tap Setup" (copies $_dnsHost & opens Settings).\n'
-                              '2. Go to Network & Internet / More Connections → Private DNS.\n'
-                              '3. Select "Private DNS provider hostname", paste $_dnsHost & tap Save.\n'
-                              '4. Tap "I Saved DNS • Verify" below!',
+                          ? _tr('wizStep3SubDone')
+                          : _tr('wizStep3SubTodo'),
                       isDone: _osDnsIsFamilySafe,
                       buttonLabel:
-                          _osDnsIsFamilySafe ? 'Active ✓' : '1-Tap Setup',
+                          _osDnsIsFamilySafe ? _tr('grantedBtn') : '1-Tap',
                       onTap: () {
                         Navigator.pop(mCtx);
                         _activateSafePrivateDnsNow(ctx);
@@ -1479,7 +1601,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                             size: 16,
                           ),
                           label: Text(
-                            'I Saved $_dnsHost in Settings • Verify & Lock Now',
+                            _tr('wizStep3VerifyBtn'),
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -1497,16 +1619,69 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       ),
                     ],
                     const SizedBox(height: 10),
+                    // STEP 4: PRINT PHYSICAL QR CODE & KEEP IN ANOTHER ROOM
                     _buildWizardStepTile(
                       step: '4',
-                      title:
-                          'Step 4: Set Default Home Launcher (ডিফল্ট হোম স্ক্রিন)',
+                      title: _tr('wizStep4Title'),
+                      subtitle: _qrSetupVerified
+                          ? _tr('wizStep4SubDone')
+                          : _tr('wizStep4SubTodo'),
+                      isDone: _qrSetupVerified,
+                      buttonLabel: '🖨️ Print',
+                      onTap: () async {
+                        await _printPhysicalQrSheet();
+                      },
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white24),
+                            ),
+                            icon: const Icon(Icons.print_rounded, size: 16),
+                            label: Text(
+                              _tr('printQrBtn'),
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            onPressed: _printPhysicalQrSheet,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF10B981),
+                              side: const BorderSide(color: Color(0xFF10B981)),
+                            ),
+                            icon: const Icon(
+                                Icons.qr_code_scanner_rounded, size: 16),
+                            label: Text(
+                              _tr('testQrScanBtn'),
+                              style: const TextStyle(
+                                  fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: () async {
+                              await _scanPhysicalQrWithCamera(ctx);
+                              if (sCtx.mounted) setWizardState(() {});
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    _buildWizardStepTile(
+                      step: '5',
+                      title: _tr('wizStep5Title'),
                       subtitle: _isDefaultLauncher
-                          ? '✅ ACTIVE as your Default Home Launcher!'
-                          : '1. Tap "Set Home" → Choose "Minimum Phone" → Tap "Always".',
+                          ? _tr('wizStep5SubDone')
+                          : _tr('wizStep5SubTodo'),
                       isDone: _isDefaultLauncher,
-                      buttonLabel:
-                          _isDefaultLauncher ? 'Default ✓' : 'Set Home',
+                      buttonLabel: _isDefaultLauncher
+                          ? _tr('grantedBtn')
+                          : _tr('setDefaultBtn'),
                       onTap: () async {
                         await _channel.invokeMethod('requestDefaultLauncher');
                         await Future.delayed(const Duration(seconds: 1));
@@ -1527,9 +1702,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           _refreshNativeStatus();
                           Navigator.pop(mCtx);
                         },
-                        child: const Text(
-                          'Done & Verify Protection',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                        child: Text(
+                          _tr('doneVerifyBtn'),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
@@ -1645,6 +1820,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   _buildFocusPage(innerCtx),
                   _buildSettingsPage(innerCtx),
                   _buildKeepNotesPage(innerCtx),
+                  _buildUserGuidePage(innerCtx),
                 ],
               ),
             ),
@@ -1657,19 +1833,23 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
   PreferredSizeWidget _buildTopAppBar(BuildContext ctx) {
     final List<String> tabTitles = [
-      _tr('appTitle'),
+      '', // Ultra-clean Homepage: NO "Minimum Phone" branding on Home!
       _tr('navApps'),
       _tr('navPurity'),
       _tr('navFocus'),
       _tr('navSettings'),
-      'Keep Notes',
+      _tr('navKeepNotes'),
+      _tr('navUserGuide'),
     ];
+    final bool isAllProtected =
+        _osDnsIsFamilySafe && _hasUsageAccess && _hasOverlayPermission;
+
     return AppBar(
       backgroundColor: _bgColor,
       elevation: 0,
       leading: IconButton(
         icon: Icon(Icons.menu_rounded, color: _textColor),
-        tooltip: 'Open Sidebar Navigation',
+        tooltip: _tr('menuTitle'),
         onPressed: () => _scaffoldKey.currentState?.openDrawer(),
       ),
       titleSpacing: 0,
@@ -1696,7 +1876,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           size: 14, color: _accentColor),
                       const SizedBox(width: 4),
                       Text(
-                        'Home',
+                        _tr('navHome'),
                         style: TextStyle(
                           color: _textColor,
                           fontSize: 11,
@@ -1722,74 +1902,33 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         ],
       ),
       actions: [
-        // Live Safe DNS Status Pill
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-          child: InkWell(
-            onTap: () {
-              if (!_osDnsIsFamilySafe) {
-                _activateSafePrivateDnsNow(ctx);
-              } else {
-                setState(() {
-                  _currentTab = 2;
-                  _puritySubTab = 0;
-                });
-              }
-            },
-            borderRadius: BorderRadius.circular(20),
+        // Minimal Green or Red Status Dot (Zero DNS text on Homepage!)
+        InkWell(
+          onTap: () => _showSetupWizardModal(ctx),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              width: 11,
+              height: 11,
               decoration: BoxDecoration(
-                color: _osDnsIsFamilySafe
-                    ? const Color(0xFF10B981).withValues(alpha: 0.18)
-                    : Colors.amber.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: _osDnsIsFamilySafe
-                      ? const Color(0xFF10B981)
-                      : Colors.amber,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _osDnsIsFamilySafe
-                        ? Icons.verified_user_rounded
-                        : Icons.gpp_maybe_rounded,
-                    size: 13,
-                    color: _osDnsIsFamilySafe
-                        ? const Color(0xFF10B981)
-                        : Colors.amber,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _osDnsIsFamilySafe ? _tr('dnsActive') : _tr('dnsInactive'),
-                    style: TextStyle(
-                      color: _osDnsIsFamilySafe
-                          ? const Color(0xFF10B981)
-                          : Colors.amber,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
+                shape: BoxShape.circle,
+                color: isAllProtected
+                    ? const Color(0xFF10B981)
+                    : const Color(0xFFEF4444),
+                boxShadow: [
+                  BoxShadow(
+                    color: (isAllProtected
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFFEF4444))
+                        .withValues(alpha: 0.55),
+                    blurRadius: 8,
+                    spreadRadius: 1.5,
                   ),
                 ],
               ),
             ),
           ),
-        ),
-        IconButton(
-          icon: Icon(
-            (!_hasUsageAccess || !_hasOverlayPermission)
-                ? Icons.warning_amber_rounded
-                : Icons.fact_check_outlined,
-            color: (!_hasUsageAccess || !_hasOverlayPermission)
-                ? Colors.amber
-                : _subTextColor,
-            size: 20,
-          ),
-          tooltip: _tr('setupBtn'),
-          onPressed: () => _showSetupWizardModal(ctx),
         ),
       ],
     );
@@ -1823,7 +1962,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                         ),
                       ),
                       Text(
-                        'v2.1.0 • All-in-Sidebar Minimalist OS',
+                        _tr('menuSubtitle'),
                         style: TextStyle(color: _subTextColor, fontSize: 11),
                       ),
                     ],
@@ -1835,7 +1974,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
             // MAIN NAVIGATION IN SIDEBAR
             Text(
-              'NAVIGATION',
+              _tr('navSection'),
               style: TextStyle(
                 color: _subTextColor,
                 fontSize: 11,
@@ -1847,48 +1986,54 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             _buildDrawerNavTile(
               ctx,
               icon: Icons.home_rounded,
-              title: 'Home (Minimalist Launcher)',
+              title: _tr('drawerHome'),
               tab: 0,
             ),
             _buildDrawerNavTile(
               ctx,
               icon: Icons.lightbulb_outline_rounded,
-              title: 'Keep Notes (${_keepNotes.length} Notes & Lists)',
+              title: '${_tr('drawerKeepNotes')} (${_keepNotes.length})',
               tab: 5,
             ),
             _buildDrawerNavTile(
               ctx,
               icon: Icons.apps_rounded,
-              title: '${_tr('navApps')} (${_apps.length} Apps)',
+              title: '${_tr('drawerApps')} (${_apps.length})',
               tab: 1,
             ),
             _buildDrawerNavTile(
               ctx,
               icon: Icons.shield_rounded,
-              title: '${_tr('navPurity')} & Safe DNS Guard',
+              title: _tr('drawerPurity'),
               tab: 2,
               subTab: 0,
             ),
             _buildDrawerNavTile(
               ctx,
               icon: Icons.sos_rounded,
-              title: 'Emergency SOS & Clean Streak',
+              title: _tr('drawerSos'),
               tab: 2,
               subTab: 1,
             ),
             _buildDrawerNavTile(
               ctx,
-              icon: Icons.center_focus_strong_rounded,
-              title: '${_tr('navFocus')} • Monk Mode & Digest',
+              icon: Icons.qr_code_scanner_rounded,
+              title: _tr('drawerFocus'),
               tab: 3,
-              subTab: 0,
+              subTab: 2,
             ),
             _buildDrawerNavTile(
               ctx,
               icon: Icons.admin_panel_settings_rounded,
-              title: '${_tr('navSettings')} • Permissions & Impact',
+              title: _tr('drawerSettings'),
               tab: 4,
               subTab: 0,
+            ),
+            _buildDrawerNavTile(
+              ctx,
+              icon: Icons.menu_book_rounded,
+              title: _tr('drawerUserGuide'),
+              tab: 6,
             ),
             ListTile(
               dense: true,
@@ -1901,9 +2046,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 color: Color(0xFF10B981),
                 size: 20,
               ),
-              title: const Text(
-                '📋 4-Step Protection Setup Guide',
-                style: TextStyle(
+              title: Text(
+                _tr('drawerSetupWizard'),
+                style: const TextStyle(
                   color: Color(0xFF10B981),
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
@@ -1947,8 +2092,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       Expanded(
                         child: Text(
                           _osDnsIsFamilySafe
-                              ? 'SAFE DNS ON: $_osDnsSpecifier'
-                              : 'Safe Private DNS: OFF',
+                              ? '${_tr('dnsActive')}: $_osDnsSpecifier'
+                              : _tr('dnsInactive'),
                           style: TextStyle(
                             color: _osDnsIsFamilySafe
                                 ? const Color(0xFF10B981)
@@ -2000,10 +2145,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     onChanged: (val) {
                       if (!val) {
                         Navigator.pop(ctx);
-                        _showMindfulGateModal(
+                        _requireProtectionUnlock(
                           ctx,
-                          targetTitle: 'Unlock Phone Settings',
-                          onPassed: () {
+                          targetTitle: _tr('lockPhoneSettings'),
+                          onUnlocked: () {
                             setState(() => _phoneSettingsLocked = false);
                             _saveState();
                             _syncFortressToNative();
@@ -2063,7 +2208,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
             const Divider(height: 24, color: Colors.white12),
             Text(
-              'LANGUAGE / ভাষা / اللغة',
+              _tr('langCardTitle'),
               style: TextStyle(
                 color: _subTextColor,
                 fontSize: 11,
@@ -2241,7 +2386,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   // =========================================================================
-  // PAGE 1: ULTRA-CLEAN MINIMALIST HOMEPAGE
+  // PAGE 1: ULTRA-CLEAN MINIMALIST HOMEPAGE (ZERO DNS TEXT, ZERO BRANDING)
   // =========================================================================
   Widget _buildHomePage(BuildContext ctx) {
     final String hh = _now.hour.toString().padLeft(2, '0');
@@ -2279,20 +2424,22 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     final List<KeepNoteItem> pinnedNotes =
         _keepNotes.where((n) => n.pinned).take(2).toList();
 
-    final WisdomEntry currentWisdom = AppDataDefaults
-        .wisdomList[_wisdomIndex % AppDataDefaults.wisdomList.length];
-
-    final bool needsPermissions = !_hasUsageAccess || !_hasOverlayPermission;
+    final List<WisdomEntry> wList = AppDataDefaults.getWisdomList(_lang);
+    final int qIdx = _wisdomIndex % wList.length;
+    final WisdomEntry currentWisdom = wList[qIdx];
+    final WisdomEntry altWisdom = _lang == 'bn'
+        ? WisdomBank.entriesEn[qIdx % WisdomBank.entriesEn.length]
+        : WisdomBank.entriesBn[qIdx % WisdomBank.entriesBn.length];
 
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
       children: [
         // 1. Minimalist Clock & Date
         Text(
           '$hh:$mm',
           style: TextStyle(
             color: _textColor,
-            fontSize: 64,
+            fontSize: 66,
             fontWeight: FontWeight.w200,
             letterSpacing: -2.0,
             height: 1.0,
@@ -2316,61 +2463,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 18),
 
-        // 2. Compact Permission / DNS Alert Strip (Only prominent when action needed, sleek when active)
-        if (needsPermissions || !_osDnsIsFamilySafe)
-          Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: _cardColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.amber.withValues(alpha: 0.6)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.shield_outlined, color: Colors.amber, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    needsPermissions
-                        ? 'Grant Usage & Overlay Access to activate Settings Lock'
-                        : 'Safe Private DNS is off ($_dnsHost)',
-                    style: TextStyle(
-                      color: _textColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF10B981),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: () {
-                    if (needsPermissions) {
-                      _showSetupWizardModal(ctx);
-                    } else {
-                      _activateSafePrivateDnsNow(ctx);
-                    }
-                  },
-                  child: Text(
-                    needsPermissions ? 'Activate →' : '1-Tap Fix →',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-        // 3. Minimalist Profile Switcher
+        // 2. Minimalist Profile Switcher
         Row(
           children: [
             _buildProfileButton('work', _tr('profileWork')),
@@ -2380,9 +2475,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             _buildProfileButton('sunset', _tr('profileSunset')),
           ],
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 20),
 
-        // 4. Clean Typography Pinned Essential Apps List
+        // 3. Clean Typography Pinned Essential Apps List
         ...pinnedApps.map(
           (app) => InkWell(
             onTap: () => _handleAppTap(ctx, app),
@@ -2430,9 +2525,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           ),
         ),
 
-        const Divider(height: 28, color: Colors.white10),
+        const Divider(height: 26, color: Colors.white10),
 
-        // 5. Minimalist Home Note Bar -> Opens Full Google Keep-Style Notes Inside!
+        // 4. Minimalist Home Note Bar -> Opens Full Google Keep-Style Notes Inside!
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -2449,7 +2544,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       size: 16, color: _accentColor),
                   const SizedBox(width: 6),
                   Text(
-                    'Keep Notes',
+                    _tr('quickNotes'),
                     style: TextStyle(
                       color: _textColor,
                       fontWeight: FontWeight.bold,
@@ -2460,7 +2555,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   InkWell(
                     onTap: () => setState(() => _currentTab = 5),
                     child: Text(
-                      'Open All (${_keepNotes.length}) →',
+                      '${_tr('openAllNotes')} (${_keepNotes.length}) →',
                       style: TextStyle(
                         color: _accentColor,
                         fontSize: 12,
@@ -2479,7 +2574,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       controller: _quickHomeNoteController,
                       style: TextStyle(color: _textColor, fontSize: 13),
                       decoration: InputDecoration(
-                        hintText: 'Take a quick note...',
+                        hintText: _tr('takeQuickNoteHint'),
                         hintStyle: TextStyle(color: _subTextColor, fontSize: 12),
                         isDense: true,
                         border: InputBorder.none,
@@ -2490,7 +2585,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   IconButton(
                     icon: Icon(Icons.check_box_outlined,
                         size: 18, color: _subTextColor),
-                    tooltip: 'New Checklist in Keep Notes',
+                    tooltip: _tr('newChecklistBtn'),
                     constraints: const BoxConstraints(),
                     padding: const EdgeInsets.symmetric(horizontal: 6),
                     onPressed: () {
@@ -2501,7 +2596,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   IconButton(
                     icon: Icon(Icons.add_circle_outline_rounded,
                         size: 18, color: _accentColor),
-                    tooltip: 'Save Quick Note',
+                    tooltip: _tr('saveNoteBtn'),
                     constraints: const BoxConstraints(),
                     padding: EdgeInsets.zero,
                     onPressed: _addQuickNoteFromHome,
@@ -2552,7 +2647,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
         const SizedBox(height: 16),
 
-        // 6. Ultra-Clean 2-Line Wisdom Footer
+        // 5. Bilingual 535+ Wisdom Footer (Quote + Translation)
         InkWell(
           onTap: () => setState(() => _wisdomIndex++),
           borderRadius: BorderRadius.circular(10),
@@ -2564,17 +2659,26 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 Text(
                   '"${currentWisdom.text}"',
                   style: TextStyle(
-                    color: _subTextColor,
-                    fontSize: 12,
+                    color: _textColor.withValues(alpha: 0.9),
+                    fontSize: 12.5,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '— ${currentWisdom.ref}  (Tap for next)',
+                  '"${altWisdom.text}"',
                   style: TextStyle(
-                    color: _accentColor.withValues(alpha: 0.8),
+                    color: _subTextColor,
+                    fontSize: 11.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '— ${currentWisdom.ref}  (#${qIdx + 1}/${wList.length} • ${_tr('tapForNextWisdom')})',
+                  style: TextStyle(
+                    color: _accentColor.withValues(alpha: 0.85),
                     fontSize: 11,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -2650,12 +2754,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   // =========================================================================
   Widget _buildKeepNotesPage(BuildContext ctx) {
     final List<String> filterLabels = [
-      'All',
-      '📌 Pinned',
-      '✅ Checklists',
-      '💼 Work',
-      '💡 Idea',
-      '🤲 Reflection',
+      _tr('filterAll'),
+      _tr('filterPinned'),
+      _tr('filterChecklists'),
+      _tr('filterWork'),
+      _tr('filterIdea'),
+      _tr('filterReflection'),
     ];
 
     final List<KeepNoteItem> filtered = _keepNotes.where((n) {
@@ -2698,7 +2802,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   controller: _notesSearchController,
                   style: TextStyle(color: _textColor, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Search your notes & checklists...',
+                    hintText: _tr('searchNotesHint'),
                     hintStyle: TextStyle(color: _subTextColor, fontSize: 12),
                     prefixIcon:
                         Icon(Icons.search_rounded, color: _subTextColor, size: 18),
@@ -2723,7 +2827,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   color: _textColor,
                   size: 18,
                 ),
-                tooltip: 'Toggle Grid / List View',
                 onPressed: () =>
                     setState(() => _notesGridView = !_notesGridView),
               ),
@@ -2743,9 +2846,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     padding: const EdgeInsets.symmetric(vertical: 11),
                   ),
                   icon: const Icon(Icons.note_add_rounded, size: 17),
-                  label: const Text(
-                    'New Note',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  label: Text(
+                    _tr('newNoteBtn'),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                   onPressed: () =>
                       _openKeepNoteEditorModal(ctx, isNewChecklist: false),
@@ -2761,9 +2865,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   ),
                   icon: Icon(Icons.checklist_rounded,
                       size: 17, color: _accentColor),
-                  label: const Text(
-                    'New Checklist',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  label: Text(
+                    _tr('newChecklistBtn'),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                   onPressed: () =>
                       _openKeepNoteEditorModal(ctx, isNewChecklist: true),
@@ -2777,7 +2882,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           child: filtered.isEmpty
               ? Center(
                   child: Text(
-                    'No notes found. Tap "New Note" or "New Checklist" above.',
+                    _tr('noNotesFound'),
                     style: TextStyle(color: _subTextColor, fontSize: 13),
                   ),
                 )
@@ -2833,7 +2938,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               children: [
                 Expanded(
                   child: Text(
-                    note.title.isEmpty ? 'Untitled' : note.title,
+                    note.title.isEmpty ? _tr('untitledNote') : note.title,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -3051,9 +3156,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                             _saveState();
                             Navigator.pop(mCtx);
                           },
-                          child: const Text(
-                            'Save Note',
-                            style: TextStyle(fontWeight: FontWeight.bold),
+                          child: Text(
+                            _tr('saveNoteBtn'),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
@@ -3065,9 +3170,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
-                      decoration: const InputDecoration(
-                        hintText: 'Title',
-                        hintStyle: TextStyle(color: Colors.white38),
+                      decoration: InputDecoration(
+                        hintText: _tr('noteTitleHint'),
+                        hintStyle: const TextStyle(color: Colors.white38),
                         border: InputBorder.none,
                       ),
                     ),
@@ -3110,9 +3215,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                             child: TextField(
                               controller: newCheckItemCtrl,
                               style: const TextStyle(color: Colors.white),
-                              decoration: const InputDecoration(
-                                hintText: '+ Add checklist item...',
-                                hintStyle: TextStyle(color: Colors.white38),
+                              decoration: InputDecoration(
+                                hintText: _tr('addChecklistItemHint'),
+                                hintStyle: const TextStyle(color: Colors.white38),
                                 border: InputBorder.none,
                               ),
                               onSubmitted: (v) {
@@ -3147,9 +3252,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                         maxLines: 6,
                         style:
                             const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: const InputDecoration(
-                          hintText: 'Write your note here...',
-                          hintStyle: TextStyle(color: Colors.white38),
+                        decoration: InputDecoration(
+                          hintText: _tr('noteBodyHint'),
+                          hintStyle: const TextStyle(color: Colors.white38),
                           border: InputBorder.none,
                         ),
                       ),
@@ -3205,7 +3310,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   // =========================================================================
-  // PAGE 2: APPS DIRECTORY (WITH STICKY SUB-TAB BAR)
+  // PAGE 2: APPS DIRECTORY (WITH QR LOCK ON RESTRICTION WEAKENING)
   // =========================================================================
   Widget _buildAppsPage(BuildContext ctx) {
     final List<AppItem> filtered = _apps.where((app) {
@@ -3243,7 +3348,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   controller: _searchController,
                   style: TextStyle(color: _textColor, fontSize: 14),
                   decoration: InputDecoration(
-                    hintText: 'Search apps or packages...',
+                    hintText: _tr('searchAppsHint'),
                     hintStyle: TextStyle(color: _subTextColor, fontSize: 13),
                     prefixIcon: Icon(Icons.search, color: _subTextColor),
                     filled: true,
@@ -3261,7 +3366,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               IconButton(
                 style: IconButton.styleFrom(backgroundColor: _cardColor),
                 icon: Icon(Icons.sync_rounded, color: _accentColor),
-                tooltip: 'Sync Installed Android Apps',
+                tooltip: _tr('syncAppsTooltip'),
                 onPressed: _syncInstalledAndroidApps,
               ),
             ],
@@ -3323,7 +3428,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                             color: app.pinned ? _accentColor : _subTextColor,
                             size: 18,
                           ),
-                          tooltip: 'Pin to Home',
                           onPressed: () {
                             setState(() => app.pinned = !app.pinned);
                             _saveState();
@@ -3344,7 +3448,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           ),
                           onPressed: () => _handleAppTap(ctx, app),
                           child: Text(
-                            app.tier == 'restricted' ? '15s Gate' : 'Open',
+                            app.tier == 'restricted'
+                                ? _tr('gate15sBtn')
+                                : _tr('openBtn'),
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -3356,18 +3462,31 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        _buildTierMiniButton(app, 'essential', 'Essential'),
-                        const SizedBox(width: 6),
-                        _buildTierMiniButton(app, 'utility', 'Utility'),
+                        _buildTierMiniButton(
+                            ctx, app, 'essential', _tr('tierEssential')),
                         const SizedBox(width: 6),
                         _buildTierMiniButton(
-                            app, 'restricted', '15s Restricted'),
+                            ctx, app, 'utility', _tr('tierUtility')),
+                        const SizedBox(width: 6),
+                        _buildTierMiniButton(
+                            ctx, app, 'restricted', _tr('tierRestricted')),
                         const Spacer(),
                         InkWell(
                           onTap: () {
-                            setState(
-                                () => app.nightQrLocked = !app.nightQrLocked);
-                            _saveState();
+                            if (app.nightQrLocked) {
+                              // Turning OFF Night QR Lock requires Physical QR Scan + 15s Gate!
+                              _requireProtectionUnlock(
+                                ctx,
+                                targetTitle: '${app.name} (${_tr('nightQr')})',
+                                onUnlocked: () {
+                                  setState(() => app.nightQrLocked = false);
+                                  _saveState();
+                                },
+                              );
+                            } else {
+                              setState(() => app.nightQrLocked = true);
+                              _saveState();
+                            }
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(
@@ -3381,7 +3500,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              app.nightQrLocked ? '🌙 QR Locked' : '🌙 QR Off',
+                              app.nightQrLocked
+                                  ? _tr('qrLockedBadge')
+                                  : _tr('qrOffBadge'),
                               style: TextStyle(
                                 color: app.nightQrLocked
                                     ? Colors.purpleAccent
@@ -3404,12 +3525,29 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     );
   }
 
-  Widget _buildTierMiniButton(AppItem app, String tierVal, String label) {
+  Widget _buildTierMiniButton(
+      BuildContext ctx, AppItem app, String tierVal, String label) {
     final bool selected = app.tier == tierVal;
     return InkWell(
       onTap: () {
-        setState(() => app.tier = tierVal);
-        _saveState();
+        if (app.tier == tierVal) return;
+        // Weakening restriction (from 'restricted' to 'utility'/'essential', or at night) requires Physical QR Scan!
+        final bool isWeakening =
+            (app.tier == 'restricted' && tierVal != 'restricted') ||
+                _isNightWindow;
+        if (isWeakening) {
+          _requireProtectionUnlock(
+            ctx,
+            targetTitle: '${app.name} → $label',
+            onUnlocked: () {
+              setState(() => app.tier = tierVal);
+              _saveState();
+            },
+          );
+        } else {
+          setState(() => app.tier = tierVal);
+          _saveState();
+        }
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -3437,11 +3575,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     return Column(
       children: [
         _buildStickySubTabBar(
-          tabs: const [
-            '🛡️ DNS & Night Lock',
-            '🚨 SOS & Streak',
-            '🔍 Keywords & Guard',
-            'All',
+          tabs: [
+            _tr('purityTabDns'),
+            _tr('purityTabSos'),
+            _tr('purityTabKeywords'),
+            _tr('filterAll'),
           ],
           currentIndex: _puritySubTab,
           onTap: (idx) => setState(() => _puritySubTab = idx),
@@ -3458,7 +3596,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               ],
               if (_puritySubTab == 2 || _puritySubTab == 3) ...[
                 const SizedBox(height: 14),
-                _buildBlockedKeywordsCard(),
+                _buildBlockedKeywordsCard(ctx),
               ],
             ],
           ),
@@ -3508,8 +3646,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     ),
                     Text(
                       _osDnsIsFamilySafe
-                          ? 'OS Status: ACTIVE ($_osDnsMode -> $_osDnsSpecifier)'
-                          : 'OS Status: $_osDnsMode (Tap below to activate $_dnsHost)',
+                          ? '${_tr('dnsVerified')} ($_osDnsSpecifier)'
+                          : '${_tr('dnsNotVerified')} ($_dnsHost)',
                       style: TextStyle(
                         color: _osDnsIsFamilySafe
                             ? const Color(0xFF10B981)
@@ -3576,9 +3714,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     side: const BorderSide(color: Color(0xFF10B981)),
                   ),
                   icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
-                  label: const Text(
-                    'Verify / Mark Active',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  label: Text(
+                    _tr('verifyDnsBtn'),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold),
                   ),
                   onPressed: () async {
                     await _channel.invokeMethod('confirmManualDnsSetup', {
@@ -3589,7 +3728,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       ScaffoldMessenger.of(ctx).showSnackBar(
                         SnackBar(
                           content: Text(
-                              '✅ Verified Safe Private DNS ($_dnsHost) & Locked Settings!'),
+                              '✅ ${_tr('dnsVerified')} ($_dnsHost)'),
                           backgroundColor: const Color(0xFF10B981),
                         ),
                       );
@@ -3640,10 +3779,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             value: _phoneSettingsLocked,
             onChanged: (val) {
               if (!val) {
-                _showMindfulGateModal(
+                _requireProtectionUnlock(
                   ctx,
-                  targetTitle: 'Unlock Phone Settings',
-                  onPassed: () {
+                  targetTitle: _tr('lockPhoneSettings'),
+                  onUnlocked: () {
                     setState(() => _phoneSettingsLocked = false);
                     _saveState();
                     _syncFortressToNative();
@@ -3675,9 +3814,55 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             ),
             value: _nightAutoDnsEnabled,
             onChanged: (val) {
-              setState(() => _nightAutoDnsEnabled = val);
-              _saveState();
-              _syncFortressToNative();
+              if (!val) {
+                _requireProtectionUnlock(
+                  ctx,
+                  targetTitle: _tr('nightAutoDns'),
+                  onUnlocked: () {
+                    setState(() => _nightAutoDnsEnabled = false);
+                    _saveState();
+                    _syncFortressToNative();
+                  },
+                );
+              } else {
+                setState(() => _nightAutoDnsEnabled = true);
+                _saveState();
+                _syncFortressToNative();
+              }
+            },
+          ),
+
+          // Strict Physical QR Lock on All Settings & Restrictions
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            activeThumbColor: const Color(0xFF10B981),
+            title: Text(
+              _tr('strictQrSettingsLock'),
+              style: TextStyle(
+                color: _textColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            subtitle: Text(
+              _tr('strictQrSettingsLockSub'),
+              style: TextStyle(color: _subTextColor, fontSize: 12),
+            ),
+            value: _strictQrSettingsLock,
+            onChanged: (val) {
+              if (!val) {
+                _requireProtectionUnlock(
+                  ctx,
+                  targetTitle: _tr('strictQrSettingsLock'),
+                  onUnlocked: () {
+                    setState(() => _strictQrSettingsLock = false);
+                    _saveState();
+                  },
+                );
+              } else {
+                setState(() => _strictQrSettingsLock = true);
+                _saveState();
+              }
             },
           ),
 
@@ -3813,7 +3998,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               const Spacer(),
               TextButton.icon(
                 icon: const Icon(Icons.add_circle_outline, size: 16),
-                label: const Text('+1 Day'),
+                label: Text(_tr('addDayBtn')),
                 onPressed: () {
                   setState(() => _cleanStreakDays++);
                   _saveState();
@@ -3831,7 +4016,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           ),
           const SizedBox(height: 6),
           Text(
-            '90-Day Neuroplasticity Reset Progress: ${(progress * 100).toStringAsFixed(0)}%',
+            '${_tr('neuroProgress')}: ${(progress * 100).toStringAsFixed(0)}%',
             style: TextStyle(color: _subTextColor, fontSize: 12),
           ),
           const Divider(height: 24, color: Colors.white12),
@@ -3888,7 +4073,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     );
   }
 
-  Widget _buildBlockedKeywordsCard() {
+  Widget _buildBlockedKeywordsCard(BuildContext ctx) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -3900,7 +4085,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '🔍 Custom Blocked Adult Keywords & Domains (${_blockedKeywords.length})',
+            '🔍 ${_tr('keywordsTitle')} (${_blockedKeywords.length})',
             style: TextStyle(
               color: _textColor,
               fontWeight: FontWeight.bold,
@@ -3915,7 +4100,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   controller: _keywordController,
                   style: TextStyle(color: _textColor, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Add keyword or domain to block...',
+                    hintText: _tr('addKeywordHint'),
                     hintStyle: TextStyle(color: _subTextColor, fontSize: 12),
                     filled: true,
                     fillColor: _bgColor,
@@ -3943,7 +4128,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     _saveState();
                   }
                 },
-                child: const Text('Add'),
+                child: Text(_tr('addBtn')),
               ),
             ],
           ),
@@ -3960,8 +4145,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       style: TextStyle(color: _textColor, fontSize: 11),
                     ),
                     onDeleted: () {
-                      setState(() => _blockedKeywords.remove(kw));
-                      _saveState();
+                      // Removing a blocked keyword requires Physical QR Scan + 15s Gate!
+                      _requireProtectionUnlock(
+                        ctx,
+                        targetTitle: 'Remove keyword: $kw',
+                        onUnlocked: () {
+                          setState(() => _blockedKeywords.remove(kw));
+                          _saveState();
+                        },
+                      );
                     },
                   ),
                 )
@@ -3979,11 +4171,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     return Column(
       children: [
         _buildStickySubTabBar(
-          tabs: const [
-            '📬 Digest Batch',
-            '🧘 Monk & Night',
-            '🧱 QR & RAM Cleaner',
-            'All',
+          tabs: [
+            _tr('focusTabDigest'),
+            _tr('focusTabMonk'),
+            _tr('focusTabQr'),
+            _tr('filterAll'),
           ],
           currentIndex: _focusSubTab,
           onTap: (idx) => setState(() => _focusSubTab = idx),
@@ -3995,7 +4187,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               if (_focusSubTab == 0 || _focusSubTab == 3) _buildDigestCard(),
               if (_focusSubTab == 1 || _focusSubTab == 3) ...[
                 const SizedBox(height: 14),
-                _buildMonkAndNightScheduleCard(),
+                _buildMonkAndNightScheduleCard(ctx),
               ],
               if (_focusSubTab == 2 || _focusSubTab == 3) ...[
                 const SizedBox(height: 14),
@@ -4032,7 +4224,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               const Spacer(),
               TextButton(
                 onPressed: () => setState(() => _digestItems.clear()),
-                child: const Text('Clear All'),
+                child: Text(_tr('clearAllBtn')),
               ),
             ],
           ),
@@ -4059,7 +4251,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           const SizedBox(height: 10),
           if (_digestItems.isEmpty)
             Text(
-              'Zero held notifications — your attention is clear.',
+              _tr('zeroNotifications'),
               style: TextStyle(color: _subTextColor, fontSize: 13),
             )
           else
@@ -4090,7 +4282,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     );
   }
 
-  Widget _buildMonkAndNightScheduleCard() {
+  Widget _buildMonkAndNightScheduleCard(BuildContext ctx) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -4131,8 +4323,14 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           if (_isMonkActive) ...[
             const SizedBox(height: 8),
             TextButton(
-              onPressed: () => setState(() => _monkModeUntil = 0),
-              child: const Text('End Monk Mode Early'),
+              onPressed: () {
+                _requireProtectionUnlock(
+                  ctx,
+                  targetTitle: _tr('endMonkEarly'),
+                  onUnlocked: () => setState(() => _monkModeUntil = 0),
+                );
+              },
+              child: Text(_tr('endMonkEarly')),
             ),
           ],
           const Divider(height: 24, color: Colors.white12),
@@ -4148,11 +4346,21 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               ),
             ),
             subtitle: Text(
-              'Enforces QR lock on night-restricted apps & auto-enables Safe Private DNS at 22:00.',
+              _tr('sleepScheduleSub'),
               style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
             value: _sleepScheduleEnabled,
-            onChanged: (v) => setState(() => _sleepScheduleEnabled = v),
+            onChanged: (v) {
+              if (!v) {
+                _requireProtectionUnlock(
+                  ctx,
+                  targetTitle: _tr('sleepScheduleTitle'),
+                  onUnlocked: () => setState(() => _sleepScheduleEnabled = false),
+                );
+              } else {
+                setState(() => _sleepScheduleEnabled = true);
+              }
+            },
           ),
         ],
       ),
@@ -4160,6 +4368,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   Widget _buildQrAndRamCleanerCard(BuildContext ctx) {
+    final bool hideQrAtNight = _isNightWindow && _qrSetupVerified;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -4171,7 +4380,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '🧱 Physical QR Unlock Key: $_qrSecret',
+            _tr('qrCardTitle'),
             style: TextStyle(
               color: _textColor,
               fontWeight: FontWeight.bold,
@@ -4180,12 +4389,105 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           ),
           const SizedBox(height: 6),
           Text(
-            'Write "$_qrSecret" on a card kept outside your bedroom to unlock Night QR apps or emergency settings.',
-            style: TextStyle(color: _subTextColor, fontSize: 12),
+            _tr('qrCardSub'),
+            style: TextStyle(color: _subTextColor, fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          if (hideQrAtNight)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber),
+              ),
+              child: Text(
+                _tr('qrHiddenNightMsg'),
+                style: const TextStyle(
+                  color: Colors.amber,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
+          else if (_qrMatrixSize > 0 && _qrMatrixBits.isNotEmpty)
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFF10B981), width: 2),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 170,
+                      height: 170,
+                      child: CustomPaint(
+                        painter: _QrMatrixPainter(
+                          size: _qrMatrixSize,
+                          bits: _qrMatrixBits,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _qrSecret,
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  icon: const Icon(Icons.print_rounded, size: 18),
+                  label: Text(
+                    _tr('printQrBtn'),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: _printPhysicalQrSheet,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _accentColor,
+                    side: BorderSide(color: _accentColor),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                  label: Text(
+                    _tr('testQrScanBtn'),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () => _scanPhysicalQrWithCamera(ctx),
+                ),
+              ),
+            ],
           ),
           const Divider(height: 24, color: Colors.white12),
           Text(
-            '🧹 ${_tr('ramCleanerTitle')} (Total Freed: $_ramFreedMb MB)',
+            '🧹 ${_tr('ramCleanerTitle')} ($_ramFreedMb MB)',
             style: TextStyle(
               color: _textColor,
               fontWeight: FontWeight.bold,
@@ -4233,11 +4535,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     return Column(
       children: [
         _buildStickySubTabBar(
-          tabs: const [
-            '🔐 Phone & System',
-            '📊 Impact Report',
-            '🌐 Language & Display',
-            'All',
+          tabs: [
+            _tr('settingsTabSystem'),
+            _tr('settingsTabImpact'),
+            _tr('settingsTabLang'),
+            _tr('filterAll'),
           ],
           currentIndex: _settingsSubTab,
           onTap: (idx) => setState(() => _settingsSubTab = idx),
@@ -4262,7 +4564,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Settings are protected against impulsive weakening. Complete a 15s reflection to unlock editing.',
+                          _tr('settingsLockedBanner'),
                           style: TextStyle(color: _textColor, fontSize: 12),
                         ),
                       ),
@@ -4272,13 +4574,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           backgroundColor: Colors.amber,
                           foregroundColor: Colors.black,
                         ),
-                        onPressed: () => _showMindfulGateModal(
+                        onPressed: () => _requireProtectionUnlock(
                           ctx,
-                          targetTitle: 'Unlock Minimum Phone Settings',
-                          onPassed: () =>
+                          targetTitle: _tr('navSettings'),
+                          onUnlocked: () =>
                               setState(() => _settingsUnlockedSession = true),
                         ),
-                        child: const Text('15s Unlock'),
+                        child: Text(_tr('unlockBtn')),
                       ),
                     ],
                   ),
@@ -4312,7 +4614,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '🔐 Native Android OS Fortress Permissions',
+            _tr('nativePermsTitle'),
             style: TextStyle(
               color: _textColor,
               fontSize: 16,
@@ -4339,8 +4641,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             ),
             subtitle: Text(
               _hasUsageAccess
-                  ? '✅ Active! Watchdog is detecting Settings & Browsers in 250ms.'
-                  : 'Tap Grant to allow Minimum Phone to detect when Settings or Browsers open.',
+                  ? _tr('usageAccessActiveSub')
+                  : _tr('usageAccessInactiveSub'),
               style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
             trailing: ElevatedButton(
@@ -4353,7 +4655,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               onPressed: () async {
                 await _channel.invokeMethod('requestUsageStatsPermission');
               },
-              child: Text(_hasUsageAccess ? 'Granted ✓' : 'Grant'),
+              child:
+                  Text(_hasUsageAccess ? _tr('grantedBtn') : _tr('grantBtn')),
             ),
           ),
           const Divider(color: Colors.white12),
@@ -4368,7 +4671,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   : Colors.amber,
             ),
             title: Text(
-              'Appear on Top / Display Over Other Apps',
+              _tr('overlayPermCard'),
               style: TextStyle(
                 color: _textColor,
                 fontWeight: FontWeight.bold,
@@ -4377,8 +4680,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             ),
             subtitle: Text(
               _hasOverlayPermission
-                  ? '✅ Active! Lock screen can pop up over Phone Settings immediately.'
-                  : 'Required on Android 10–15 so Minimum Phone can block Phone Settings.',
+                  ? _tr('overlayActiveSub')
+                  : _tr('overlayInactiveSub'),
               style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
             trailing: ElevatedButton(
@@ -4392,7 +4695,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               onPressed: () async {
                 await _channel.invokeMethod('requestOverlayPermission');
               },
-              child: Text(_hasOverlayPermission ? 'Granted ✓' : 'Grant'),
+              child: Text(
+                  _hasOverlayPermission ? _tr('grantedBtn') : _tr('grantBtn')),
             ),
           ),
           const Divider(color: Colors.white12),
@@ -4416,15 +4720,17 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             ),
             subtitle: Text(
               _isDefaultLauncher
-                  ? '✅ Active as your Default Home Screen'
-                  : 'Tap to set Minimum Phone as your Default Home App',
+                  ? _tr('defaultLauncherActiveSub')
+                  : _tr('defaultLauncherInactiveSub'),
               style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
             trailing: ElevatedButton(
               onPressed: () async {
                 await _channel.invokeMethod('requestDefaultLauncher');
               },
-              child: Text(_isDefaultLauncher ? 'Change' : 'Set Default'),
+              child: Text(_isDefaultLauncher
+                  ? _tr('changeBtn')
+                  : _tr('setDefaultBtn')),
             ),
           ),
           const Divider(color: Colors.white12),
@@ -4443,7 +4749,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               ),
             ),
             subtitle: Text(
-              'Locks hardware navigation buttons to this screen during deep work.',
+              _tr('kioskPinSub'),
               style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
             trailing: ElevatedButton(
@@ -4451,7 +4757,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 await _channel.invokeMethod('toggleKioskPin');
                 _refreshNativeStatus();
               },
-              child: Text(_isKioskPinned ? 'Unpin' : 'Pin Screen'),
+              child:
+                  Text(_isKioskPinned ? _tr('unpinBtn') : _tr('pinScreenBtn')),
             ),
           ),
         ],
@@ -4471,7 +4778,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '📊 Digital Wellbeing & Purity Impact',
+            _tr('impactReportTitle'),
             style: TextStyle(
               color: _textColor,
               fontSize: 16,
@@ -4487,10 +4794,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             crossAxisSpacing: 10,
             childAspectRatio: 1.9,
             children: [
-              _buildStatBox('$_reclaimedMinutes m', 'Time Reclaimed'),
-              _buildStatBox('$_mindfulPausesCompleted', '15s Wisdom Pauses'),
-              _buildStatBox('$_urgesResisted', 'SOS Urges Resisted'),
-              _buildStatBox('$_blockedOpens', 'Impulsive Opens Stopped'),
+              _buildStatBox('$_reclaimedMinutes m', _tr('statReclaimed')),
+              _buildStatBox('$_mindfulPausesCompleted', _tr('statPauses')),
+              _buildStatBox('$_urgesResisted', _tr('statUrges')),
+              _buildStatBox('$_blockedOpens', _tr('statBlocked')),
             ],
           ),
         ],
@@ -4541,7 +4848,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '🌐 Language (5 Languages + RTL Support)',
+            _tr('langCardTitle'),
             style: TextStyle(
               color: _textColor,
               fontSize: 15,
@@ -4562,7 +4869,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           ),
           const Divider(height: 24, color: Colors.white12),
           Text(
-            '🎨 Minimalist Display Theme',
+            _tr('themeCardTitle'),
             style: TextStyle(
               color: _textColor,
               fontSize: 15,
@@ -4574,7 +4881,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             spacing: 8,
             children: [
               ChoiceChip(
-                label: const Text('OLED Pitch Black'),
+                label: Text(_tr('themeOled')),
                 selected: _themeMode == 'oled',
                 onSelected: (_) {
                   setState(() => _themeMode = 'oled');
@@ -4582,7 +4889,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 },
               ),
               ChoiceChip(
-                label: const Text('E-Ink Warm Paper'),
+                label: Text(_tr('themeEink')),
                 selected: _themeMode == 'eink',
                 onSelected: (_) {
                   setState(() => _themeMode = 'eink');
@@ -4590,7 +4897,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 },
               ),
               ChoiceChip(
-                label: const Text('Sunset Zero-Blue'),
+                label: Text(_tr('themeAmber')),
                 selected: _themeMode == 'amber',
                 onSelected: (_) {
                   setState(() => _themeMode = 'amber');
@@ -4603,4 +4910,169 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       ),
     );
   }
+
+  // =========================================================================
+  // PAGE 7 (TAB 6): DEDICATED COMPLETE USER GUIDE (100% TRANSLATED)
+  // =========================================================================
+  Widget _buildUserGuidePage(BuildContext ctx) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: _cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF10B981), width: 1.4),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _tr('userGuideTitle'),
+                style: TextStyle(
+                  color: _textColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _tr('userGuideIntro'),
+                style: TextStyle(color: _subTextColor, fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      icon: const Icon(Icons.fact_check_rounded, size: 18),
+                      label: Text(
+                        _tr('drawerSetupWizard'),
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                      onPressed: () => _showSetupWizardModal(ctx),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _buildGuideSectionCard(
+          icon: Icons.security_rounded,
+          title: _tr('ugSec1Title'),
+          body: _tr('ugSec1Body'),
+        ),
+        const SizedBox(height: 14),
+        _buildGuideSectionCard(
+          icon: Icons.qr_code_scanner_rounded,
+          title: _tr('ugSec2Title'),
+          body: _tr('ugSec2Body'),
+          actionButton: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+              foregroundColor: Colors.black,
+            ),
+            icon: const Icon(Icons.print_rounded, size: 18),
+            label: Text(_tr('printQrBtn')),
+            onPressed: _printPhysicalQrSheet,
+          ),
+        ),
+        const SizedBox(height: 14),
+        _buildGuideSectionCard(
+          icon: Icons.apps_rounded,
+          title: _tr('ugSec3Title'),
+          body: _tr('ugSec3Body'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGuideSectionCard({
+    required IconData icon,
+    required String title,
+    required String body,
+    Widget? actionButton,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: _accentColor, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: _textColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            body,
+            style: TextStyle(
+              color: _subTextColor,
+              fontSize: 13,
+              height: 1.55,
+            ),
+          ),
+          if (actionButton != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: actionButton),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _QrMatrixPainter extends CustomPainter {
+  final int size;
+  final String bits;
+
+  _QrMatrixPainter({required this.size, required this.bits});
+
+  @override
+  void paint(Canvas canvas, Size canvasSize) {
+    if (size <= 0 || bits.length < size * size) return;
+    final Paint darkPaint = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.fill;
+    final double cell = canvasSize.width / size;
+    for (int y = 0; y < size; y++) {
+      for (int x = 0; x < size; x++) {
+        if (bits.codeUnitAt(y * size + x) == 49) {
+          canvas.drawRect(
+            Rect.fromLTWH(x * cell, y * cell, cell + 0.4, cell + 0.4),
+            darkPaint,
+          );
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _QrMatrixPainter oldDelegate) =>
+      oldDelegate.size != size || oldDelegate.bits != bits;
 }

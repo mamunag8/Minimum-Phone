@@ -60,10 +60,16 @@
         <activity
             android:name=".NativeFortressLockActivity"
             android:exported="false"
-            android:launchMode="singleInstance"
+            android:launchMode="singleTop"
             android:excludeFromRecents="true"
-            android:noHistory="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Portrait QR Scanner Activity -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="portrait"
+            android:stateNotNeeded="true"
+            tools:replace="android:screenOrientation" />
 
         <!-- Helper component toggled momentarily to clear sticky OEM stock launcher defaults -->
         <activity
@@ -101,7 +107,9 @@
             android:value="2" />
     </application>
 
-    <!-- Permissions for Anti-Dopamine Launcher, Usage Stats, Private DNS Lock, Overlay Lock, and NFC Anchor -->
+    <!-- Permissions for Anti-Dopamine Launcher, Usage Stats, Private DNS Lock, Overlay Lock, Camera QR Scanner, and NFC Anchor -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />

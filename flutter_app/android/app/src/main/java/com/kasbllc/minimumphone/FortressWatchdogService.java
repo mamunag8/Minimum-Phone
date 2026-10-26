@@ -141,9 +141,11 @@ public class FortressWatchdogService extends Service {
         String lowerPkg = fgPkg.toLowerCase(Locale.ROOT);
         if (lowerPkg.contains("minimumphone")) return;
 
-        // Never intercept system permission controller / role manager dialogs
+        // Never intercept system permission controller / role manager / print spooler dialogs
         if (lowerPkg.contains("permissioncontroller") ||
-            lowerPkg.contains("packageinstaller") && now < tempUnlockUntilMs) {
+            lowerPkg.contains("printspooler") ||
+            lowerPkg.contains("printservice") ||
+            (lowerPkg.contains("packageinstaller") && now < tempUnlockUntilMs)) {
             return;
         }
 

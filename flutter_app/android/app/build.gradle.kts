@@ -17,8 +17,8 @@ android {
         applicationId = "com.kasbllc.minimumphone"
         minSdk = 24
         targetSdk = 36
-        versionCode = 14
-        versionName = "2.1.0"
+        versionCode = 15
+        versionName = "2.2.0"
     }
 
     signingConfigs {
@@ -47,4 +47,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.google.zxing:core:3.5.3")
 }

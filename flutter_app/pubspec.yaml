@@ -1,7 +1,7 @@
 name: minimumphone
 description: "Minimum Phone: Detox & Focus — Calm Mind Launcher & Private DNS OS Fortress by Kasb LLC"
 publish_to: 'none'
-version: 2.1.0+14
+version: 2.2.0+15
 
 environment:
   sdk: ^3.10.0

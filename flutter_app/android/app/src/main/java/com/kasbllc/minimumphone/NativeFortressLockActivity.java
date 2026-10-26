@@ -1,14 +1,17 @@
 package com.kasbllc.minimumphone;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -23,6 +26,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 
 import java.util.Random;
 
@@ -209,17 +215,37 @@ public class NativeFortressLockActivity extends Activity {
         mathInput.setBackground(inputBg1);
         root.addView(mathInput);
 
-        // Step 3: Physical QR Code Input
+        // Step 3: Physical QR Code Camera Scanner + Input (No Secret Leaked on Screen!)
         TextView qrLabel = new TextView(this);
-        qrLabel.setText("🧱 STEP 3: PHYSICAL QR FORTRESS CODE (Required: " + expectedQrCode + ")");
+        qrLabel.setText("🧱 STEP 3: SCAN PHYSICAL QR FORTRESS CARD\n(আপনার অন্য ঘরে রাখা প্রিন্টেড QR কোডটি স্ক্যান করুন)");
         qrLabel.setTextColor(Color.parseColor("#E4E4E7"));
         qrLabel.setTextSize(12f);
         qrLabel.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         qrLabel.setPadding(0, dp(14), 0, dp(6));
         root.addView(qrLabel);
 
+        Button scanQrBtn = new Button(this);
+        scanQrBtn.setAllCaps(false);
+        scanQrBtn.setText("📷 Scan Physical QR Code with Camera (QR স্ক্যান করুন)");
+        scanQrBtn.setTextColor(Color.BLACK);
+        scanQrBtn.setBackgroundColor(Color.parseColor("#10B981"));
+        scanQrBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        scanLp.bottomMargin = dp(8);
+        scanQrBtn.setLayoutParams(scanLp);
+        scanQrBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startCameraQrScan();
+            }
+        });
+        root.addView(scanQrBtn);
+
         qrInput = new EditText(this);
-        qrInput.setHint("Type or scan QR code (e.g. " + expectedQrCode + ")");
+        qrInput.setHint("Scan QR above or enter your physical key...");
         qrInput.setHintTextColor(Color.parseColor("#71717A"));
         qrInput.setTextColor(Color.WHITE);
         qrInput.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -365,7 +391,7 @@ public class NativeFortressLockActivity extends Activity {
 
         String qrStr = qrInput.getText() != null ? qrInput.getText().toString().trim() : "";
         if (!qrStr.equalsIgnoreCase(expectedQrCode)) {
-            errorView.setText("⚠️ Step 3 Physical QR Code does not match '" + expectedQrCode + "'.");
+            errorView.setText("⚠️ Step 3 Physical QR Code is invalid! Please scan your printed Physical QR Card kept in the other room.");
             return;
         }
 
@@ -374,6 +400,65 @@ public class NativeFortressLockActivity extends Activity {
         prefs.edit().putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 35000L).apply();
         Toast.makeText(this, "🔓 Settings unlocked for 35 seconds. Will auto-lock after 35s!", Toast.LENGTH_LONG).show();
         finish();
+    }
+
+    private void startCameraQrScan() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.CAMERA}, 701);
+                return;
+            }
+        }
+        launchZxingScanner();
+    }
+
+    private void launchZxingScanner() {
+        try {
+            IntentIntegrator integrator = new IntentIntegrator(this);
+            integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
+            integrator.setPrompt("Scan your Physical Minimum Phone QR Card / আপনার ফিজিক্যাল QR কোড স্ক্যান করুন");
+            integrator.setBeepEnabled(true);
+            integrator.setOrientationLocked(true);
+            integrator.initiateScan();
+        } catch (Exception e) {
+            Toast.makeText(this, "Camera scanner error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 701 && grantResults != null && grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            launchZxingScanner();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if (result != null) {
+            if (result.getContents() != null) {
+                String scanned = result.getContents().trim();
+                if (qrInput != null) {
+                    qrInput.setText(scanned);
+                }
+                if (scanned.equalsIgnoreCase(expectedQrCode)) {
+                    if (errorView != null) {
+                        errorView.setText("✅ Physical QR Code Scanned & Verified!");
+                        errorView.setTextColor(Color.parseColor("#34D399"));
+                    }
+                    Toast.makeText(this, "✅ Physical QR Code Verified!", Toast.LENGTH_SHORT).show();
+                } else {
+                    if (errorView != null) {
+                        errorView.setText("⚠️ Scanned QR code does not match your Minimum Phone QR Card!");
+                        errorView.setTextColor(Color.parseColor("#F87171"));
+                    }
+                }
+            }
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     private void goHomeNow() {
