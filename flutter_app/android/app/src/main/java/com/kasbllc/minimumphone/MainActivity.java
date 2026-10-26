@@ -3,6 +3,8 @@ package com.kasbllc.minimumphone;
 import android.app.ActivityManager;
 import android.app.AppOpsManager;
 import android.app.role.RoleManager;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
@@ -34,7 +36,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import io.flutter.embedding.android.FlutterActivity;
@@ -53,6 +54,12 @@ public class MainActivity extends FlutterActivity {
         super.onCreate(savedInstanceState);
         NightFortressReceiver.startWatchdogSafely(this);
         NightFortressReceiver.scheduleNightAlarm(this, 22);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        NightFortressReceiver.startWatchdogSafely(this);
     }
 
     @Override
@@ -98,21 +105,50 @@ public class MainActivity extends FlutterActivity {
                         }
 
                         case "activateSafePrivateDns": {
-                            String host = call.argument("hostname");
+                            String host = call.argument("host");
+                            if (host == null || host.trim().isEmpty()) {
+                                host = call.argument("hostname");
+                            }
                             if (host == null || host.trim().isEmpty()) {
                                 host = "family.cloudflare-dns.com";
                             }
-                            boolean openSettingsIfNeeded = Boolean.TRUE.equals(call.argument("openSettingsIfNeeded"));
+                            Boolean openOpt = call.argument("openSettingsIfNeeded");
+                            boolean openSettingsIfNeeded = (openOpt == null) ? true : openOpt;
                             result.success(activateSafePrivateDns(ctx, host.trim(), openSettingsIfNeeded));
                             break;
                         }
 
+                        case "confirmManualDnsSetup": {
+                            String host = call.argument("host");
+                            if (host == null || host.trim().isEmpty()) {
+                                host = "family.cloudflare-dns.com";
+                            }
+                            SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+                            prefs.edit()
+                                .putString(FortressWatchdogService.KEY_USER_VERIFIED_DNS_HOST, host.trim())
+                                .putString(FortressWatchdogService.KEY_EXPECTED_DNS_HOST, host.trim())
+                                .putBoolean(FortressWatchdogService.KEY_LOCK_SETTINGS, true)
+                                .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, 0L)
+                                .apply();
+                            result.success(buildStatusMap(ctx));
+                            break;
+                        }
+
                         case "configureFortress": {
-                            String host = call.argument("expectedHost");
-                            Boolean lockSettings = call.argument("lockSystemSettings");
-                            Boolean autoNightDns = call.argument("autoNightDns");
+                            String host = call.argument("dnsHost");
+                            if (host == null || host.isEmpty()) host = call.argument("expectedHost");
+
+                            Boolean lockSettings = call.argument("phoneSettingsLocked");
+                            if (lockSettings == null) lockSettings = call.argument("lockSystemSettings");
+
+                            Boolean autoNightDns = call.argument("nightAutoDnsEnabled");
+                            if (autoNightDns == null) autoNightDns = call.argument("autoNightDns");
+
                             Boolean dnsShieldActive = call.argument("dnsShieldActive");
-                            String qrCode = call.argument("qrCode");
+                            String qrCode = call.argument("qrSecret");
+                            if (qrCode == null || qrCode.isEmpty()) qrCode = call.argument("qrCode");
+
+                            Number emergencyUntil = call.argument("emergencyLockdownUntil");
                             Integer startH = call.argument("nightStartHour");
                             Integer endH = call.argument("nightEndHour");
 
@@ -124,6 +160,7 @@ public class MainActivity extends FlutterActivity {
                             if (autoNightDns != null) ed.putBoolean(FortressWatchdogService.KEY_AUTO_DNS_NIGHT, autoNightDns);
                             if (dnsShieldActive != null) ed.putBoolean(FortressWatchdogService.KEY_DNS_SHIELD_ACTIVE, dnsShieldActive);
                             if (qrCode != null && !qrCode.isEmpty()) ed.putString(FortressWatchdogService.KEY_QR_CODE, qrCode);
+                            if (emergencyUntil != null) ed.putLong(FortressWatchdogService.KEY_EMERGENCY_LOCKDOWN_UNTIL_MS, emergencyUntil.longValue());
                             if (startH != null) ed.putInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, startH);
                             if (endH != null) ed.putInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, endH);
                             ed.apply();
@@ -135,7 +172,8 @@ public class MainActivity extends FlutterActivity {
                         }
 
                         case "openSafePhoneSetting": {
-                            String target = call.argument("target");
+                            String target = call.argument("settingType");
+                            if (target == null || target.isEmpty()) target = call.argument("target");
                             openSafePhoneSetting(ctx, target != null ? target : "wifi");
                             result.success(true);
                             break;
@@ -158,18 +196,58 @@ public class MainActivity extends FlutterActivity {
 
                         case "requestUsageStatsPermission": {
                             SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
-                            prefs.edit().putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 45000L).apply();
+                            prefs.edit()
+                                .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 60000L)
+                                .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "usage_access")
+                                .apply();
                             try {
                                 Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+                                intent.setData(Uri.parse("package:" + ctx.getPackageName()));
                                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                                 startActivity(intent);
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) {
+                                try {
+                                    Intent fallback = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+                                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                    startActivity(fallback);
+                                } catch (Exception ignored) {}
+                            }
+                            result.success(true);
+                            break;
+                        }
+
+                        case "requestOverlayPermission": {
+                            SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+                            prefs.edit()
+                                .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 60000L)
+                                .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "overlay_permission")
+                                .apply();
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    Intent intent = new Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:" + ctx.getPackageName())
+                                    );
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                    startActivity(intent);
+                                }
+                            } catch (Exception e) {
+                                try {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                        Intent fallback = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+                                        fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                        startActivity(fallback);
+                                    }
+                                } catch (Exception ignored) {}
+                            }
                             result.success(true);
                             break;
                         }
 
                         case "toggleKioskPin": {
-                            boolean enable = Boolean.TRUE.equals(call.argument("enable"));
+                            Boolean enableArg = call.argument("enable");
+                            boolean currentlyPinned = isLockTaskModeRunning(ctx);
+                            boolean enable = (enableArg != null) ? enableArg : !currentlyPinned;
                             try {
                                 if (enable) {
                                     startLockTask();
@@ -183,7 +261,10 @@ public class MainActivity extends FlutterActivity {
 
                         case "cleanBackgroundApps": {
                             int cleaned = cleanBackgroundAppsNow(ctx);
-                            result.success(cleaned);
+                            Map<String, Object> res = new HashMap<>();
+                            res.put("cleanedCount", cleaned);
+                            res.put("freedMb", cleaned * 18);
+                            result.success(res);
                             break;
                         }
 
@@ -199,6 +280,7 @@ public class MainActivity extends FlutterActivity {
         Map<String, Object> map = new HashMap<>();
         boolean isDefault = isMyLauncherDefault(ctx);
         boolean usageGranted = isUsageStatsGranted(ctx);
+        boolean overlayGranted = isOverlayPermissionGranted(ctx);
         boolean isPinned = isLockTaskModeRunning(ctx);
 
         int batteryPct = 85;
@@ -224,14 +306,21 @@ public class MainActivity extends FlutterActivity {
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         boolean isNightNow = (hour >= 22 || hour < 6);
 
+        // Unified keys for 100% compatibility
         map.put("isDefaultLauncher", isDefault);
         map.put("isUsageStatsGranted", usageGranted);
+        map.put("hasUsageAccess", usageGranted);
+        map.put("isOverlayGranted", overlayGranted);
+        map.put("hasOverlayPermission", overlayGranted);
         map.put("isKioskPinned", isPinned);
         map.put("batteryLevel", batteryPct);
         map.put("isCharging", isCharging);
         map.put("privateDnsActive", osDnsValid);
+        map.put("osDnsIsFamilySafe", osDnsValid);
         map.put("privateDnsHost", dnsHost);
+        map.put("osDnsSpecifier", dnsHost);
         map.put("privateDnsMode", dnsMode);
+        map.put("osDnsMode", dnsMode);
         map.put("watchdogActive", watchdogActive);
         map.put("isNightWindow", isNightNow);
         return map;
@@ -247,7 +336,7 @@ public class MainActivity extends FlutterActivity {
             .putBoolean(FortressWatchdogService.KEY_WATCHDOG_ENABLED, true)
             .apply();
 
-        // 1. Copy targetHost to clipboard so user can paste in 1 tap if needed
+        // 1. Copy targetHost to clipboard so user can paste in 1 tap
         try {
             ClipboardManager cb = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
             if (cb != null) {
@@ -261,8 +350,11 @@ public class MainActivity extends FlutterActivity {
         NightFortressReceiver.scheduleNightAlarm(ctx, 22);
 
         if (!autoApplied && openSettingsIfNeeded) {
-            // Grant 45-second setup lease so user can paste hostname into Private DNS settings
-            prefs.edit().putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 45000L).apply();
+            // Grant 60-second setup lease so user can paste hostname into Private DNS settings
+            prefs.edit()
+                .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 60000L)
+                .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "dns_setup")
+                .apply();
             Toast.makeText(
                 ctx,
                 "📋 Copied '" + targetHost + "'! Tap 'Private DNS' -> Paste hostname -> Save.",
@@ -285,13 +377,17 @@ public class MainActivity extends FlutterActivity {
 
         Map<String, Object> res = buildStatusMap(ctx);
         res.put("autoApplied", autoApplied);
+        res.put("directSuccess", autoApplied);
         res.put("copiedHost", targetHost);
         return res;
     }
 
     private void openSafePhoneSetting(Context ctx, String target) {
         SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 35000L).apply();
+        prefs.edit()
+            .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 35000L)
+            .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "safe_sub_setting")
+            .apply();
 
         String action = Settings.ACTION_SETTINGS;
         if ("wifi".equalsIgnoreCase(target)) {
@@ -306,6 +402,10 @@ public class MainActivity extends FlutterActivity {
                     cb.setPrimaryClip(ClipData.newPlainText("Safe Private DNS", host));
                 }
             } catch (Exception ignored) {}
+            prefs.edit()
+                .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 60000L)
+                .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "dns_setup")
+                .apply();
             Toast.makeText(ctx, "📋 Copied '" + host + "'! Tap Private DNS -> Paste -> Save.", Toast.LENGTH_LONG).show();
             action = Settings.ACTION_WIRELESS_SETTINGS;
         } else if ("sound".equalsIgnoreCase(target)) {
@@ -346,6 +446,7 @@ public class MainActivity extends FlutterActivity {
 
                 Map<String, Object> item = new HashMap<>();
                 item.put("name", label);
+                item.put("label", label);
                 item.put("packageName", pkg);
                 item.put("isSystemApp", isSys);
                 list.add(item);
@@ -373,7 +474,7 @@ public class MainActivity extends FlutterActivity {
             }
 
             if (launchIntent == null && appId != null) {
-                if ("phone".equalsIgnoreCase(appId)) {
+                if ("phone".equalsIgnoreCase(appId) || "dialer".equalsIgnoreCase(appId)) {
                     launchIntent = new Intent(Intent.ACTION_DIAL);
                 } else if ("messages".equalsIgnoreCase(appId)) {
                     launchIntent = new Intent(Intent.ACTION_MAIN);
@@ -415,7 +516,10 @@ public class MainActivity extends FlutterActivity {
 
     private void requestDefaultHomeRole(Context ctx) {
         SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 45000L).apply();
+        prefs.edit()
+            .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 45000L)
+            .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "default_launcher")
+            .apply();
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 RoleManager rm = (RoleManager) ctx.getSystemService(Context.ROLE_SERVICE);
@@ -486,12 +590,32 @@ public class MainActivity extends FlutterActivity {
     private boolean isUsageStatsGranted(Context ctx) {
         try {
             AppOpsManager appOps = (AppOpsManager) ctx.getSystemService(Context.APP_OPS_SERVICE);
-            if (appOps == null) return false;
-            int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.getPackageName());
-            return mode == AppOpsManager.MODE_ALLOWED;
-        } catch (Exception ignored) {
-            return false;
+            if (appOps != null) {
+                int mode;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    mode = appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.getPackageName());
+                } else {
+                    mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.getPackageName());
+                }
+                if (mode == AppOpsManager.MODE_ALLOWED) {
+                    return true;
+                }
+            }
+            UsageStatsManager usm = (UsageStatsManager) ctx.getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm != null) {
+                long now = System.currentTimeMillis();
+                List<UsageStats> stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 86400000L, now);
+                return stats != null && !stats.isEmpty();
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private boolean isOverlayPermissionGranted(Context ctx) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return Settings.canDrawOverlays(ctx);
         }
+        return true;
     }
 
     private boolean isLockTaskModeRunning(Context ctx) {
@@ -509,6 +633,6 @@ public class MainActivity extends FlutterActivity {
 
     @Override
     public void onBackPressed() {
-        // As a system Home Launcher, pressing Back on the home screen stays inside Minimum Phone
+        // Stay inside Minimum Phone when Back is pressed on Home
     }
 }

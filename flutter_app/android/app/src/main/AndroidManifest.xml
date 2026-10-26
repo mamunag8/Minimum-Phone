@@ -101,7 +101,9 @@
             android:value="2" />
     </application>
 
-    <!-- Permissions for Anti-Dopamine Launcher, Usage Stats, Private DNS Lock, and NFC Anchor -->
+    <!-- Permissions for Anti-Dopamine Launcher, Usage Stats, Private DNS Lock, Overlay Lock, and NFC Anchor -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />

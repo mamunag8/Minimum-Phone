@@ -57,7 +57,75 @@ class AppItem {
         tier: json['tier'] ?? 'utility',
         pinned: json['pinned'] ?? false,
         nightQrLocked: json['nightQrLocked'] ?? false,
-        profiles: List<String>.from(json['profiles'] ?? ['work', 'personal', 'sunset']),
+        profiles: List<String>.from(
+            json['profiles'] ?? ['work', 'personal', 'sunset']),
+      );
+}
+
+class ChecklistEntry {
+  String text;
+  bool done;
+
+  ChecklistEntry({required this.text, this.done = false});
+
+  Map<String, dynamic> toJson() => {'text': text, 'done': done};
+
+  factory ChecklistEntry.fromJson(Map<String, dynamic> json) => ChecklistEntry(
+        text: json['text'] ?? '',
+        done: json['done'] == true,
+      );
+}
+
+class KeepNoteItem {
+  String id;
+  String title;
+  String content;
+  bool isChecklist;
+  List<ChecklistEntry> checklist;
+  bool pinned;
+  String label; // 'Idea', 'Work', 'Reflection', 'Task'
+  int colorIndex; // 0..5
+  int updatedAt;
+
+  KeepNoteItem({
+    required this.id,
+    required this.title,
+    required this.content,
+    this.isChecklist = false,
+    List<ChecklistEntry>? checklist,
+    this.pinned = false,
+    this.label = 'Idea',
+    this.colorIndex = 0,
+    int? updatedAt,
+  })  : checklist = checklist ?? [],
+        updatedAt = updatedAt ?? DateTime.now().millisecondsSinceEpoch;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'content': content,
+        'isChecklist': isChecklist,
+        'checklist': checklist.map((c) => c.toJson()).toList(),
+        'pinned': pinned,
+        'label': label,
+        'colorIndex': colorIndex,
+        'updatedAt': updatedAt,
+      };
+
+  factory KeepNoteItem.fromJson(Map<String, dynamic> json) => KeepNoteItem(
+        id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        title: json['title'] ?? '',
+        content: json['content'] ?? '',
+        isChecklist: json['isChecklist'] == true,
+        checklist: (json['checklist'] as List<dynamic>?)
+                ?.map((e) => ChecklistEntry.fromJson(Map<String, dynamic>.from(e)))
+                .toList() ??
+            [],
+        pinned: json['pinned'] == true,
+        label: json['label'] ?? 'Idea',
+        colorIndex: (json['colorIndex'] as int?) ?? 0,
+        updatedAt:
+            (json['updatedAt'] as int?) ?? DateTime.now().millisecondsSinceEpoch,
       );
 }
 
@@ -68,27 +136,35 @@ class MinimumPhoneApp extends StatefulWidget {
   State<MinimumPhoneApp> createState() => _MinimumPhoneAppState();
 }
 
-class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
+class _MinimumPhoneAppState extends State<MinimumPhoneApp>
+    with WidgetsBindingObserver {
   static const MethodChannel _channel =
       MethodChannel('com.kasbllc.minimumphone/native');
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // Navigation State
-  int _currentTab = 0; // 0: Home, 1: Apps, 2: Purity & DNS, 3: Focus, 4: Settings
+  // Navigation State (No Bottom Bar — 100% Sidebar Driven!)
+  // 0: Home, 1: Apps, 2: Purity & DNS, 3: Focus, 4: Settings, 5: Keep Notes
+  int _currentTab = 0;
   int _appsSubTab = 0; // 0: All, 1: Essential, 2: Utility, 3: Restricted, 4: Night QR
   int _puritySubTab = 0; // 0: DNS & Night Lock, 1: SOS & Streak, 2: Keywords, 3: All
   int _focusSubTab = 0; // 0: Digest, 1: Monk & Night, 2: QR & Cleaner, 3: All
   int _settingsSubTab = 0; // 0: System & Lock, 1: Impact, 2: Language & Theme, 3: All
+  int _notesSubTab = 0; // 0: All, 1: Pinned, 2: Checklists, 3: Work, 4: Ideas, 5: Reflections
+  bool _notesGridView = true;
+  String _notesSearchQuery = '';
 
   // App State
   String _lang = 'en';
   String _themeMode = 'oled'; // 'oled', 'eink', 'amber'
   String _activeProfile = 'work'; // 'work', 'personal', 'sunset'
-  String _scratchpad = '';
   String _searchQuery = '';
-  String _wisdomCategory = 'all'; // 'all', 'quran', 'hadith', 'proverb'
   int _wisdomIndex = 0;
+
+  // Keep Notes State
+  List<KeepNoteItem> _keepNotes = [];
+  final TextEditingController _quickHomeNoteController = TextEditingController();
+  final TextEditingController _notesSearchController = TextEditingController();
 
   // Safe Private DNS & OS Fortress State
   String _dnsProvider = 'cloudflare'; // 'cloudflare', 'cleanbrowsing', 'adguard'
@@ -129,8 +205,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
   // Live Native OS Status (polled from MainActivity)
   bool _isDefaultLauncher = false;
   bool _hasUsageAccess = false;
+  bool _hasOverlayPermission = false;
   bool _isKioskPinned = false;
-  String _osDnsMode = 'unknown';
+  String _osDnsMode = 'off';
   String _osDnsSpecifier = '';
   bool _osDnsIsFamilySafe = false;
   int _batteryLevel = 100;
@@ -138,7 +215,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
   // Clock & Timers
   DateTime _now = DateTime.now();
   Timer? _clockTimer;
-  final TextEditingController _notesController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _keywordController = TextEditingController();
 
@@ -161,10 +237,21 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
     },
   ];
 
+  static const List<Color> _keepNotePalette = [
+    Color(0xFF14161D), // 0: Obsidian Default
+    Color(0xFF0B291E), // 1: Deep Emerald
+    Color(0xFF2B1D0A), // 2: Warm Amber
+    Color(0xFF0D2133), // 3: Midnight Ocean
+    Color(0xFF25132B), // 4: Royal Plum
+    Color(0xFF1F232A), // 5: Minimalist Slate
+  ];
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initDefaultApps();
+    _initDefaultKeepNotes();
     _loadPersistedState();
     _refreshNativeStatus();
     _clockTimer = Timer.periodic(const Duration(seconds: 2), (_) {
@@ -179,11 +266,50 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _clockTimer?.cancel();
-    _notesController.dispose();
+    _quickHomeNoteController.dispose();
+    _notesSearchController.dispose();
     _searchController.dispose();
     _keywordController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Immediately refresh Usage Access, Overlay, and OS Private DNS when user returns from Android Settings!
+      _refreshNativeStatus();
+    }
+  }
+
+  void _initDefaultKeepNotes() {
+    _keepNotes = [
+      KeepNoteItem(
+        id: 'note_1',
+        title: 'Today\'s Core Priorities',
+        content: '',
+        isChecklist: true,
+        pinned: true,
+        label: 'Work',
+        colorIndex: 1,
+        checklist: [
+          ChecklistEntry(text: 'Activate Safe Private DNS & Lock Settings', done: true),
+          ChecklistEntry(text: 'Complete 90m Deep Work Session', done: false),
+          ChecklistEntry(text: 'Read Quran / Evening Reflection before 22:00', done: false),
+        ],
+      ),
+      KeepNoteItem(
+        id: 'note_2',
+        title: 'Digital Detox Intention',
+        content:
+            'Every time I feel the urge to scroll aimlessly, pause for 15 seconds, breathe deeply, and remember what truly matters.',
+        isChecklist: false,
+        pinned: true,
+        label: 'Reflection',
+        colorIndex: 2,
+      ),
+    ];
   }
 
   void _initDefaultApps() {
@@ -192,7 +318,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         id: 'dialer',
         name: 'Phone Calls',
         packageName: 'com.google.android.dialer',
-        category: 'Communication',
+        category: 'Calls',
         tier: 'essential',
         pinned: true,
         nightQrLocked: false,
@@ -202,7 +328,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         id: 'messages',
         name: 'SMS Messages',
         packageName: 'com.google.android.apps.messaging',
-        category: 'Communication',
+        category: 'SMS',
         tier: 'essential',
         pinned: true,
         nightQrLocked: false,
@@ -212,7 +338,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         id: 'whatsapp',
         name: 'WhatsApp',
         packageName: 'com.whatsapp',
-        category: 'Messaging',
+        category: 'Chat',
         tier: 'utility',
         pinned: true,
         nightQrLocked: false,
@@ -222,7 +348,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         id: 'maps',
         name: 'Google Maps',
         packageName: 'com.google.android.apps.maps',
-        category: 'Navigation',
+        category: 'Maps',
         tier: 'essential',
         pinned: true,
         nightQrLocked: false,
@@ -232,7 +358,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         id: 'calendar',
         name: 'Calendar',
         packageName: 'com.google.android.calendar',
-        category: 'Productivity',
+        category: 'Plan',
         tier: 'essential',
         pinned: true,
         nightQrLocked: false,
@@ -292,7 +418,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         id: 'tiktok',
         name: 'TikTok',
         packageName: 'com.zhiliaoapp.musically',
-        category: 'Short Video',
+        category: 'Video',
         tier: 'restricted',
         pinned: false,
         nightQrLocked: true,
@@ -313,15 +439,14 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
 
   Future<void> _loadPersistedState() async {
     try {
-      final String? raw = await _channel.invokeMethod<String>('loadAppStateJson');
+      final String? raw =
+          await _channel.invokeMethod<String>('loadAppStateJson');
       if (raw != null && raw.isNotEmpty) {
         final Map<String, dynamic> data = jsonDecode(raw);
         setState(() {
           _lang = data['lang'] ?? _lang;
           _themeMode = data['themeMode'] ?? _themeMode;
           _activeProfile = data['activeProfile'] ?? _activeProfile;
-          _scratchpad = data['scratchpad'] ?? '';
-          _notesController.text = _scratchpad;
           _dnsProvider = data['dnsProvider'] ?? 'cloudflare';
           _dnsHost = data['dnsHost'] ?? 'family.cloudflare-dns.com';
           _phoneSettingsLocked = data['phoneSettingsLocked'] ?? true;
@@ -338,8 +463,29 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
           if (data['apps'] != null) {
             final List<dynamic> list = data['apps'];
             if (list.isNotEmpty) {
-              _apps = list.map((e) => AppItem.fromJson(Map<String, dynamic>.from(e))).toList();
+              _apps = list
+                  .map((e) => AppItem.fromJson(Map<String, dynamic>.from(e)))
+                  .toList();
             }
+          }
+          if (data['keepNotes'] != null) {
+            final List<dynamic> nList = data['keepNotes'];
+            if (nList.isNotEmpty) {
+              _keepNotes = nList
+                  .map((e) => KeepNoteItem.fromJson(Map<String, dynamic>.from(e)))
+                  .toList();
+            }
+          } else if (data['scratchpad'] != null &&
+              data['scratchpad'].toString().trim().isNotEmpty) {
+            _keepNotes.insert(
+              0,
+              KeepNoteItem(
+                id: 'migrated_note',
+                title: 'Quick Note',
+                content: data['scratchpad'].toString(),
+                pinned: true,
+              ),
+            );
           }
         });
         _syncFortressToNative();
@@ -355,7 +501,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         'lang': _lang,
         'themeMode': _themeMode,
         'activeProfile': _activeProfile,
-        'scratchpad': _scratchpad,
         'dnsProvider': _dnsProvider,
         'dnsHost': _dnsHost,
         'phoneSettingsLocked': _phoneSettingsLocked,
@@ -368,8 +513,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         'blockedOpens': _blockedOpens,
         'blockedKeywords': _blockedKeywords,
         'apps': _apps.map((a) => a.toJson()).toList(),
+        'keepNotes': _keepNotes.map((n) => n.toJson()).toList(),
       };
-      await _channel.invokeMethod('saveAppStateJson', {'json': jsonEncode(data)});
+      await _channel
+          .invokeMethod('saveAppStateJson', {'json': jsonEncode(data)});
     } catch (_) {}
   }
 
@@ -377,9 +524,14 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
     try {
       await _channel.invokeMethod('configureFortress', {
         'phoneSettingsLocked': _phoneSettingsLocked,
+        'lockSystemSettings': _phoneSettingsLocked,
         'nightAutoDnsEnabled': _nightAutoDnsEnabled,
+        'autoNightDns': _nightAutoDnsEnabled,
+        'dnsShieldActive': true,
         'dnsHost': _dnsHost,
+        'expectedHost': _dnsHost,
         'qrSecret': _qrSecret,
+        'qrCode': _qrSecret,
         'emergencyLockdownUntil': _emergencyLockdownUntil,
       });
     } catch (_) {}
@@ -392,16 +544,20 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
       if (status != null && mounted) {
         setState(() {
           _isDefaultLauncher = status['isDefaultLauncher'] == true;
-          _hasUsageAccess = status['hasUsageAccess'] == true;
+          _hasUsageAccess = (status['isUsageStatsGranted'] == true) ||
+              (status['hasUsageAccess'] == true);
+          _hasOverlayPermission = (status['isOverlayGranted'] == true) ||
+              (status['hasOverlayPermission'] == true);
           _isKioskPinned = status['isKioskPinned'] == true;
-          _osDnsMode = (status['osDnsMode'] ?? 'off').toString();
-          _osDnsSpecifier = (status['osDnsSpecifier'] ?? '').toString();
-          _osDnsIsFamilySafe = status['osDnsIsFamilySafe'] == true;
+          _osDnsMode =
+              (status['privateDnsMode'] ?? status['osDnsMode'] ?? 'off')
+                  .toString();
+          _osDnsSpecifier =
+              (status['privateDnsHost'] ?? status['osDnsSpecifier'] ?? '')
+                  .toString();
+          _osDnsIsFamilySafe = (status['privateDnsActive'] == true) ||
+              (status['osDnsIsFamilySafe'] == true);
           _batteryLevel = (status['batteryLevel'] as int?) ?? 100;
-          final int nativeRam = (status['ramFreedMb'] as int?) ?? 0;
-          if (nativeRam > _ramFreedMb) {
-            _ramFreedMb = nativeRam;
-          }
         });
       }
     } catch (_) {}
@@ -409,33 +565,41 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
 
   Future<void> _syncInstalledAndroidApps() async {
     try {
-      final String? raw = await _channel.invokeMethod<String>('getInstalledApps');
-      if (raw != null && raw.isNotEmpty) {
-        final List<dynamic> list = jsonDecode(raw);
+      final dynamic raw = await _channel.invokeMethod('getInstalledApps');
+      List<dynamic> list = [];
+      if (raw is String && raw.isNotEmpty) {
+        list = jsonDecode(raw);
+      } else if (raw is List) {
+        list = raw;
+      }
+      if (list.isNotEmpty) {
         int added = 0;
         setState(() {
           for (final item in list) {
-            final String pkg = (item['packageName'] ?? '').toString();
-            final String label = (item['label'] ?? 'App').toString();
+            final Map<dynamic, dynamic> map = item as Map<dynamic, dynamic>;
+            final String pkg = (map['packageName'] ?? '').toString();
+            final String label =
+                (map['label'] ?? map['name'] ?? 'App').toString();
             if (pkg.isEmpty) continue;
             final bool exists = _apps.any((a) => a.packageName == pkg);
             if (!exists) {
-              final bool isBrowserOrSocial = pkg.contains('browser') ||
-                  pkg.contains('chrome') ||
-                  pkg.contains('firefox') ||
-                  pkg.contains('opera') ||
-                  pkg.contains('brave') ||
-                  pkg.contains('instagram') ||
-                  pkg.contains('facebook') ||
-                  pkg.contains('tiktok') ||
-                  pkg.contains('youtube') ||
-                  pkg.contains('twitter') ||
-                  pkg.contains('reddit');
+              final String lowerPkg = pkg.toLowerCase();
+              final bool isBrowserOrSocial = lowerPkg.contains('browser') ||
+                  lowerPkg.contains('chrome') ||
+                  lowerPkg.contains('firefox') ||
+                  lowerPkg.contains('opera') ||
+                  lowerPkg.contains('brave') ||
+                  lowerPkg.contains('instagram') ||
+                  lowerPkg.contains('facebook') ||
+                  lowerPkg.contains('tiktok') ||
+                  lowerPkg.contains('youtube') ||
+                  lowerPkg.contains('twitter') ||
+                  lowerPkg.contains('reddit');
               _apps.add(AppItem(
                 id: pkg,
                 name: label,
                 packageName: pkg,
-                category: isBrowserOrSocial ? 'Guarded' : 'Installed',
+                category: isBrowserOrSocial ? 'Guarded' : 'App',
                 tier: isBrowserOrSocial ? 'restricted' : 'utility',
                 pinned: false,
                 nightQrLocked: isBrowserOrSocial,
@@ -449,8 +613,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Synced device apps ($added new apps added)'),
-              backgroundColor: const Color(0xFF1E8E5A),
+              content: Text('Synced installed apps ($added new apps added)'),
+              backgroundColor: const Color(0xFF10B981),
             ),
           );
         }
@@ -500,14 +664,16 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
     return const Color(0xFF10B981);
   }
 
-  Future<void> _activateSafePrivateDnsNow() async {
+  Future<void> _activateSafePrivateDnsNow(BuildContext ctx) async {
     try {
+      Clipboard.setData(ClipboardData(text: _dnsHost));
       final Map<dynamic, dynamic>? res =
           await _channel.invokeMethod<Map<dynamic, dynamic>>(
         'activateSafePrivateDns',
         {
           'host': _dnsHost,
-          'lockAfter': true,
+          'hostname': _dnsHost,
+          'openSettingsIfNeeded': true,
         },
       );
       setState(() {
@@ -516,42 +682,154 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
       await _saveState();
       await _refreshNativeStatus();
 
-      if (!mounted) return;
-      final bool directSuccess = res?['directSuccess'] == true;
-      if (directSuccess) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (!ctx.mounted) return;
+      final bool autoApplied =
+          (res?['autoApplied'] == true) || (res?['directSuccess'] == true);
+      if (autoApplied || _osDnsIsFamilySafe) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
           SnackBar(
             content: Text(
-              'VERIFIED! Safe Private DNS ($_dnsHost) activated directly in Android OS & Settings Locked!',
+              '🛡️ Safe Private DNS ($_dnsHost) is Active & Phone Settings Locked!',
             ),
             backgroundColor: const Color(0xFF10B981),
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 6),
-            content: Text(
-              'Copied "$_dnsHost"! Select "Private DNS provider hostname", paste "$_dnsHost" & press Save. Settings will auto-lock the moment you save!',
-            ),
-            backgroundColor: const Color(0xFF059669),
-          ),
-        );
+        // Show persistent helper modal so when user comes back (or before they paste), they can also confirm in 1 tap!
+        _showDnsGuidedConfirmationSheet(ctx);
       }
     } catch (_) {}
+  }
+
+  void _showDnsGuidedConfirmationSheet(BuildContext ctx) {
+    showModalBottomSheet(
+      context: ctx,
+      backgroundColor: const Color(0xFF11131A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sCtx) {
+        return Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.shield_rounded, color: Color(0xFF10B981)),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Safe Private DNS Setup Guide',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF191D26),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF10B981)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '📋 Copied to Clipboard: $_dnsHost',
+                      style: const TextStyle(
+                        color: Color(0xFF10B981),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      '1. In Android Settings, tap "Private DNS" (under Network / More Connections).\n'
+                      '2. Select "Private DNS provider hostname".\n'
+                      '3. Long-press to Paste the copied hostname & tap Save.\n'
+                      '4. Minimum Phone will auto-detect & lock Settings!',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white24),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                      label: const Text(
+                        'Open DNS Settings',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      onPressed: () {
+                        _openSafeSubSetting('private_dns');
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      icon: const Icon(Icons.check_circle_rounded, size: 16),
+                      label: const Text(
+                        'I Saved It • Lock Now',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      onPressed: () async {
+                        await _channel.invokeMethod('confirmManualDnsSetup', {
+                          'host': _dnsHost,
+                        });
+                        await _refreshNativeStatus();
+                        if (sCtx.mounted) Navigator.pop(sCtx);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _openSafeSubSetting(String type) async {
     try {
       await _channel.invokeMethod('openSafePhoneSetting', {
         'settingType': type,
+        'target': type,
         'dnsHost': _dnsHost,
       });
     } catch (_) {}
   }
 
   void _handleAppTap(BuildContext ctx, AppItem app) {
-    // Check Monk Mode
     if (_isMonkActive && app.tier != 'essential') {
       final int minsLeft =
           ((_monkModeUntil - DateTime.now().millisecondsSinceEpoch) / 60000)
@@ -569,15 +847,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
       return;
     }
 
-    // Check Night QR Lock
     if (_isNightWindow && _sleepScheduleEnabled && app.nightQrLocked) {
       _showQrUnlockDialog(ctx, onUnlocked: () {
-        _launchNativePackage(app.packageName);
+        _launchNativePackage(app.packageName, app.id);
       });
       return;
     }
 
-    // Check Restricted 15-Second Mindful Gate
     if (app.tier == 'restricted') {
       _showMindfulGateModal(
         ctx,
@@ -588,23 +864,25 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
             _reclaimedMinutes += 5;
           });
           _saveState();
-          _launchNativePackage(app.packageName);
+          _launchNativePackage(app.packageName, app.id);
         },
       );
       return;
     }
 
-    _launchNativePackage(app.packageName);
+    _launchNativePackage(app.packageName, app.id);
   }
 
-  Future<void> _launchNativePackage(String pkg) async {
+  Future<void> _launchNativePackage(String pkg, String appId) async {
     try {
-      final bool? ok =
-          await _channel.invokeMethod<bool>('launchApp', {'packageName': pkg});
+      final bool? ok = await _channel.invokeMethod<bool>('launchApp', {
+        'packageName': pkg,
+        'appId': appId,
+      });
       if (ok != true && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Simulated launch: $pkg'),
+            content: Text('Opening $pkg...'),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -656,7 +934,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
               _saveState();
               Navigator.pop(dCtx);
             },
-            child: const Text('Stay Focused (Cancel)'),
+            child: const Text('Stay Focused'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -787,7 +1065,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                     const SizedBox(height: 6),
                     Text(
                       _tr('gateSub'),
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 13),
                     ),
                     const SizedBox(height: 16),
                     Container(
@@ -850,7 +1129,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                             ),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                                  ? const Color(0xFF10B981)
+                                      .withValues(alpha: 0.2)
                                   : Colors.white.withValues(alpha: 0.05),
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
@@ -906,7 +1186,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                                 } else {
                                   setModalState(() {
                                     errorMsg =
-                                        'Please reflect on the wisdom and choose the accurate answer.';
+                                        'Please reflect on the quote and select the matching answer.';
                                   });
                                 }
                               },
@@ -1063,87 +1343,201 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (mCtx) {
-        return Padding(
-          padding: const EdgeInsets.all(22),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '🛡️ 3-Step OS Fortress Setup Wizard',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Complete these 3 steps once so Safe Private DNS and OS Settings Lock work 24/7 without bypass:',
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                const SizedBox(height: 18),
-                _buildWizardStepTile(
-                  step: '1',
-                  title: 'Grant Usage Access (Required for <350ms Settings Lock)',
-                  subtitle: _hasUsageAccess
-                      ? '✅ Granted! Watchdog is actively guarding Settings & Browsers.'
-                      : 'Allows Minimum Phone to detect and lock Android Settings & Browsers.',
-                  isDone: _hasUsageAccess,
-                  buttonLabel: _hasUsageAccess ? 'Granted' : 'Grant Usage Access',
-                  onTap: () async {
-                    await _channel.invokeMethod('requestUsageStatsPermission');
-                  },
-                ),
-                const SizedBox(height: 12),
-                _buildWizardStepTile(
-                  step: '2',
-                  title: 'Activate Safe Private DNS ($_dnsHost)',
-                  subtitle: _osDnsIsFamilySafe
-                      ? '✅ Active in Android OS ($_osDnsSpecifier)!'
-                      : 'Copies $_dnsHost & opens Android Private DNS settings with auto-lock on save.',
-                  isDone: _osDnsIsFamilySafe,
-                  buttonLabel:
-                      _osDnsIsFamilySafe ? 'Active' : '1-Tap Activate Safe DNS',
-                  onTap: () {
-                    Navigator.pop(mCtx);
-                    _activateSafePrivateDnsNow();
-                  },
-                ),
-                const SizedBox(height: 12),
-                _buildWizardStepTile(
-                  step: '3',
-                  title: 'Set Minimum Phone as Default Home Launcher',
-                  subtitle: _isDefaultLauncher
-                      ? '✅ Active as Default Home Launcher!'
-                      : 'Makes pressing the Home button always return to your minimalist fortress.',
-                  isDone: _isDefaultLauncher,
-                  buttonLabel:
-                      _isDefaultLauncher ? 'Default Home' : 'Set Default Home',
-                  onTap: () async {
-                    await _channel.invokeMethod('requestDefaultLauncher');
-                  },
-                ),
-                const SizedBox(height: 18),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+        return StatefulBuilder(
+          builder: (sCtx, setWizardState) {
+            final int completedSteps = (_hasUsageAccess ? 1 : 0) +
+                (_hasOverlayPermission ? 1 : 0) +
+                (_osDnsIsFamilySafe ? 1 : 0) +
+                (_isDefaultLauncher ? 1 : 0);
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '🛡️ Step-by-Step Protection Setup Guide',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFF10B981),
+                          ),
+                          icon: const Icon(Icons.refresh_rounded, size: 16),
+                          label: const Text(
+                            'Refresh',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          onPressed: () async {
+                            await _refreshNativeStatus();
+                            if (sCtx.mounted) setWizardState(() {});
+                          },
+                        ),
+                      ],
                     ),
-                    onPressed: () => Navigator.pop(mCtx),
-                    child: const Text(
-                      'Done',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Completed $completedSteps of 4 steps • Follow these 4 steps once so DNS Protection & Phone Settings Lock work 100% reliably:',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: completedSteps / 4.0,
+                      minHeight: 6,
+                      backgroundColor: Colors.white12,
+                      color: const Color(0xFF10B981),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildWizardStepTile(
+                      step: '1',
+                      title: 'Step 1: Grant Usage Access (অ্যাপ ইউসেজ পারমিশন)',
+                      subtitle: _hasUsageAccess
+                          ? '✅ ACTIVE! Minimum Phone can now detect when Phone Settings or Browsers open.'
+                          : 'How to enable:\n'
+                              '1. Tap "Grant Usage" → Find "Minimum Phone" in the list.\n'
+                              '2. Turn ON "Permit usage access" / "Allow usage tracking".\n'
+                              '3. Press Back to return to Minimum Phone.',
+                      isDone: _hasUsageAccess,
+                      buttonLabel: _hasUsageAccess ? 'Granted ✓' : 'Grant Usage',
+                      onTap: () async {
+                        await _channel
+                            .invokeMethod('requestUsageStatsPermission');
+                        await Future.delayed(const Duration(seconds: 1));
+                        await _refreshNativeStatus();
+                        if (sCtx.mounted) setWizardState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    _buildWizardStepTile(
+                      step: '2',
+                      title:
+                          'Step 2: Allow "Appear on Top" (লক স্ক্রিন পারমিশন)',
+                      subtitle: _hasOverlayPermission
+                          ? '✅ ACTIVE! Lock Screen can immediately pop up over Phone Settings.'
+                          : 'Why needed: Android 10–15 requires this so our Lock Screen can block Phone Settings.\n'
+                              '1. Tap "Allow Overlay" → Select "Minimum Phone".\n'
+                              '2. Turn ON "Allow display over other apps" / "Appear on top".\n'
+                              '3. Press Back to return here.',
+                      isDone: _hasOverlayPermission,
+                      buttonLabel:
+                          _hasOverlayPermission ? 'Granted ✓' : 'Allow Overlay',
+                      onTap: () async {
+                        await _channel.invokeMethod('requestOverlayPermission');
+                        await Future.delayed(const Duration(seconds: 1));
+                        await _refreshNativeStatus();
+                        if (sCtx.mounted) setWizardState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    _buildWizardStepTile(
+                      step: '3',
+                      title: 'Step 3: Activate Safe Private DNS ($_dnsHost)',
+                      subtitle: _osDnsIsFamilySafe
+                          ? '✅ ACTIVE ($_osDnsSpecifier)! Adult sites & malware are blocked across all browsers & apps.'
+                          : 'How to enable:\n'
+                              '1. Tap "1-Tap Setup" (copies $_dnsHost & opens Settings).\n'
+                              '2. Go to Network & Internet / More Connections → Private DNS.\n'
+                              '3. Select "Private DNS provider hostname", paste $_dnsHost & tap Save.\n'
+                              '4. Tap "I Saved DNS • Verify" below!',
+                      isDone: _osDnsIsFamilySafe,
+                      buttonLabel:
+                          _osDnsIsFamilySafe ? 'Active ✓' : '1-Tap Setup',
+                      onTap: () {
+                        Navigator.pop(mCtx);
+                        _activateSafePrivateDnsNow(ctx);
+                      },
+                    ),
+                    if (!_osDnsIsFamilySafe) ...[
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF10B981),
+                            side: const BorderSide(color: Color(0xFF10B981)),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                          icon: const Icon(
+                            Icons.verified_user_rounded,
+                            size: 16,
+                          ),
+                          label: Text(
+                            'I Saved $_dnsHost in Settings • Verify & Lock Now',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          onPressed: () async {
+                            await _channel.invokeMethod(
+                              'confirmManualDnsSetup',
+                              {'host': _dnsHost},
+                            );
+                            await _refreshNativeStatus();
+                            if (sCtx.mounted) setWizardState(() {});
+                          },
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    _buildWizardStepTile(
+                      step: '4',
+                      title:
+                          'Step 4: Set Default Home Launcher (ডিফল্ট হোম স্ক্রিন)',
+                      subtitle: _isDefaultLauncher
+                          ? '✅ ACTIVE as your Default Home Launcher!'
+                          : '1. Tap "Set Home" → Choose "Minimum Phone" → Tap "Always".',
+                      isDone: _isDefaultLauncher,
+                      buttonLabel:
+                          _isDefaultLauncher ? 'Default ✓' : 'Set Home',
+                      onTap: () async {
+                        await _channel.invokeMethod('requestDefaultLauncher');
+                        await Future.delayed(const Duration(seconds: 1));
+                        await _refreshNativeStatus();
+                        if (sCtx.mounted) setWizardState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF10B981),
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () {
+                          _refreshNativeStatus();
+                          Navigator.pop(mCtx);
+                        },
+                        child: const Text(
+                          'Done & Verify Protection',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -1158,7 +1552,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
     required VoidCallback onTap,
   }) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF191C26),
         borderRadius: BorderRadius.circular(14),
@@ -1169,7 +1563,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
       child: Row(
         children: [
           CircleAvatar(
-            radius: 16,
+            radius: 15,
             backgroundColor:
                 isDone ? const Color(0xFF10B981) : Colors.white12,
             child: Text(
@@ -1177,10 +1571,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
               style: TextStyle(
                 color: isDone ? Colors.black : Colors.white,
                 fontWeight: FontWeight.bold,
+                fontSize: 13,
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1193,10 +1588,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                     fontSize: 13,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   subtitle,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
                 ),
               ],
             ),
@@ -1207,12 +1602,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
               backgroundColor:
                   isDone ? Colors.white12 : const Color(0xFF10B981),
               foregroundColor: isDone ? Colors.white70 : Colors.black,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             ),
             onPressed: onTap,
             child: Text(
               buttonLabel,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -1249,10 +1644,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                   _buildPurityDnsPage(innerCtx),
                   _buildFocusPage(innerCtx),
                   _buildSettingsPage(innerCtx),
+                  _buildKeepNotesPage(innerCtx),
                 ],
               ),
             ),
-            bottomNavigationBar: _buildBottomNav(),
+            // NO BOTTOM BAR — 100% Minimalist & Sidebar Driven!
           ),
         ),
       ),
@@ -1260,43 +1656,67 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
   }
 
   PreferredSizeWidget _buildTopAppBar(BuildContext ctx) {
+    final List<String> tabTitles = [
+      _tr('appTitle'),
+      _tr('navApps'),
+      _tr('navPurity'),
+      _tr('navFocus'),
+      _tr('navSettings'),
+      'Keep Notes',
+    ];
     return AppBar(
-      backgroundColor: _cardColor,
+      backgroundColor: _bgColor,
       elevation: 0,
       leading: IconButton(
         icon: Icon(Icons.menu_rounded, color: _textColor),
-        tooltip: 'Menu & Quick Fortress Controls',
+        tooltip: 'Open Sidebar Navigation',
         onPressed: () => _scaffoldKey.currentState?.openDrawer(),
       ),
       titleSpacing: 0,
       title: Row(
         children: [
+          if (_currentTab != 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: InkWell(
+                onTap: () => setState(() => _currentTab = 0),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _cardColor,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.arrow_back_rounded,
+                          size: 14, color: _accentColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Home',
+                        style: TextStyle(
+                          color: _textColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _tr('appTitle'),
-                  style: TextStyle(
-                    color: _textColor,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  _osDnsIsFamilySafe
-                      ? '🛡️ $_osDnsSpecifier'
-                      : _tr('subtitle'),
-                  style: TextStyle(
-                    color: _osDnsIsFamilySafe
-                        ? const Color(0xFF10B981)
-                        : _subTextColor,
-                    fontSize: 11,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+            child: Text(
+              tabTitles[_currentTab],
+              style: TextStyle(
+                color: _textColor,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -1308,7 +1728,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
           child: InkWell(
             onTap: () {
               if (!_osDnsIsFamilySafe) {
-                _activateSafePrivateDnsNow();
+                _activateSafePrivateDnsNow(ctx);
               } else {
                 setState(() {
                   _currentTab = 2;
@@ -1321,13 +1741,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: _osDnsIsFamilySafe
-                    ? const Color(0xFF10B981).withValues(alpha: 0.2)
-                    : Colors.redAccent.withValues(alpha: 0.22),
+                    ? const Color(0xFF10B981).withValues(alpha: 0.18)
+                    : Colors.amber.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: _osDnsIsFamilySafe
                       ? const Color(0xFF10B981)
-                      : Colors.redAccent,
+                      : Colors.amber,
                 ),
               ),
               child: Row(
@@ -1337,10 +1757,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                     _osDnsIsFamilySafe
                         ? Icons.verified_user_rounded
                         : Icons.gpp_maybe_rounded,
-                    size: 14,
+                    size: 13,
                     color: _osDnsIsFamilySafe
                         ? const Color(0xFF10B981)
-                        : Colors.redAccent,
+                        : Colors.amber,
                   ),
                   const SizedBox(width: 4),
                   Text(
@@ -1348,7 +1768,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                     style: TextStyle(
                       color: _osDnsIsFamilySafe
                           ? const Color(0xFF10B981)
-                          : Colors.redAccent,
+                          : Colors.amber,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1359,25 +1779,17 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
           ),
         ),
         IconButton(
-          icon: Icon(Icons.fact_check_outlined, color: _textColor, size: 20),
-          tooltip: _tr('setupBtn'),
-          onPressed: () => _showSetupWizardModal(ctx),
-        ),
-        IconButton(
           icon: Icon(
-            _phoneSettingsLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
-            color: _phoneSettingsLocked
-                ? const Color(0xFF10B981)
-                : Colors.amber,
+            (!_hasUsageAccess || !_hasOverlayPermission)
+                ? Icons.warning_amber_rounded
+                : Icons.fact_check_outlined,
+            color: (!_hasUsageAccess || !_hasOverlayPermission)
+                ? Colors.amber
+                : _subTextColor,
             size: 20,
           ),
-          tooltip: _tr('lockBtn'),
-          onPressed: () async {
-            await _channel.invokeMethod('openNativeFortressLock', {
-              'pkg': 'com.android.settings',
-              'reason': 'settings_locked',
-            });
-          },
+          tooltip: _tr('setupBtn'),
+          onPressed: () => _showSetupWizardModal(ctx),
         ),
       ],
     );
@@ -1395,7 +1807,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                 const Icon(
                   Icons.shield_rounded,
                   color: Color(0xFF10B981),
-                  size: 28,
+                  size: 26,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -1411,7 +1823,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                         ),
                       ),
                       Text(
-                        'v2.0.0 • Native OS Fortress',
+                        'v2.1.0 • All-in-Sidebar Minimalist OS',
                         style: TextStyle(color: _subTextColor, fontSize: 11),
                       ),
                     ],
@@ -1421,7 +1833,91 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
             ),
             const SizedBox(height: 16),
 
-            // Instant Safe Private DNS & OS Settings Lock Card inside Sidebar!
+            // MAIN NAVIGATION IN SIDEBAR
+            Text(
+              'NAVIGATION',
+              style: TextStyle(
+                color: _subTextColor,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.0,
+              ),
+            ),
+            const SizedBox(height: 6),
+            _buildDrawerNavTile(
+              ctx,
+              icon: Icons.home_rounded,
+              title: 'Home (Minimalist Launcher)',
+              tab: 0,
+            ),
+            _buildDrawerNavTile(
+              ctx,
+              icon: Icons.lightbulb_outline_rounded,
+              title: 'Keep Notes (${_keepNotes.length} Notes & Lists)',
+              tab: 5,
+            ),
+            _buildDrawerNavTile(
+              ctx,
+              icon: Icons.apps_rounded,
+              title: '${_tr('navApps')} (${_apps.length} Apps)',
+              tab: 1,
+            ),
+            _buildDrawerNavTile(
+              ctx,
+              icon: Icons.shield_rounded,
+              title: '${_tr('navPurity')} & Safe DNS Guard',
+              tab: 2,
+              subTab: 0,
+            ),
+            _buildDrawerNavTile(
+              ctx,
+              icon: Icons.sos_rounded,
+              title: 'Emergency SOS & Clean Streak',
+              tab: 2,
+              subTab: 1,
+            ),
+            _buildDrawerNavTile(
+              ctx,
+              icon: Icons.center_focus_strong_rounded,
+              title: '${_tr('navFocus')} • Monk Mode & Digest',
+              tab: 3,
+              subTab: 0,
+            ),
+            _buildDrawerNavTile(
+              ctx,
+              icon: Icons.admin_panel_settings_rounded,
+              title: '${_tr('navSettings')} • Permissions & Impact',
+              tab: 4,
+              subTab: 0,
+            ),
+            ListTile(
+              dense: true,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+              leading: const Icon(
+                Icons.fact_check_rounded,
+                color: Color(0xFF10B981),
+                size: 20,
+              ),
+              title: const Text(
+                '📋 4-Step Protection Setup Guide',
+                style: TextStyle(
+                  color: Color(0xFF10B981),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showSetupWizardModal(ctx);
+              },
+            ),
+
+            const Divider(height: 24, color: Colors.white12),
+
+            // Instant Safe Private DNS & OS Settings Lock Card inside Sidebar
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -1451,8 +1947,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                       Expanded(
                         child: Text(
                           _osDnsIsFamilySafe
-                              ? 'DNS ACTIVE: $_osDnsSpecifier'
-                              : 'Safe Private DNS Not Active',
+                              ? 'SAFE DNS ON: $_osDnsSpecifier'
+                              : 'Safe Private DNS: OFF',
                           style: TextStyle(
                             color: _osDnsIsFamilySafe
                                 ? const Color(0xFF10B981)
@@ -1483,11 +1979,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                       ),
                       onPressed: () {
                         Navigator.pop(ctx);
-                        _activateSafePrivateDnsNow();
+                        _activateSafePrivateDnsNow(ctx);
                       },
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
@@ -1518,25 +2014,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                         _saveState();
                         _syncFortressToNative();
                       }
-                    },
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    activeThumbColor: const Color(0xFF10B981),
-                    title: Text(
-                      _tr('nightAutoDns'),
-                      style: TextStyle(
-                        color: _textColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    value: _nightAutoDnsEnabled,
-                    onChanged: (val) {
-                      setState(() => _nightAutoDnsEnabled = val);
-                      _saveState();
-                      _syncFortressToNative();
                     },
                   ),
                 ],
@@ -1584,58 +2061,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
               ],
             ),
 
-            const Divider(height: 28, color: Colors.white12),
-            Text(
-              'PAGES & SUB-TABS',
-              style: TextStyle(
-                color: _subTextColor,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 6),
-            _buildDrawerNavTile(
-              ctx,
-              icon: Icons.home_rounded,
-              title: _tr('navHome'),
-              tab: 0,
-            ),
-            _buildDrawerNavTile(
-              ctx,
-              icon: Icons.apps_rounded,
-              title: '${_tr('navApps')} • Essential / Restricted',
-              tab: 1,
-            ),
-            _buildDrawerNavTile(
-              ctx,
-              icon: Icons.shield_rounded,
-              title: '${_tr('navPurity')} • Safe Private DNS & Night Lock',
-              tab: 2,
-              subTab: 0,
-            ),
-            _buildDrawerNavTile(
-              ctx,
-              icon: Icons.sos_rounded,
-              title: '${_tr('navPurity')} • Emergency SOS & Streak',
-              tab: 2,
-              subTab: 1,
-            ),
-            _buildDrawerNavTile(
-              ctx,
-              icon: Icons.notifications_paused_rounded,
-              title: '${_tr('navFocus')} • Notification Digest & Monk Mode',
-              tab: 3,
-              subTab: 0,
-            ),
-            _buildDrawerNavTile(
-              ctx,
-              icon: Icons.admin_panel_settings_rounded,
-              title: '${_tr('navSettings')} • Launcher & System Permissions',
-              tab: 4,
-              subTab: 0,
-            ),
-
-            const Divider(height: 28, color: Colors.white12),
+            const Divider(height: 24, color: Colors.white12),
             Text(
               'LANGUAGE / ভাষা / اللغة',
               style: TextStyle(
@@ -1707,10 +2133,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
     required int tab,
     int? subTab,
   }) {
-    final bool selected = _currentTab == tab;
+    final bool selected = _currentTab == tab && (subTab == null);
     return ListTile(
       dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      tileColor:
+          selected ? _accentColor.withValues(alpha: 0.14) : Colors.transparent,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
       leading: Icon(
         icon,
         color: selected ? _accentColor : _subTextColor,
@@ -1757,43 +2186,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         setState(() => _lang = code);
         _saveState();
       },
-    );
-  }
-
-  Widget _buildBottomNav() {
-    return NavigationBar(
-      backgroundColor: _cardColor,
-      indicatorColor: _accentColor.withValues(alpha: 0.22),
-      selectedIndex: _currentTab,
-      onDestinationSelected: (idx) => setState(() => _currentTab = idx),
-      destinations: [
-        NavigationDestination(
-          icon: const Icon(Icons.home_outlined),
-          selectedIcon: Icon(Icons.home_rounded, color: _accentColor),
-          label: _tr('navHome'),
-        ),
-        NavigationDestination(
-          icon: const Icon(Icons.apps_outlined),
-          selectedIcon: Icon(Icons.apps_rounded, color: _accentColor),
-          label: _tr('navApps'),
-        ),
-        NavigationDestination(
-          icon: const Icon(Icons.shield_outlined),
-          selectedIcon: Icon(Icons.shield_rounded, color: _accentColor),
-          label: _tr('navPurity'),
-        ),
-        NavigationDestination(
-          icon: const Icon(Icons.center_focus_strong_outlined),
-          selectedIcon:
-              Icon(Icons.center_focus_strong_rounded, color: _accentColor),
-          label: _tr('navFocus'),
-        ),
-        NavigationDestination(
-          icon: const Icon(Icons.tune_outlined),
-          selectedIcon: Icon(Icons.tune_rounded, color: _accentColor),
-          label: _tr('navSettings'),
-        ),
-      ],
     );
   }
 
@@ -1849,19 +2241,19 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
   }
 
   // =========================================================================
-  // PAGE 1: HOME
+  // PAGE 1: ULTRA-CLEAN MINIMALIST HOMEPAGE
   // =========================================================================
   Widget _buildHomePage(BuildContext ctx) {
     final String hh = _now.hour.toString().padLeft(2, '0');
     final String mm = _now.minute.toString().padLeft(2, '0');
     final List<String> weekdays = [
-      'Mon',
-      'Tue',
-      'Wed',
-      'Thu',
-      'Fri',
-      'Sat',
-      'Sun'
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday'
     ];
     final List<String> months = [
       'Jan',
@@ -1884,181 +2276,119 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         .where((a) => a.pinned && a.profiles.contains(_activeProfile))
         .toList();
 
-    final List<WisdomEntry> filteredWisdom = _wisdomCategory == 'all'
-        ? AppDataDefaults.wisdomList
-        : AppDataDefaults.wisdomList
-            .where((w) => w.category == _wisdomCategory)
-            .toList();
-    final WisdomEntry currentWisdom =
-        filteredWisdom[_wisdomIndex % filteredWisdom.length];
+    final List<KeepNoteItem> pinnedNotes =
+        _keepNotes.where((n) => n.pinned).take(2).toList();
+
+    final WisdomEntry currentWisdom = AppDataDefaults
+        .wisdomList[_wisdomIndex % AppDataDefaults.wisdomList.length];
+
+    final bool needsPermissions = !_hasUsageAccess || !_hasOverlayPermission;
 
     return ListView(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
       children: [
-        // Clock & Status Header
+        // 1. Minimalist Clock & Date
+        Text(
+          '$hh:$mm',
+          style: TextStyle(
+            color: _textColor,
+            fontSize: 64,
+            fontWeight: FontWeight.w200,
+            letterSpacing: -2.0,
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(height: 6),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              '$hh:$mm',
+              dateStr,
               style: TextStyle(
-                color: _textColor,
-                fontSize: 54,
-                fontWeight: FontWeight.w300,
-                letterSpacing: -1.5,
+                color: _subTextColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
               ),
             ),
             const Spacer(),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  dateStr,
-                  style: TextStyle(
-                    color: _textColor,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '🔋 $_batteryLevel% • 🔥 $_cleanStreakDays ${_tr('daysClean')}',
-                  style: TextStyle(color: _subTextColor, fontSize: 12),
-                ),
-              ],
+            Text(
+              '$_batteryLevel% • 🔥 $_cleanStreakDays d',
+              style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
           ],
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
 
-        // Instant Safe Private DNS Status / Action Banner on Home!
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: _osDnsIsFamilySafe
-                ? const Color(0xFF10B981).withValues(alpha: 0.12)
-                : Colors.amber.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: _osDnsIsFamilySafe
-                  ? const Color(0xFF10B981)
-                  : Colors.amber,
+        // 2. Compact Permission / DNS Alert Strip (Only prominent when action needed, sleek when active)
+        if (needsPermissions || !_osDnsIsFamilySafe)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: _cardColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.amber.withValues(alpha: 0.6)),
             ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                _osDnsIsFamilySafe
-                    ? Icons.verified_user_rounded
-                    : Icons.shield_outlined,
-                color: _osDnsIsFamilySafe
-                    ? const Color(0xFF10B981)
-                    : Colors.amber,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _osDnsIsFamilySafe
-                          ? '${_tr('dnsVerified')} ($_osDnsSpecifier)'
-                          : _tr('dnsNotVerified'),
-                      style: TextStyle(
-                        color: _textColor,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                    Text(
-                      _phoneSettingsLocked
-                          ? '🔒 OS Settings Lock Active (<350ms Watchdog)'
-                          : '⚠️ OS Settings Unlocked',
-                      style: TextStyle(color: _subTextColor, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (!_osDnsIsFamilySafe)
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.black,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                  onPressed: _activateSafePrivateDnsNow,
-                  child: const Text(
-                    '1-Tap Fix',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                )
-              else
-                TextButton(
-                  onPressed: () => setState(() {
-                    _currentTab = 2;
-                    _puritySubTab = 0;
-                  }),
-                  child: const Text(
-                    'Guard',
+            child: Row(
+              children: [
+                const Icon(Icons.shield_outlined, color: Colors.amber, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    needsPermissions
+                        ? 'Grant Usage & Overlay Access to activate Settings Lock'
+                        : 'Safe Private DNS is off ($_dnsHost)',
                     style: TextStyle(
-                      color: Color(0xFF10B981),
+                      color: _textColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF10B981),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () {
+                    if (needsPermissions) {
+                      _showSetupWizardModal(ctx);
+                    } else {
+                      _activateSafePrivateDnsNow(ctx);
+                    }
+                  },
+                  child: Text(
+                    needsPermissions ? 'Activate →' : '1-Tap Fix →',
+                    style: const TextStyle(
+                      fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
-            ],
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 14),
 
-        // Profile Switcher
+        // 3. Minimalist Profile Switcher
         Row(
           children: [
-            _buildProfileButton('work', '💼 ${_tr('profileWork')}'),
+            _buildProfileButton('work', _tr('profileWork')),
             const SizedBox(width: 8),
-            _buildProfileButton('personal', '🌿 ${_tr('profilePersonal')}'),
+            _buildProfileButton('personal', _tr('profilePersonal')),
             const SizedBox(width: 8),
-            _buildProfileButton('sunset', '🌙 ${_tr('profileSunset')}'),
+            _buildProfileButton('sunset', _tr('profileSunset')),
           ],
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 22),
 
-        // Pinned Essential Apps
-        Row(
-          children: [
-            Text(
-              _tr('essentialApps').toUpperCase(),
-              style: TextStyle(
-                color: _subTextColor,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.1,
-              ),
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: () => setState(() => _currentTab = 1),
-              child: Text(
-                '${_tr('allApps')} →',
-                style: TextStyle(color: _accentColor, fontSize: 12),
-              ),
-            ),
-          ],
-        ),
+        // 4. Clean Typography Pinned Essential Apps List
         ...pinnedApps.map(
           (app) => InkWell(
             onTap: () => _handleAppTap(ctx, app),
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                color: _cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white10),
-              ),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
               child: Row(
                 children: [
                   Expanded(
@@ -2066,30 +2396,43 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                       app.name,
                       style: TextStyle(
                         color: _textColor,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w500,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w400,
+                        letterSpacing: -0.3,
                       ),
                     ),
                   ),
                   Text(
                     app.category,
-                    style: TextStyle(color: _subTextColor, fontSize: 12),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    size: 13,
-                    color: _subTextColor,
+                    style: TextStyle(
+                      color: _subTextColor.withValues(alpha: 0.6),
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),
             ),
           ),
         ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: _subTextColor,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            ),
+            icon: const Icon(Icons.apps_rounded, size: 15),
+            label: Text(
+              '${_tr('allApps')} (${_apps.length}) →',
+              style: const TextStyle(fontSize: 12),
+            ),
+            onPressed: () => setState(() => _currentTab = 1),
+          ),
+        ),
 
-        const SizedBox(height: 14),
+        const Divider(height: 28, color: Colors.white10),
 
-        // Quick Mindful Scratchpad
+        // 5. Minimalist Home Note Bar -> Opens Full Google Keep-Style Notes Inside!
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -2100,64 +2443,26 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '📝 ${_tr('quickNotes')}',
-                style: TextStyle(
-                  color: _textColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _notesController,
-                maxLines: 2,
-                style: TextStyle(color: _textColor, fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: _tr('notesHint'),
-                  hintStyle: TextStyle(color: _subTextColor, fontSize: 12),
-                  border: InputBorder.none,
-                  isDense: true,
-                ),
-                onChanged: (v) {
-                  _scratchpad = v;
-                  _saveState();
-                },
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 14),
-
-        // Calm Mind Wisdom Bar
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: _cardColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
               Row(
                 children: [
+                  Icon(Icons.lightbulb_outline_rounded,
+                      size: 16, color: _accentColor),
+                  const SizedBox(width: 6),
                   Text(
-                    '✨ ${_tr('wisdomHeader')}',
+                    'Keep Notes',
                     style: TextStyle(
-                      color: _accentColor,
+                      color: _textColor,
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
                     ),
                   ),
                   const Spacer(),
                   InkWell(
-                    onTap: () => setState(() => _wisdomIndex++),
+                    onTap: () => setState(() => _currentTab = 5),
                     child: Text(
-                      '↻ ${_tr('nextWisdom')}',
+                      'Open All (${_keepNotes.length}) →',
                       style: TextStyle(
-                        color: _subTextColor,
+                        color: _accentColor,
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                       ),
@@ -2166,39 +2471,138 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                 ],
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
+              // Quick 1-Line Capture on Home
+              Row(
                 children: [
-                  _buildWisdomCatChip('all', 'All'),
-                  _buildWisdomCatChip('quran', '📖 Quran'),
-                  _buildWisdomCatChip('hadith', '✨ Hadith'),
-                  _buildWisdomCatChip('proverb', '🌱 Proverb'),
+                  Expanded(
+                    child: TextField(
+                      controller: _quickHomeNoteController,
+                      style: TextStyle(color: _textColor, fontSize: 13),
+                      decoration: InputDecoration(
+                        hintText: 'Take a quick note...',
+                        hintStyle: TextStyle(color: _subTextColor, fontSize: 12),
+                        isDense: true,
+                        border: InputBorder.none,
+                      ),
+                      onSubmitted: (val) => _addQuickNoteFromHome(),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.check_box_outlined,
+                        size: 18, color: _subTextColor),
+                    tooltip: 'New Checklist in Keep Notes',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    onPressed: () {
+                      setState(() => _currentTab = 5);
+                      _openKeepNoteEditorModal(ctx, isNewChecklist: true);
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.add_circle_outline_rounded,
+                        size: 18, color: _accentColor),
+                    tooltip: 'Save Quick Note',
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                    onPressed: _addQuickNoteFromHome,
+                  ),
                 ],
               ),
-              const SizedBox(height: 10),
-              Text(
-                '"${currentWisdom.text}"',
-                style: TextStyle(
-                  color: _textColor,
-                  fontSize: 14,
-                  fontStyle: FontStyle.italic,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '— ${currentWisdom.ref}',
-                style: TextStyle(
-                  color: _accentColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              if (pinnedNotes.isNotEmpty) ...[
+                const Divider(height: 14, color: Colors.white10),
+                ...pinnedNotes.map((n) {
+                  final String summary = n.isChecklist
+                      ? n.checklist
+                          .take(2)
+                          .map((c) => '${c.done ? "☑" : "☐"} ${c.text}')
+                          .join('  •  ')
+                      : n.content;
+                  return InkWell(
+                    onTap: () {
+                      setState(() => _currentTab = 5);
+                      _openKeepNoteEditorModal(ctx, existing: n);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 4),
+                      child: Row(
+                        children: [
+                          const Text('📌 ', style: TextStyle(fontSize: 11)),
+                          Expanded(
+                            child: Text(
+                              n.title.isNotEmpty
+                                  ? '${n.title}: $summary'
+                                  : summary,
+                              style: TextStyle(
+                                color: _subTextColor,
+                                fontSize: 12,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ],
             ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // 6. Ultra-Clean 2-Line Wisdom Footer
+        InkWell(
+          onTap: () => setState(() => _wisdomIndex++),
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '"${currentWisdom.text}"',
+                  style: TextStyle(
+                    color: _subTextColor,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '— ${currentWisdom.ref}  (Tap for next)',
+                  style: TextStyle(
+                    color: _accentColor.withValues(alpha: 0.8),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ],
     );
+  }
+
+  void _addQuickNoteFromHome() {
+    final String text = _quickHomeNoteController.text.trim();
+    if (text.isEmpty) return;
+    setState(() {
+      _keepNotes.insert(
+        0,
+        KeepNoteItem(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          title: '',
+          content: text,
+          pinned: true,
+          label: 'Idea',
+          colorIndex: 0,
+        ),
+      );
+      _quickHomeNoteController.clear();
+    });
+    _saveState();
   }
 
   Widget _buildProfileButton(String id, String label) {
@@ -2216,23 +2620,23 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
           });
           _saveState();
         },
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: active ? _accentColor : _cardColor,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: active ? _accentColor : Colors.white12,
+              color: active ? _accentColor : Colors.white10,
             ),
           ),
           child: Text(
             label,
             style: TextStyle(
-              color: active ? Colors.black : _textColor,
+              color: active ? Colors.black : _subTextColor,
               fontSize: 12,
-              fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.w600,
             ),
             overflow: TextOverflow.ellipsis,
           ),
@@ -2241,28 +2645,562 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
     );
   }
 
-  Widget _buildWisdomCatChip(String cat, String label) {
-    final bool active = _wisdomCategory == cat;
-    return InkWell(
-      onTap: () => setState(() => _wisdomCategory = cat),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: active ? _accentColor.withValues(alpha: 0.2) : _bgColor,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: active ? _accentColor : Colors.white12,
+  // =========================================================================
+  // PAGE 6 (TAB 5): GOOGLE KEEP-STYLE POWERFUL NOTES WORKSPACE
+  // =========================================================================
+  Widget _buildKeepNotesPage(BuildContext ctx) {
+    final List<String> filterLabels = [
+      'All',
+      '📌 Pinned',
+      '✅ Checklists',
+      '💼 Work',
+      '💡 Idea',
+      '🤲 Reflection',
+    ];
+
+    final List<KeepNoteItem> filtered = _keepNotes.where((n) {
+      if (_notesSearchQuery.isNotEmpty) {
+        final String q = _notesSearchQuery.toLowerCase();
+        final bool matchTitle = n.title.toLowerCase().contains(q);
+        final bool matchBody = n.content.toLowerCase().contains(q);
+        final bool matchList =
+            n.checklist.any((c) => c.text.toLowerCase().contains(q));
+        if (!matchTitle && !matchBody && !matchList) return false;
+      }
+      if (_notesSubTab == 1) return n.pinned;
+      if (_notesSubTab == 2) return n.isChecklist;
+      if (_notesSubTab == 3) return n.label == 'Work';
+      if (_notesSubTab == 4) return n.label == 'Idea';
+      if (_notesSubTab == 5) return n.label == 'Reflection';
+      return true;
+    }).toList();
+
+    // Sort pinned first
+    filtered.sort((a, b) {
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
+
+    return Column(
+      children: [
+        _buildStickySubTabBar(
+          tabs: filterLabels,
+          currentIndex: _notesSubTab,
+          onTap: (idx) => setState(() => _notesSubTab = idx),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _notesSearchController,
+                  style: TextStyle(color: _textColor, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Search your notes & checklists...',
+                    hintStyle: TextStyle(color: _subTextColor, fontSize: 12),
+                    prefixIcon:
+                        Icon(Icons.search_rounded, color: _subTextColor, size: 18),
+                    filled: true,
+                    fillColor: _cardColor,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  onChanged: (v) => setState(() => _notesSearchQuery = v),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                style: IconButton.styleFrom(backgroundColor: _cardColor),
+                icon: Icon(
+                  _notesGridView
+                      ? Icons.view_agenda_outlined
+                      : Icons.grid_view_rounded,
+                  color: _textColor,
+                  size: 18,
+                ),
+                tooltip: 'Toggle Grid / List View',
+                onPressed: () =>
+                    setState(() => _notesGridView = !_notesGridView),
+              ),
+            ],
           ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? _accentColor : _subTextColor,
-            fontSize: 11,
-            fontWeight: FontWeight.bold,
+        // Action Bar: + New Note | + New Checklist
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _accentColor,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                  ),
+                  icon: const Icon(Icons.note_add_rounded, size: 17),
+                  label: const Text(
+                    'New Note',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  onPressed: () =>
+                      _openKeepNoteEditorModal(ctx, isNewChecklist: false),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _textColor,
+                    side: BorderSide(color: _accentColor),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                  ),
+                  icon: Icon(Icons.checklist_rounded,
+                      size: 17, color: _accentColor),
+                  label: const Text(
+                    'New Checklist',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  onPressed: () =>
+                      _openKeepNoteEditorModal(ctx, isNewChecklist: true),
+                ),
+              ),
+            ],
           ),
+        ),
+        const SizedBox(height: 6),
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Text(
+                    'No notes found. Tap "New Note" or "New Checklist" above.',
+                    style: TextStyle(color: _subTextColor, fontSize: 13),
+                  ),
+                )
+              : _notesGridView
+                  ? GridView.builder(
+                      padding: const EdgeInsets.all(14),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                        childAspectRatio: 0.92,
+                      ),
+                      itemCount: filtered.length,
+                      itemBuilder: (gCtx, i) =>
+                          _buildKeepNoteCard(ctx, filtered[i]),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(14),
+                      itemCount: filtered.length,
+                      itemBuilder: (lCtx, i) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _buildKeepNoteCard(ctx, filtered[i]),
+                      ),
+                    ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildKeepNoteCard(BuildContext ctx, KeepNoteItem note) {
+    final Color cardBg =
+        _keepNotePalette[note.colorIndex % _keepNotePalette.length];
+    return InkWell(
+      onTap: () => _openKeepNoteEditorModal(ctx, existing: note),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: note.pinned
+                ? _accentColor.withValues(alpha: 0.7)
+                : Colors.white12,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    note.title.isEmpty ? 'Untitled' : note.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    setState(() => note.pinned = !note.pinned);
+                    _saveState();
+                  },
+                  child: Icon(
+                    note.pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                    size: 16,
+                    color: note.pinned ? _accentColor : Colors.white54,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (note.isChecklist)
+              ...note.checklist.take(4).map(
+                    (item) => InkWell(
+                      onTap: () {
+                        setState(() => item.done = !item.done);
+                        _saveState();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          children: [
+                            Icon(
+                              item.done
+                                  ? Icons.check_box_rounded
+                                  : Icons.check_box_outline_blank_rounded,
+                              size: 15,
+                              color: item.done ? _accentColor : Colors.white60,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                item.text,
+                                style: TextStyle(
+                                  color: item.done
+                                      ? Colors.white38
+                                      : Colors.white,
+                                  fontSize: 12,
+                                  decoration: item.done
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+            else
+              Text(
+                note.content,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  height: 1.35,
+                ),
+                maxLines: 5,
+                overflow: TextOverflow.ellipsis,
+              ),
+            const Spacer(),
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    note.label,
+                    style: const TextStyle(
+                      color: Colors.white60,
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                InkWell(
+                  onTap: () {
+                    setState(() => _keepNotes.removeWhere((n) => n.id == note.id));
+                    _saveState();
+                  },
+                  child: const Icon(
+                    Icons.delete_outline_rounded,
+                    size: 16,
+                    color: Colors.white38,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
+    );
+  }
+
+  void _openKeepNoteEditorModal(
+    BuildContext ctx, {
+    KeepNoteItem? existing,
+    bool isNewChecklist = false,
+  }) {
+    final bool isEditing = existing != null;
+    final TextEditingController titleCtrl =
+        TextEditingController(text: existing?.title ?? '');
+    final TextEditingController bodyCtrl =
+        TextEditingController(text: existing?.content ?? '');
+    final TextEditingController newCheckItemCtrl = TextEditingController();
+    bool isChecklist = existing?.isChecklist ?? isNewChecklist;
+    bool pinned = existing?.pinned ?? true;
+    String label = existing?.label ?? 'Idea';
+    int colorIndex = existing?.colorIndex ?? 0;
+    List<ChecklistEntry> checklist = existing != null
+        ? existing.checklist
+            .map((c) => ChecklistEntry(text: c.text, done: c.done))
+            .toList()
+        : [];
+
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: _keepNotePalette[colorIndex % _keepNotePalette.length],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (mCtx) {
+        return StatefulBuilder(
+          builder: (sCtx, setModalState) {
+            return Container(
+              decoration: BoxDecoration(
+                color: _keepNotePalette[colorIndex % _keepNotePalette.length],
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(sCtx).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: Icon(
+                            pinned
+                                ? Icons.push_pin_rounded
+                                : Icons.push_pin_outlined,
+                            color: pinned ? _accentColor : Colors.white70,
+                          ),
+                          onPressed: () =>
+                              setModalState(() => pinned = !pinned),
+                        ),
+                        ChoiceChip(
+                          label: Text(isChecklist ? '☑ Checklist' : '📝 Text'),
+                          selected: isChecklist,
+                          onSelected: (v) =>
+                              setModalState(() => isChecklist = v),
+                        ),
+                        const Spacer(),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF10B981),
+                            foregroundColor: Colors.black,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              if (isEditing) {
+                                existing.title = titleCtrl.text.trim();
+                                existing.content = bodyCtrl.text.trim();
+                                existing.isChecklist = isChecklist;
+                                existing.checklist = checklist;
+                                existing.pinned = pinned;
+                                existing.label = label;
+                                existing.colorIndex = colorIndex;
+                                existing.updatedAt =
+                                    DateTime.now().millisecondsSinceEpoch;
+                              } else {
+                                _keepNotes.insert(
+                                  0,
+                                  KeepNoteItem(
+                                    id: DateTime.now()
+                                        .millisecondsSinceEpoch
+                                        .toString(),
+                                    title: titleCtrl.text.trim(),
+                                    content: bodyCtrl.text.trim(),
+                                    isChecklist: isChecklist,
+                                    checklist: checklist,
+                                    pinned: pinned,
+                                    label: label,
+                                    colorIndex: colorIndex,
+                                  ),
+                                );
+                              }
+                            });
+                            _saveState();
+                            Navigator.pop(mCtx);
+                          },
+                          child: const Text(
+                            'Save Note',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                    TextField(
+                      controller: titleCtrl,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      decoration: const InputDecoration(
+                        hintText: 'Title',
+                        hintStyle: TextStyle(color: Colors.white38),
+                        border: InputBorder.none,
+                      ),
+                    ),
+                    const Divider(color: Colors.white12),
+                    if (isChecklist) ...[
+                      ...List.generate(checklist.length, (i) {
+                        final item = checklist[i];
+                        return Row(
+                          children: [
+                            Checkbox(
+                              value: item.done,
+                              activeColor: const Color(0xFF10B981),
+                              onChanged: (v) =>
+                                  setModalState(() => item.done = v == true),
+                            ),
+                            Expanded(
+                              child: Text(
+                                item.text,
+                                style: TextStyle(
+                                  color:
+                                      item.done ? Colors.white38 : Colors.white,
+                                  decoration: item.done
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close,
+                                  size: 16, color: Colors.white38),
+                              onPressed: () =>
+                                  setModalState(() => checklist.removeAt(i)),
+                            ),
+                          ],
+                        );
+                      }),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: newCheckItemCtrl,
+                              style: const TextStyle(color: Colors.white),
+                              decoration: const InputDecoration(
+                                hintText: '+ Add checklist item...',
+                                hintStyle: TextStyle(color: Colors.white38),
+                                border: InputBorder.none,
+                              ),
+                              onSubmitted: (v) {
+                                if (v.trim().isNotEmpty) {
+                                  setModalState(() {
+                                    checklist.add(
+                                        ChecklistEntry(text: v.trim()));
+                                    newCheckItemCtrl.clear();
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle_rounded,
+                                color: Color(0xFF10B981)),
+                            onPressed: () {
+                              final String v = newCheckItemCtrl.text.trim();
+                              if (v.isNotEmpty) {
+                                setModalState(() {
+                                  checklist.add(ChecklistEntry(text: v));
+                                  newCheckItemCtrl.clear();
+                                });
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ] else
+                      TextField(
+                        controller: bodyCtrl,
+                        maxLines: 6,
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 14),
+                        decoration: const InputDecoration(
+                          hintText: 'Write your note here...',
+                          hintStyle: TextStyle(color: Colors.white38),
+                          border: InputBorder.none,
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    // Color & Label Picker
+                    Row(
+                      children: [
+                        ...List.generate(_keepNotePalette.length, (cIdx) {
+                          return GestureDetector(
+                            onTap: () =>
+                                setModalState(() => colorIndex = cIdx),
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              width: 26,
+                              height: 26,
+                              decoration: BoxDecoration(
+                                color: _keepNotePalette[cIdx],
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: colorIndex == cIdx
+                                      ? const Color(0xFF10B981)
+                                      : Colors.white38,
+                                  width: colorIndex == cIdx ? 2.2 : 1,
+                                ),
+                              ),
+                            ),
+                          );
+                        }),
+                        const Spacer(),
+                        DropdownButton<String>(
+                          value: label,
+                          dropdownColor: const Color(0xFF191C26),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 12),
+                          items: ['Idea', 'Work', 'Reflection']
+                              .map((l) =>
+                                  DropdownMenuItem(value: l, child: Text(l)))
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) setModalState(() => label = v);
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -2625,7 +3563,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                 '${_tr('activateDnsBtn')} ($_dnsHost)',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              onPressed: _activateSafePrivateDnsNow,
+              onPressed: () => _activateSafePrivateDnsNow(ctx),
             ),
           ),
           const SizedBox(height: 8),
@@ -2634,19 +3572,28 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
               Expanded(
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: _textColor,
-                    side: const BorderSide(color: Colors.white24),
+                    foregroundColor: const Color(0xFF10B981),
+                    side: const BorderSide(color: Color(0xFF10B981)),
                   ),
-                  icon: const Icon(Icons.copy_rounded, size: 16),
+                  icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
                   label: const Text(
-                    'Copy Hostname',
-                    style: TextStyle(fontSize: 12),
+                    'Verify / Mark Active',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                   ),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: _dnsHost));
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      SnackBar(content: Text('Copied $_dnsHost to clipboard')),
-                    );
+                  onPressed: () async {
+                    await _channel.invokeMethod('confirmManualDnsSetup', {
+                      'host': _dnsHost,
+                    });
+                    await _refreshNativeStatus();
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              '✅ Verified Safe Private DNS ($_dnsHost) & Locked Settings!'),
+                          backgroundColor: const Color(0xFF10B981),
+                        ),
+                      );
+                    }
                   },
                 ),
               ),
@@ -2986,7 +3933,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                   foregroundColor: Colors.black,
                 ),
                 onPressed: () {
-                  final String kw = _keywordController.text.trim().toLowerCase();
+                  final String kw =
+                      _keywordController.text.trim().toLowerCase();
                   if (kw.isNotEmpty && !_blockedKeywords.contains(kw)) {
                     setState(() {
                       _blockedKeywords.add(kw);
@@ -3044,8 +3992,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              if (_focusSubTab == 0 || _focusSubTab == 3)
-                _buildDigestCard(),
+              if (_focusSubTab == 0 || _focusSubTab == 3) _buildDigestCard(),
               if (_focusSubTab == 1 || _focusSubTab == 3) ...[
                 const SizedBox(height: 14),
                 _buildMonkAndNightScheduleCard(),
@@ -3257,8 +4204,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
               label: Text(_tr('cleanNowBtn')),
               onPressed: () async {
                 try {
-                  final Map<dynamic, dynamic>? res = await _channel
-                      .invokeMethod<Map<dynamic, dynamic>>('cleanBackgroundApps');
+                  final Map<dynamic, dynamic>? res =
+                      await _channel.invokeMethod<Map<dynamic, dynamic>>(
+                          'cleanBackgroundApps');
                   final int freed = (res?['freedMb'] as int?) ?? 48;
                   setState(() => _ramFreedMb += freed);
                   if (ctx.mounted) {
@@ -3364,7 +4312,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '🔐 Native Android OS Fortress Controls',
+            '🔐 Native Android OS Fortress Permissions',
             style: TextStyle(
               color: _textColor,
               fontSize: 16,
@@ -3372,6 +4320,82 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
             ),
           ),
           const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              _hasUsageAccess
+                  ? Icons.verified_user_rounded
+                  : Icons.warning_amber_rounded,
+              color:
+                  _hasUsageAccess ? const Color(0xFF10B981) : Colors.redAccent,
+            ),
+            title: Text(
+              _tr('usageAccessCard'),
+              style: TextStyle(
+                color: _textColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            subtitle: Text(
+              _hasUsageAccess
+                  ? '✅ Active! Watchdog is detecting Settings & Browsers in 250ms.'
+                  : 'Tap Grant to allow Minimum Phone to detect when Settings or Browsers open.',
+              style: TextStyle(color: _subTextColor, fontSize: 12),
+            ),
+            trailing: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    _hasUsageAccess ? Colors.white12 : const Color(0xFF10B981),
+                foregroundColor:
+                    _hasUsageAccess ? Colors.white70 : Colors.black,
+              ),
+              onPressed: () async {
+                await _channel.invokeMethod('requestUsageStatsPermission');
+              },
+              child: Text(_hasUsageAccess ? 'Granted ✓' : 'Grant'),
+            ),
+          ),
+          const Divider(color: Colors.white12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              _hasOverlayPermission
+                  ? Icons.verified_user_rounded
+                  : Icons.layers_outlined,
+              color: _hasOverlayPermission
+                  ? const Color(0xFF10B981)
+                  : Colors.amber,
+            ),
+            title: Text(
+              'Appear on Top / Display Over Other Apps',
+              style: TextStyle(
+                color: _textColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            subtitle: Text(
+              _hasOverlayPermission
+                  ? '✅ Active! Lock screen can pop up over Phone Settings immediately.'
+                  : 'Required on Android 10–15 so Minimum Phone can block Phone Settings.',
+              style: TextStyle(color: _subTextColor, fontSize: 12),
+            ),
+            trailing: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _hasOverlayPermission
+                    ? Colors.white12
+                    : const Color(0xFF10B981),
+                foregroundColor:
+                    _hasOverlayPermission ? Colors.white70 : Colors.black,
+              ),
+              onPressed: () async {
+                await _channel.invokeMethod('requestOverlayPermission');
+              },
+              child: Text(_hasOverlayPermission ? 'Granted ✓' : 'Grant'),
+            ),
+          ),
+          const Divider(color: Colors.white12),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Icon(
@@ -3392,7 +4416,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
             ),
             subtitle: Text(
               _isDefaultLauncher
-                  ? 'Active as your Default Home Screen'
+                  ? '✅ Active as your Default Home Screen'
                   : 'Tap to set Minimum Phone as your Default Home App',
               style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
@@ -3401,37 +4425,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
                 await _channel.invokeMethod('requestDefaultLauncher');
               },
               child: Text(_isDefaultLauncher ? 'Change' : 'Set Default'),
-            ),
-          ),
-          const Divider(color: Colors.white12),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              _hasUsageAccess
-                  ? Icons.verified_user_rounded
-                  : Icons.warning_amber_rounded,
-              color:
-                  _hasUsageAccess ? const Color(0xFF10B981) : Colors.redAccent,
-            ),
-            title: Text(
-              _tr('usageAccessCard'),
-              style: TextStyle(
-                color: _textColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
-            ),
-            subtitle: Text(
-              _hasUsageAccess
-                  ? 'Granted! 350ms Watchdog is actively guarding Settings & Browsers.'
-                  : 'Required so Minimum Phone can intercept Android Settings & Browsers.',
-              style: TextStyle(color: _subTextColor, fontSize: 12),
-            ),
-            trailing: ElevatedButton(
-              onPressed: () async {
-                await _channel.invokeMethod('requestUsageStatsPermission');
-              },
-              child: Text(_hasUsageAccess ? 'Verified' : 'Grant'),
             ),
           ),
           const Divider(color: Colors.white12),
@@ -3450,7 +4443,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp> {
               ),
             ),
             subtitle: Text(
-              'Locks the hardware navigation buttons to this screen during exams or deep work.',
+              'Locks hardware navigation buttons to this screen during deep work.',
               style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
             trailing: ElevatedButton(

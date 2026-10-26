@@ -322,8 +322,11 @@ public class NativeFortressLockActivity extends Activity {
             return;
         }
 
-        // 3. Grant a 45-second lease specifically so user can paste the hostname into Private DNS settings
-        prefs.edit().putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 45000L).apply();
+        // 3. Grant a 60-second lease specifically so user can paste the hostname into Private DNS settings
+        prefs.edit()
+            .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 60000L)
+            .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "dns_setup")
+            .apply();
         Toast.makeText(
             this,
             "📋 Copied '" + targetHost + "'! Tap 'Private DNS' -> Paste hostname -> Save.",
