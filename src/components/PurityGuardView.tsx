@@ -12,7 +12,7 @@ import {
 } from '../data/calmTriggers';
 import { TRANSLATIONS, tx } from '../i18n/translations';
 import { NativeBridge } from '../services/nativeBridge';
-import { openPhoneMainSetting } from '../services/nativeLauncherBridge';
+import { openPhoneMainSetting, type PhoneSettingTarget } from '../services/nativeLauncherBridge';
 
 interface PurityGuardViewProps {
   purity: PurityState;
@@ -20,9 +20,15 @@ interface PurityGuardViewProps {
   platform: PlatformMode;
   showArabicScript: boolean;
   inspirationMode?: InspirationMode;
+  isNightHourActive?: boolean;
   openSosImmediately?: boolean;
   onClearImmediateSos?: () => void;
   onUpdatePurity: (updater: (prev: PurityState) => PurityState) => void;
+  onRequestPhoneSetting?: (
+    target: PhoneSettingTarget,
+    options?: { bypassForDnsSetup?: boolean }
+  ) => void;
+  onRequestUnlockDnsFortress?: () => void;
 }
 
 const DEFAULT_ADULT_KEYWORDS = [
@@ -114,9 +120,12 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
   platform,
   showArabicScript,
   inspirationMode = 'blended',
+  isNightHourActive = false,
   openSosImmediately,
   onClearImmediateSos,
   onUpdatePurity,
+  onRequestPhoneSetting,
+  onRequestUnlockDnsFortress,
 }) => {
   const t = TRANSLATIONS[lang];
 
@@ -311,7 +320,23 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
       // ignore clipboard errors
     }
     setCopiedHost(hostname);
-    await openPhoneMainSetting('dns');
+    onUpdatePurity((prev) => ({
+      ...prev,
+      adultDnsEnabled: true,
+      dnsLockedByQr: true,
+      autoActivateDnsAtNight: true,
+      lockFullPhoneSettingsAtNight: true,
+      privateDnsRemovedAlert: false,
+      lastDnsAutoRestoreIso: new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    }));
+    if (onRequestPhoneSetting) {
+      onRequestPhoneSetting('dns', { bypassForDnsSetup: true });
+    } else {
+      await openPhoneMainSetting('dns', 35);
+    }
   };
 
   const handleAddCustomKeyword = (e: React.FormEvent) => {
@@ -617,25 +642,31 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           </div>
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              if ((purity.strictPornLockdown ?? true) && (purity.dnsLockedByQr ?? true)) {
+                if (onRequestUnlockDnsFortress) {
+                  onRequestUnlockDnsFortress();
+                }
+                return;
+              }
               onUpdatePurity((prev) => ({
                 ...prev,
                 strictPornLockdown: !(prev.strictPornLockdown ?? true),
-              }))
-            }
-            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+              }));
+            }}
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer shrink-0 ${
               purity.strictPornLockdown ?? true
                 ? 'border-zinc-100 bg-zinc-100 text-black font-semibold'
                 : 'border-zinc-700 text-zinc-400'
             }`}
           >
             {purity.strictPornLockdown ?? true
-              ? tx(lang, 'LOCKED ON', 'চালু (লকড)', 'مفعل', 'فعال', 'AKTIF')
+              ? tx(lang, '🔒 LOCKED ON', '🔒 চালু (লকড)', '🔒 مفعل', '🔒 فعال', '🔒 AKTIF')
               : tx(lang, 'OFF', 'বন্ধ', 'متوقف', 'بند', 'MATI')}
           </button>
         </div>
 
-        {/* Layer 1: 1-Tap Private Safe DNS Setup + Stronger Tamper-Proof Control */}
+        {/* Layer 1: 1-Tap Private Safe DNS Setup + Stronger Tamper-Proof Control + Night Auto-Activation */}
         <div className="py-2.5 border-b border-zinc-900 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -658,13 +689,16 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
                   setDnsStatusMessage(
                     tx(
                       lang,
-                      '🔒 Tamper Lock Active: Private DNS Shield is locked for your protection. Scan Emergency QR in Focus/Settings to unlock.',
-                      '🔒 সুরক্ষা লক চালু আছে: আপনার নিরাপত্তার জন্য প্রাইভেট DNS শিল্ড লক করা রয়েছে। আনলক করতে ফোকাস বা সেটিংসে জরুরি QR কোড স্ক্যান করুন।',
-                      '🔒 قفل الحماية نشط: درع DNS مقفل لحمايتك. امسح رمز QR للطوارئ لفتحه.',
-                      '🔒 حفاظتی لاک فعال ہے: آپ کی حفاظت کے لیے پرائیویٹ DNS شیلڈ لاک ہے۔ ان لاک کرنے کے لیے ایمرجنسی QR اسکین کریں۔',
-                      '🔒 Kunci Pengaman Aktif: Perisai DNS dikunci untuk perlindungan Anda. Pindai QR Darurat untuk membuka.'
+                      '🔒 Strong QR Fortress Active: Private DNS cannot be turned off without scanning your Physical Emergency QR Card + 30s Cooldown.',
+                      '🔒 কঠোর QR দুর্গ লক চালু আছে: ফিজিক্যাল জরুরি QR কোড স্ক্যান ও ৩০ সেকেন্ড অপেক্ষা ছাড়া প্রাইভেট DNS বন্ধ করা যাবে না।',
+                      '🔒 قلعة QR نشطة: لا يمكن إيقاف DNS الخاص بدون مسح رمز QR الفعلي ومؤقت ٣٠ ثانية.',
+                      '🔒 مضبوط QR لاک فعال ہے: فزیکل QR کارڈ اسکین اور ٣٠ سیکنڈ انتظار کے بغیر پرائیویٹ DNS بند نہیں کیا جا سکتا۔',
+                      '🔒 Benteng QR Aktif: DNS Pribadi tidak dapat dimatikan tanpa memindai Kartu QR Fisik + 30 detik.'
                     )
                   );
+                  if (onRequestUnlockDnsFortress) {
+                    onRequestUnlockDnsFortress();
+                  }
                   return;
                 }
                 handleToggleAdultDns();
@@ -679,6 +713,192 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
                 ? tx(lang, '🛡️ LOCKED ON', '🛡️ সুরক্ষিত ও চালু', '🛡️ مفعل ومؤمن', '🛡️ محفوظ اور فعال', '🛡️ TERKUNCI AKTIF')
                 : tx(lang, 'OFF', 'বন্ধ', 'متوقف', 'بند', 'MATI')}
             </button>
+          </div>
+
+          {/* STRONG PRIVATE DNS LOCK & AUTOMATIC NIGHT RE-ACTIVATION FORTRESS BOX */}
+          <div className="border-2 border-zinc-200 bg-black p-3 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2">
+              <div className="text-[11px] font-mono-tech font-bold uppercase text-zinc-100">
+                🏰{' '}
+                {tx(
+                  lang,
+                  'ULTRA-STRONG PRIVATE DNS & NIGHT SYSTEM SETTINGS FORTRESS',
+                  'অতি-শক্তিশালী প্রাইভেট DNS ও রাতের ফোন সেটিংস দুর্গ লক',
+                  'قلعة الحماية القصوى لـ DNS وإعدادات الهاتف ليلاً',
+                  'انتہائی مضبوط پرائیویٹ DNS اور رات کا فون سیٹنگز لاک',
+                  'BENTENG SUPER KUAT DNS PRIBADI & PENGATURAN MALAM'
+                )}
+              </div>
+              <span className="px-2 py-0.5 bg-zinc-100 text-black text-[10px] font-mono-tech font-bold">
+                {isNightHourActive
+                  ? tx(lang, '🌙 NIGHT FORTRESS ACTIVE', '🌙 রাতের দুর্গ সক্রিয়', '🌙 القلعة الليلية نشطة', '🌙 نائٹ قلعہ فعال', '🌙 BENTENG MALAM AKTIF')
+                  : tx(lang, '🛡️ 24/7 GUARD READY', '🛡️ ২৪/৭ সুরক্ষা প্রস্তুত', '🛡️ حماية ٢٤/٧ جاهزة', '🛡️ ٢٤/٧ گارڈ تیار', '🛡️ SIAGA 24/7')}
+              </span>
+            </div>
+
+            {/* Control 1: If Private DNS Removed -> Automatically Active at Night */}
+            <div className="border border-zinc-800 bg-zinc-950 p-2.5 flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-mono-tech font-semibold text-zinc-100">
+                  🌙{' '}
+                  {tx(
+                    lang,
+                    'Auto-Activate Private DNS at Night (If Removed)',
+                    'রাতে প্রাইভেট DNS স্বয়ংক্রিয় চালু (কেউ মুছে ফেললেও নিজে চালু হবে)',
+                    'تفعيل DNS الخاص تلقائياً في الليل (إذا تمت إزالته)',
+                    'رات کو پرائیویٹ DNS خودکار فعال (اگر ہٹا دیا جائے تو خود آن ہو گا)',
+                    'Aktifkan Otomatis DNS Pribadi di Malam Hari (Jika Dihapus)'
+                  )}
+                </div>
+                <div className="text-[10px] text-zinc-400 mt-0.5 leading-snug">
+                  {tx(
+                    lang,
+                    'If Private DNS is ever removed or turned off, it automatically re-activates at night (10 PM – 6 AM) and locks all browsers until restored.',
+                    'প্রাইভেট DNS যদি কখনো বন্ধ বা মুছে ফেলা হয়, তবে রাত ১০টা–ভোর ৬টায় এটি স্বয়ংক্রিয়ভাবে পুনরায় সক্রিয় হবে এবং DNS ঠিক না করা পর্যন্ত সকল ব্রাউজার লক রাখবে।',
+                    'إذا تم إيقاف أو إزالة DNS الخاص، فسيتم إعادة تفعيله تلقائياً في الليل (١٠ مساءً – ٦ صباحاً) وقفل جميع المتصفحات.',
+                    'اگر پرائیویٹ DNS کبھی ہٹا دیا جائے تو رات ١٠ بجے سے صبح ٦ بجے تک یہ خودکار طور پر دوبارہ فعال ہو جائے گا اور تمام براؤزرز لاک کر دے گا۔',
+                    'Jika DNS Pribadi dihapus atau dimatikan, otomatis aktif kembali saat malam (22:00–06:00) dan mengunci semua browser.'
+                  )}
+                </div>
+                {purity.lastDnsAutoRestoreIso && (
+                  <div className="text-[10px] font-mono-tech text-zinc-200 mt-1">
+                    ✓{' '}
+                    {tx(
+                      lang,
+                      `Last Verified / Auto-Activated: ${purity.lastDnsAutoRestoreIso}`,
+                      `সর্বশেষ যাচাই / স্বয়ংক্রিয় সক্রিয়করণ: ${purity.lastDnsAutoRestoreIso}`,
+                      `آخر تحقق / تفعيل تلقائي: ${purity.lastDnsAutoRestoreIso}`,
+                      `آخری خودکار بحالی: ${purity.lastDnsAutoRestoreIso}`,
+                      `Terakhir Diaktifkan Otomatis: ${purity.lastDnsAutoRestoreIso}`
+                    )}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if ((purity.autoActivateDnsAtNight ?? true) && (purity.dnsLockedByQr ?? true)) {
+                    if (onRequestUnlockDnsFortress) onRequestUnlockDnsFortress();
+                    return;
+                  }
+                  onUpdatePurity((prev) => ({
+                    ...prev,
+                    autoActivateDnsAtNight: !(prev.autoActivateDnsAtNight ?? true),
+                  }));
+                }}
+                className={`px-2.5 py-1.5 border text-[10px] font-mono-tech font-bold shrink-0 cursor-pointer ${
+                  purity.autoActivateDnsAtNight ?? true
+                    ? 'border-zinc-100 bg-zinc-100 text-black'
+                    : 'border-zinc-700 text-zinc-400'
+                }`}
+              >
+                {purity.autoActivateDnsAtNight ?? true
+                  ? tx(lang, '🔒 AUTO ON', '🔒 অটো চালু', '🔒 تلقائي', '🔒 آٹو آن', '🔒 AUTO ON')
+                  : tx(lang, 'OFF', 'বন্ধ', 'متوقف', 'بند', 'MATI')}
+              </button>
+            </div>
+
+            {/* Control 2: Lock Full Phone System Settings at Night (10 PM - 6 AM) */}
+            <div className="border border-zinc-800 bg-zinc-950 p-2.5 flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-mono-tech font-semibold text-zinc-100">
+                  📵{' '}
+                  {tx(
+                    lang,
+                    'Lock Full Phone System Settings at Night (10 PM – 6 AM)',
+                    'রাতে ফোনের সম্পূর্ণ সিস্টেম সেটিংস কঠোরভাবে লক করুন (রাত ১০টা – ভোর ৬টা)',
+                    'قفل نظام إعدادات الهاتف بالكامل ليلاً (١٠ مساءً – ٦ صباحاً)',
+                    'رات کے وقت فون کا مکمل سیٹنگز سسٹم لاک کریں (١٠ بجے تا ٦ بجے)',
+                    'Kunci Penuh Sistem Pengaturan Ponsel di Malam Hari (22:00 – 06:00)'
+                  )}
+                </div>
+                <div className="text-[10px] text-zinc-400 mt-0.5 leading-snug">
+                  {tx(
+                    lang,
+                    'Blocks opening Android Settings, Private DNS, App Info & Default Home at night without scanning your Physical Emergency QR Card + 30s timer + Math check.',
+                    'ফিজিক্যাল QR কার্ড স্ক্যান, ৩০ সেকেন্ড অপেক্ষা ও গণিত যাচাই ছাড়া রাতে ফোনের মূল সেটিংস (Settings, Private DNS, Apps) খোলা সম্পূর্ণ ব্লক করে এবং ব্যাকগ্রাউন্ডে সেটিংস বন্ধ করে দেয়।',
+                    'يمنع فتح إعدادات الهاتف أو تغيير DNS الخاص ليلاً بدون مسح بطاقة QR الفعلية ومؤقت ٣٠ ثانية.',
+                    'رات کو فزیکل QR کارڈ اسکین اور ٣٠ سیکنڈ ٹائمر کے بغیر فون کی سیٹنگز یا پرائیویٹ DNS کھولنا مکمل طور پر بلاک کرتا ہے۔',
+                    'Memblokir pembukaan Pengaturan Android & DNS Pribadi di malam hari tanpa Kartu QR Fisik + timer 30 detik.'
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if ((purity.lockFullPhoneSettingsAtNight ?? true) && (purity.dnsLockedByQr ?? true)) {
+                    if (onRequestUnlockDnsFortress) onRequestUnlockDnsFortress();
+                    return;
+                  }
+                  onUpdatePurity((prev) => ({
+                    ...prev,
+                    lockFullPhoneSettingsAtNight: !(prev.lockFullPhoneSettingsAtNight ?? true),
+                  }));
+                }}
+                className={`px-2.5 py-1.5 border text-[10px] font-mono-tech font-bold shrink-0 cursor-pointer ${
+                  purity.lockFullPhoneSettingsAtNight ?? true
+                    ? 'border-zinc-100 bg-zinc-100 text-black'
+                    : 'border-zinc-700 text-zinc-400'
+                }`}
+              >
+                {purity.lockFullPhoneSettingsAtNight ?? true
+                  ? tx(lang, '🔒 LOCKED', '🔒 লকড', '🔒 مقفل', '🔒 لاکڈ', '🔒 TERKUNCI')
+                  : tx(lang, 'OFF', 'বন্ধ', 'متوقف', 'بند', 'MATI')}
+              </button>
+            </div>
+
+            {/* Quick Test & Verify Buttons for DNS Removal Auto-Activation & System Settings Lock */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdatePurity((prev) => ({
+                    ...prev,
+                    adultDnsEnabled: true,
+                    dnsLockedByQr: true,
+                    autoActivateDnsAtNight: true,
+                    lockFullPhoneSettingsAtNight: true,
+                    privateDnsRemovedAlert: true,
+                    lastDnsAutoRestoreIso: new Date().toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }),
+                  }));
+                }}
+                className="py-2 px-2.5 border border-zinc-600 bg-zinc-900 hover:border-zinc-300 text-[10px] font-mono-tech text-zinc-100 cursor-pointer text-center"
+              >
+                ⚡{' '}
+                {tx(
+                  lang,
+                  'Test: If Private DNS Removed → Auto-Lock Now',
+                  'পরীক্ষা করুন: প্রাইভেট DNS মুছে গেলে অটো-লক শিল্ড',
+                  'اختبار: عند إزالة DNS ← قفل واستعادة تلقائية',
+                  'ٹیسٹ: اگر DNS ہٹا دیا جائے ← خودکار لاک شیلڈ',
+                  'Uji: Jika DNS Dihapus → Kunci Otomatis Sekarang'
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onRequestPhoneSetting) {
+                    onRequestPhoneSetting('dns');
+                  } else if (onRequestUnlockDnsFortress) {
+                    onRequestUnlockDnsFortress();
+                  }
+                }}
+                className="py-2 px-2.5 border border-zinc-400 bg-zinc-950 hover:bg-zinc-900 text-[10px] font-mono-tech text-zinc-100 cursor-pointer text-center"
+              >
+                🔒{' '}
+                {tx(
+                  lang,
+                  'Test: Try Opening Locked DNS / Phone Settings',
+                  'পরীক্ষা করুন: লক থাকা DNS / ফোন সেটিংস খোলার চেষ্টা',
+                  'اختبار: محاولة فتح إعدادات DNS المقفلة',
+                  'ٹیسٹ: لاک شدہ DNS / فون سیٹنگز کھولنے کی کوشش',
+                  'Uji: Coba Buka Pengaturan DNS yang Terkunci'
+                )}
+              </button>
+            </div>
           </div>
 
           {/* 1-Tap Easy Setup + Stronger Control Panel */}
@@ -697,12 +917,18 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
               </span>
               <button
                 type="button"
-                onClick={() =>
+                onClick={() => {
+                  if (purity.dnsLockedByQr ?? true) {
+                    if (onRequestUnlockDnsFortress) {
+                      onRequestUnlockDnsFortress();
+                    }
+                    return;
+                  }
                   onUpdatePurity((prev) => ({
                     ...prev,
-                    dnsLockedByQr: !(prev.dnsLockedByQr ?? true),
-                  }))
-                }
+                    dnsLockedByQr: true,
+                  }));
+                }}
                 className={`px-2 py-0.5 border text-[10px] font-mono-tech cursor-pointer ${
                   purity.dnsLockedByQr ?? true
                     ? 'border-zinc-200 bg-zinc-100 text-black font-bold'
@@ -711,7 +937,7 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
               >
                 {purity.dnsLockedByQr ?? true
                   ? tx(lang, '🔒 QR Tamper Lock: ON', '🔒 QR সুরক্ষা লক: চালু', '🔒 قفل QR: مفعل', '🔒 QR لاک: آن', '🔒 Kunci QR: ON')
-                  : tx(lang, 'Tamper Lock: OFF', 'সুরক্ষা লক: বন্ধ', 'قفل QR: متوقف', 'QR لاک: آف', 'Kunci QR: OFF')}
+                  : tx(lang, 'Tamper Lock: OFF (Tap to Lock)', 'সুরক্ষা লক: বন্ধ (লক করুন)', 'قفل QR: متوقف', 'QR لاک: آف', 'Kunci QR: OFF')}
               </button>
             </div>
 
@@ -900,20 +1126,24 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           </div>
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              if (purity.browserKeywordShield && (purity.dnsLockedByQr ?? true)) {
+                if (onRequestUnlockDnsFortress) onRequestUnlockDnsFortress();
+                return;
+              }
               onUpdatePurity((prev) => ({
                 ...prev,
                 browserKeywordShield: !prev.browserKeywordShield,
-              }))
-            }
-            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+              }));
+            }}
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer shrink-0 ${
               purity.browserKeywordShield
                 ? 'border-zinc-200 bg-zinc-100 text-black font-semibold'
                 : 'border-zinc-700 text-zinc-400'
             }`}
           >
             {purity.browserKeywordShield
-              ? tx(lang, 'ACTIVE', 'চালু', 'نشط', 'فعال', 'AKTIF')
+              ? tx(lang, '🔒 ACTIVE', '🔒 চালু', '🔒 نشط', '🔒 فعال', '🔒 AKTIF')
               : tx(lang, 'OFF', 'বন্ধ', 'متوقف', 'بند', 'MATI')}
           </button>
         </div>
@@ -935,17 +1165,21 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           </div>
           <button
             type="button"
-            onClick={() =>
-              onUpdatePurity((prev) => ({ ...prev, nightGuardLock: !prev.nightGuardLock }))
-            }
-            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer ${
+            onClick={() => {
+              if (purity.nightGuardLock && (purity.dnsLockedByQr ?? true)) {
+                if (onRequestUnlockDnsFortress) onRequestUnlockDnsFortress();
+                return;
+              }
+              onUpdatePurity((prev) => ({ ...prev, nightGuardLock: !prev.nightGuardLock }));
+            }}
+            className={`px-3 py-1.5 border text-xs font-mono-tech cursor-pointer shrink-0 ${
               purity.nightGuardLock
                 ? 'border-zinc-200 bg-zinc-100 text-black font-semibold'
                 : 'border-zinc-700 text-zinc-400'
             }`}
           >
             {purity.nightGuardLock
-              ? tx(lang, 'LOCKED', 'লকড', 'مقفل', 'لاکڈ', 'TERKUNCI')
+              ? tx(lang, '🔒 LOCKED', '🔒 লকড', '🔒 مقفل', '🔒 لاکڈ', '🔒 TERKUNCI')
               : tx(lang, 'OFF', 'বন্ধ', 'متوقف', 'بند', 'MATI')}
           </button>
         </div>

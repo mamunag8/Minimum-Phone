@@ -85,6 +85,10 @@ export interface PurityState {
   adultDnsEnabled: boolean; // 1.1.1.3 Family / CleanBrowsing
   selectedDnsProvider?: 'cloudflare-family' | 'cleanbrowsing-adult' | 'adguard-family';
   dnsLockedByQr?: boolean; // Requires Emergency Physical QR Code scan to disable Private DNS shield
+  autoActivateDnsAtNight?: boolean; // Automatically activates & restores Private DNS at night (22:00-06:00) if removed
+  lockFullPhoneSettingsAtNight?: boolean; // Locks full phone system settings (com.android.settings, DNS, Apps) behind QR Fortress especially at night
+  privateDnsRemovedAlert?: boolean; // Triggered when Private DNS is removed or tampered with
+  lastDnsAutoRestoreIso?: string | null; // Timestamp of last automatic night Private DNS activation/recovery
   browserKeywordShield: boolean;
   nightGuardLock: boolean; // 11 PM - 6 AM browser/social lock
   strictPornLockdown?: boolean; // Complete browser & trigger lock behind 30s Read+Quiz + DNS shield

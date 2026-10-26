@@ -45,6 +45,7 @@ public class MinimumPhoneNativePlugin extends Plugin {
     public static final int REQUEST_CODE_ROLE_HOME = 9001;
     private final Handler sessionTimerHandler = new Handler(Looper.getMainLooper());
     private Runnable activeReturnRunnable = null;
+    private Runnable settingsReturnRunnable = null;
     private Runnable minor5MinRunnable = null;
     private Runnable medium10MinRunnable = null;
     private Runnable full20MinRunnable = null;
@@ -86,11 +87,30 @@ public class MinimumPhoneNativePlugin extends Plugin {
             }
         } catch (Exception ignored) {}
 
+        // Live Private DNS status from Android Settings.Global (readable on Android 9+)
+        String dnsMode = "unknown";
+        String dnsSpecifier = "";
+        boolean dnsHostnameActive = false;
+        try {
+            String rawMode = Settings.Global.getString(ctx.getContentResolver(), "private_dns_mode");
+            String rawSpec = Settings.Global.getString(ctx.getContentResolver(), "private_dns_specifier");
+            if (rawMode != null && !rawMode.trim().isEmpty()) {
+                dnsMode = rawMode.trim().toLowerCase(Locale.ROOT);
+            }
+            if (rawSpec != null && !rawSpec.trim().isEmpty()) {
+                dnsSpecifier = rawSpec.trim().toLowerCase(Locale.ROOT);
+            }
+            dnsHostnameActive = "hostname".equalsIgnoreCase(dnsMode) && !dnsSpecifier.isEmpty();
+        } catch (Exception ignored) {}
+
         ret.put("isDefaultLauncher", isDefault);
         ret.put("currentDefaultPackage", currentHolder != null ? currentHolder : "unknown");
         ret.put("isKioskPinned", isPinned);
         ret.put("batteryLevel", batteryPct);
         ret.put("isCharging", isCharging);
+        ret.put("privateDnsMode", dnsMode);
+        ret.put("privateDnsSpecifier", dnsSpecifier);
+        ret.put("privateDnsHostnameActive", dnsHostnameActive);
         ret.put("platform", "android");
         return ret;
     }
@@ -226,6 +246,7 @@ public class MinimumPhoneNativePlugin extends Plugin {
         Context ctx = getContext();
         String target = call.getString("target", "main");
         if (target == null) target = "main";
+        int autoReturnSeconds = call.getInt("autoReturnSeconds", 40);
         String action;
 
         switch (target.toLowerCase(Locale.ROOT)) {
@@ -288,9 +309,83 @@ public class MinimumPhoneNativePlugin extends Plugin {
             } catch (Exception ignored) {}
         }
 
+        // Schedule automatic return & kill of System Settings so the user cannot stay inside Android Settings
+        if (opened && autoReturnSeconds > 0) {
+            if (settingsReturnRunnable != null) {
+                sessionTimerHandler.removeCallbacks(settingsReturnRunnable);
+            }
+            final Context appCtx = ctx.getApplicationContext();
+            settingsReturnRunnable = () -> {
+                try {
+                    ActivityManager am = (ActivityManager) appCtx.getSystemService(Context.ACTIVITY_SERVICE);
+                    if (am != null) {
+                        am.killBackgroundProcesses("com.android.settings");
+                        am.killBackgroundProcesses("com.samsung.android.settings");
+                    }
+                } catch (Exception ignored) {}
+                bringLauncherToFrontInternal(appCtx);
+            };
+            sessionTimerHandler.postDelayed(settingsReturnRunnable, autoReturnSeconds * 1000L);
+        }
+
         JSObject ret = buildStatusObject(ctx);
         ret.put("opened", opened);
         ret.put("target", target);
+        ret.put("autoReturnSeconds", autoReturnSeconds);
+        call.resolve(ret);
+    }
+
+    /**
+     * Checks live Android OS Private DNS status, attempts automatic silent restoration
+     * (via Settings.Global when WRITE_SECURE_SETTINGS is available), and optionally kills
+     * background Android System Settings processes so Private DNS cannot be tampered with at night.
+     */
+    @PluginMethod
+    public void enforcePrivateDnsAndSettingsGuard(PluginCall call) {
+        Context ctx = getContext();
+        String expectedHost = call.getString("expectedHost", "family.cloudflare-dns.com");
+        if (expectedHost == null || expectedHost.trim().isEmpty()) {
+            expectedHost = "family.cloudflare-dns.com";
+        }
+        boolean autoRestore = Boolean.TRUE.equals(call.getBoolean("autoRestore", true));
+        boolean killSystemSettings = Boolean.TRUE.equals(call.getBoolean("killSystemSettings", false));
+
+        boolean autoRestoredNatively = false;
+        boolean systemSettingsKilled = false;
+
+        try {
+            String currentMode = Settings.Global.getString(ctx.getContentResolver(), "private_dns_mode");
+            String currentSpec = Settings.Global.getString(ctx.getContentResolver(), "private_dns_specifier");
+            boolean isCurrentlyValid = "hostname".equalsIgnoreCase(currentMode) &&
+                                       currentSpec != null && !currentSpec.trim().isEmpty();
+
+            if (!isCurrentlyValid && autoRestore) {
+                try {
+                    boolean wroteMode = Settings.Global.putString(ctx.getContentResolver(), "private_dns_mode", "hostname");
+                    boolean wroteSpec = Settings.Global.putString(ctx.getContentResolver(), "private_dns_specifier", expectedHost.trim());
+                    autoRestoredNatively = wroteMode && wroteSpec;
+                } catch (Exception ignored) {
+                    autoRestoredNatively = false;
+                }
+            }
+        } catch (Exception ignored) {}
+
+        if (killSystemSettings) {
+            try {
+                ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+                if (am != null) {
+                    am.killBackgroundProcesses("com.android.settings");
+                    am.killBackgroundProcesses("com.samsung.android.settings");
+                    am.killBackgroundProcesses("com.miui.securitycenter");
+                    systemSettingsKilled = true;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        JSObject ret = buildStatusObject(ctx);
+        ret.put("autoRestoredNatively", autoRestoredNatively);
+        ret.put("systemSettingsKilled", systemSettingsKilled);
+        ret.put("expectedHost", expectedHost);
         call.resolve(ret);
     }
 
@@ -416,13 +511,14 @@ public class MinimumPhoneNativePlugin extends Plugin {
         String p = pkg.toLowerCase(Locale.ROOT);
         String l = label.toLowerCase(Locale.ROOT);
 
-        // Dopamine-trap social, short-video, streaming, gaming, and unguarded browsers
+        // Dopamine-trap social, short-video, streaming, gaming, unguarded browsers, and Android System Settings (Fortress guarded)
         String[] restrictedKeywords = new String[]{
             "instagram", "tiktok", "musically", "youtube", "facebook", "katana",
             "twitter", "com.twitter", "reddit", "snapchat", "netflix", "twitch",
             "discord", "pinterest", "threads", "bilibili", "likee", "kwai",
             "tinder", "bumble", "pubg", "freefire", "roblox", "genshin", "candycrush",
-            "clash", "chrome", "browser", "opera", "firefox", "brave", "edge"
+            "clash", "chrome", "browser", "opera", "firefox", "brave", "edge",
+            "com.android.settings", "samsung.android.settings"
         };
         for (String kw : restrictedKeywords) {
             if (p.contains(kw) || l.contains(kw)) {

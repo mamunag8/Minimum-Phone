@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Package visibility for discovering launchable apps and checking default HOME launcher (Google Play compliant) -->
     <queries>
@@ -74,8 +75,9 @@
         </provider>
     </application>
 
-    <!-- Permissions for Anti-Dopamine Launcher, Grayscale, Usage Stats, and NFC Anchor -->
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!-- Permissions for Anti-Dopamine Launcher, Grayscale, Usage Stats, Private DNS Lock, and NFC Anchor -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.VIBRATE" />

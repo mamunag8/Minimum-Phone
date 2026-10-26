@@ -78,6 +78,10 @@ interface AnalyticsAndKasbViewProps {
   purity: PurityState;
   vault: FocusVaultState;
   onUpdateVault: (updater: (prev: FocusVaultState) => FocusVaultState) => void;
+  onRequestPhoneSetting?: (
+    target: PhoneSettingTarget,
+    options?: { bypassForDnsSetup?: boolean }
+  ) => void;
 }
 
 export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
@@ -117,6 +121,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   purity,
   vault,
   onUpdateVault,
+  onRequestPhoneSetting,
 }) => {
   const t = TRANSLATIONS[lang];
 
@@ -190,6 +195,10 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
     trackLessons[slowLearning.currentLessonIndex % trackLessons.length];
 
   const handleOpenPhoneSetting = async (target: PhoneSettingTarget, label: string) => {
+    if (onRequestPhoneSetting) {
+      onRequestPhoneSetting(target);
+      return;
+    }
     await openPhoneMainSetting(target);
     setNativeStatusLog(
       tx(
@@ -650,7 +659,11 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                   'Disalin family.cloudflare-dns.com & membuka Pengaturan DNS! Tempel di Private DNS Hostname.'
                 )
               );
-              await openPhoneMainSetting('dns');
+              if (onRequestPhoneSetting) {
+                onRequestPhoneSetting('dns', { bypassForDnsSetup: true });
+              } else {
+                await openPhoneMainSetting('dns', 35);
+              }
             }}
             className="w-full py-2.5 px-3 border border-zinc-400 bg-zinc-900 text-zinc-100 font-mono-tech text-xs font-semibold hover:bg-zinc-800 cursor-pointer text-center"
           >
@@ -2662,7 +2675,11 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                           } else if (sec.actionType === 'open-phone-settings') {
                             await openPhoneMainSetting('main');
                           } else if (sec.actionType === 'open-dns-settings') {
-                            await openPhoneMainSetting('dns');
+                            if (onRequestPhoneSetting) {
+                onRequestPhoneSetting('dns', { bypassForDnsSetup: true });
+              } else {
+                await openPhoneMainSetting('dns', 35);
+              }
                           } else if (sec.actionType === 'practice-30s-quiz') {
                             setShowHowToGuideModal(false);
                             handleOpenPracticeQuiz();

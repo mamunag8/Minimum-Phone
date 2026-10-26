@@ -46,6 +46,7 @@ import { AnalyticsAndKasbView } from './components/AnalyticsAndKasbView';
 import { FirstTimeSetupModal } from './components/FirstTimeSetupModal';
 import {
   enforceBackgroundSafeApps,
+  enforcePrivateDnsAndSettingsGuard,
   fetchNativeLauncherStatus,
   forceTriggerHomePicker,
   launchNativeAndroidApp,
@@ -55,6 +56,7 @@ import {
   requestDefaultHomeLauncher,
   toggleHardwareKioskPin,
   type NativeLauncherStatus,
+  type PhoneSettingTarget,
 } from './services/nativeLauncherBridge';
 
 const STORAGE_KEY = 'minimum_phone_kasb_state_v5';
@@ -226,6 +228,10 @@ export function App() {
     adultDnsEnabled: true,
     selectedDnsProvider: 'cloudflare-family',
     dnsLockedByQr: true,
+    autoActivateDnsAtNight: true,
+    lockFullPhoneSettingsAtNight: true,
+    privateDnsRemovedAlert: false,
+    lastDnsAutoRestoreIso: null,
     browserKeywordShield: true,
     nightGuardLock: true,
     strictPornLockdown: true,
@@ -290,10 +296,20 @@ export function App() {
   const [showLauncherFortressModal, setShowLauncherFortressModal] =
     useState<boolean>(false);
   const [escapeGateTarget, setEscapeGateTarget] = useState<
-    'home-settings' | 'system-settings' | 'unpin-kiosk' | null
+    | 'home-settings'
+    | 'system-settings'
+    | 'private-dns-settings'
+    | 'unlock-dns-guard'
+    | 'unpin-kiosk'
+    | null
   >(null);
-  const [escapeCooldownSec, setEscapeCooldownSec] = useState<number>(15);
+  const [pendingPhoneSettingTarget, setPendingPhoneSettingTarget] =
+    useState<PhoneSettingTarget>('main');
+  const [escapeCooldownSec, setEscapeCooldownSec] = useState<number>(30);
   const [escapePhraseInput, setEscapePhraseInput] = useState<string>('');
+  const [escapeMathInput, setEscapeMathInput] = useState<string>('');
+  const [escapeQrInput, setEscapeQrInput] = useState<string>('');
+  const [escapeError, setEscapeError] = useState<string | null>(null);
 
   // Settings Page Quick 20-Second Read + Quiz Gate State
   const [settingsSessionUnlocked, setSettingsSessionUnlocked] = useState<boolean>(false);
@@ -733,6 +749,184 @@ export function App() {
     return (hr === 21 && min >= 30) || hr >= 22 || hr < 6;
   }, [currentTime, vault.autoCircadianWindDown]);
 
+  // Automatic Private DNS Night Re-Activation & OS Removal Watchdog:
+  // If Private DNS is removed or turned off, it automatically activates at night (22:00-06:00)
+  // and kills background Android System Settings processes when lockFullPhoneSettingsAtNight is enabled.
+  useEffect(() => {
+    const expectedHost =
+      purity.selectedDnsProvider === 'cleanbrowsing-adult'
+        ? 'adult-filter-dns.cleanbrowsing.org'
+        : purity.selectedDnsProvider === 'adguard-family'
+        ? 'family.adguard-dns.com'
+        : 'family.cloudflare-dns.com';
+
+    // 1. If Night Time is active and autoActivateDnsAtNight is enabled, force-enable DNS & locks if ever turned off
+    if (isNightHourActive && (purity.autoActivateDnsAtNight ?? true)) {
+      if (
+        !purity.adultDnsEnabled ||
+        !(purity.dnsLockedByQr ?? true) ||
+        !(purity.strictPornLockdown ?? true) ||
+        !purity.nightGuardLock
+      ) {
+        const nowStr = new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        setPurity((prev) => ({
+          ...prev,
+          adultDnsEnabled: true,
+          dnsLockedByQr: true,
+          strictPornLockdown: true,
+          nightGuardLock: true,
+          lockFullPhoneSettingsAtNight: true,
+          lastDnsAutoRestoreIso: nowStr,
+        }));
+      }
+
+      enforcePrivateDnsAndSettingsGuard(
+        expectedHost,
+        true,
+        purity.lockFullPhoneSettingsAtNight ?? true
+      ).then((res) => {
+        if (
+          launcherStatus.platform === 'android' &&
+          (res.privateDnsMode === 'off' || res.privateDnsMode === 'opportunistic') &&
+          !res.autoRestoredNatively
+        ) {
+          setPurity((prev) =>
+            prev.privateDnsRemovedAlert
+              ? prev
+              : {
+                  ...prev,
+                  privateDnsRemovedAlert: true,
+                  lastDnsAutoRestoreIso: new Date().toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
+                }
+          );
+        }
+      });
+    } else if (
+      launcherStatus.platform === 'android' &&
+      purity.adultDnsEnabled &&
+      (launcherStatus.privateDnsMode === 'off' ||
+        launcherStatus.privateDnsMode === 'opportunistic')
+    ) {
+      // 2. Even during daytime, if Private DNS is locked ON and OS reports it was turned off, auto-restore or alert
+      enforcePrivateDnsAndSettingsGuard(expectedHost, true, false).then((res) => {
+        if (!res.autoRestoredNatively && !purity.privateDnsRemovedAlert) {
+          setPurity((prev) => ({
+            ...prev,
+            privateDnsRemovedAlert: true,
+            lastDnsAutoRestoreIso: new Date().toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          }));
+        }
+      });
+    }
+  }, [
+    isNightHourActive,
+    purity.autoActivateDnsAtNight,
+    purity.adultDnsEnabled,
+    purity.dnsLockedByQr,
+    purity.strictPornLockdown,
+    purity.nightGuardLock,
+    purity.lockFullPhoneSettingsAtNight,
+    purity.selectedDnsProvider,
+    purity.privateDnsRemovedAlert,
+    launcherStatus.platform,
+    launcherStatus.privateDnsMode,
+  ]);
+
+  // Open the Strong Private DNS & Phone System Settings Fortress Modal (30s Cooldown + Math + Physical QR)
+  const openStrongSettingsFortressModal = (
+    gateTarget:
+      | 'home-settings'
+      | 'system-settings'
+      | 'private-dns-settings'
+      | 'unlock-dns-guard'
+      | 'unpin-kiosk',
+    settingTarget: PhoneSettingTarget = 'main'
+  ) => {
+    setPendingPhoneSettingTarget(settingTarget);
+    setEscapeCooldownSec(30);
+    setEscapePhraseInput('');
+    setEscapeMathInput('');
+    setEscapeQrInput('');
+    setEscapeError(null);
+    setEscapeGateTarget(gateTarget);
+  };
+
+  // Centralized Interceptor for ALL Phone System Settings & Private DNS Buttons
+  const handleRequestPhoneSetting = async (
+    target: PhoneSettingTarget,
+    options?: { bypassForDnsSetup?: boolean }
+  ) => {
+    // Allow 1-Tap Safe Family DNS Setup / Restoration Window (35s auto-return to Minimum Phone)
+    if (options?.bypassForDnsSetup && target === 'dns') {
+      try {
+        await navigator.clipboard?.writeText('family.cloudflare-dns.com');
+      } catch {
+        // ignore clipboard error
+      }
+      setPurity((prev) => ({
+        ...prev,
+        adultDnsEnabled: true,
+        dnsLockedByQr: true,
+        autoActivateDnsAtNight: true,
+        privateDnsRemovedAlert: false,
+        lastDnsAutoRestoreIso: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      }));
+      await openPhoneMainSetting('dns', 35);
+      return;
+    }
+
+    // 1. Strong Private DNS Setting Lock (24/7 whenever DNS is locked by QR)
+    if (target === 'dns' && purity.adultDnsEnabled && (purity.dnsLockedByQr ?? true)) {
+      openStrongSettingsFortressModal('private-dns-settings', 'dns');
+      return;
+    }
+
+    // 2. Full Phone System Settings Lock at Night (10:00 PM – 6:00 AM)
+    // Locks the entire Android Settings system at night so Private DNS or App Permissions cannot be bypassed
+    if (isNightHourActive && (purity.lockFullPhoneSettingsAtNight ?? true)) {
+      openStrongSettingsFortressModal(
+        target === 'dns' ? 'private-dns-settings' : 'system-settings',
+        target
+      );
+      return;
+    }
+
+    // 3. 24/7 Protection on Main System Settings, Apps, Default Home, Accessibility & Usage
+    const sensitiveTargets: PhoneSettingTarget[] = [
+      'main',
+      'dns',
+      'apps',
+      'home',
+      'accessibility',
+      'usage',
+    ];
+    if (
+      sensitiveTargets.includes(target) &&
+      (vault.uninstallProtectionEnabled || (purity.dnsLockedByQr ?? true))
+    ) {
+      openStrongSettingsFortressModal(
+        target === 'dns' ? 'private-dns-settings' : 'system-settings',
+        target
+      );
+      return;
+    }
+
+    // 4. Daytime non-sensitive quick setting (Wi-Fi, Bluetooth, Display, Sound, Battery) with 40s auto-return
+    await openPhoneMainSetting(target, 40);
+  };
+
   // Sleeping-Time / Night Mandatory Emergency QR Lock for Browsers, Social Media & Entertainment Apps
   const isNightQrLockedApp = (app: AppItem): boolean => {
     const n = app.name.toLowerCase();
@@ -791,6 +985,17 @@ export function App() {
     const lowerName = app.name.toLowerCase();
     const lowerPkg = (app.packageName || '').toLowerCase();
 
+    // 0. If Private DNS was removed, block all browsers & social apps until Private DNS is restored
+    if (
+      purity.privateDnsRemovedAlert &&
+      (app.category === 'browser' ||
+        app.category === 'social' ||
+        app.category === 'entertainment')
+    ) {
+      setImpulsesStopped((n) => n + 1);
+      return;
+    }
+
     // 1. Complete Porn & Adult Block Check: if app is adult-blocked or Emergency 15m Browser Lock is active
     const isEmergencyLockActive =
       purity.emergencyBrowserLockUntilMs &&
@@ -821,16 +1026,16 @@ export function App() {
       return;
     }
 
-    // 3. Anti-Escape Guard: if user tries to open Android Settings while Uninstall/Switch Protection is enabled
+    // 3. Strong System Settings & Private DNS Anti-Escape Guard (24/7 & Night Fortress)
     if (
-      vault.uninstallProtectionEnabled &&
+      (vault.uninstallProtectionEnabled ||
+        (purity.dnsLockedByQr ?? true) ||
+        (isNightHourActive && (purity.lockFullPhoneSettingsAtNight ?? true))) &&
       (lowerName === 'settings' ||
-        lowerPkg === 'com.android.settings' ||
+        lowerPkg.includes('settings') ||
         lowerPkg.includes('launcher'))
     ) {
-      setEscapeCooldownSec(15);
-      setEscapePhraseInput('');
-      setEscapeGateTarget('system-settings');
+      openStrongSettingsFortressModal('system-settings', 'main');
       return;
     }
 
@@ -1377,7 +1582,10 @@ export function App() {
                     },
                     {
                       target: 'dns',
-                      label: tx(lang, '🌐 DNS', '🌐 DNS', '🌐 DNS', '🌐 DNS', '🌐 DNS'),
+                      label:
+                        purity.adultDnsEnabled && (purity.dnsLockedByQr ?? true)
+                          ? tx(lang, '🔒 DNS', '🔒 DNS', '🔒 DNS', '🔒 DNS', '🔒 DNS')
+                          : tx(lang, '🌐 DNS', '🌐 DNS', '🌐 DNS', '🌐 DNS', '🌐 DNS'),
                     },
                     {
                       target: 'data',
@@ -1396,7 +1604,7 @@ export function App() {
                   <button
                     key={qs.target}
                     type="button"
-                    onClick={() => openPhoneMainSetting(qs.target)}
+                    onClick={() => handleRequestPhoneSetting(qs.target)}
                     className="py-1.5 px-1 border border-zinc-800/90 bg-zinc-950/60 text-[10px] font-mono-tech text-zinc-300 hover:border-zinc-500 hover:text-white text-center truncate cursor-pointer"
                   >
                     {qs.label}
@@ -1861,9 +2069,14 @@ export function App() {
               platform={platform}
               showArabicScript={showArabicScript}
               inspirationMode={inspirationMode}
+              isNightHourActive={isNightHourActive}
               openSosImmediately={openPuritySosImmediately}
               onClearImmediateSos={() => setOpenPuritySosImmediately(false)}
               onUpdatePurity={setPurity}
+              onRequestPhoneSetting={handleRequestPhoneSetting}
+              onRequestUnlockDnsFortress={() =>
+                openStrongSettingsFortressModal('unlock-dns-guard', 'dns')
+              }
             />
           </div>
         )}
@@ -1946,6 +2159,7 @@ export function App() {
               purity={purity}
               vault={vault}
               onUpdateVault={setVault}
+              onRequestPhoneSetting={handleRequestPhoneSetting}
             />
           </div>
         )}
@@ -2063,14 +2277,20 @@ export function App() {
                   [
                     { target: 'wifi', label: '📶 Wi-Fi' },
                     { target: 'bluetooth', label: '🦷 BT' },
-                    { target: 'dns', label: '🌐 DNS' },
+                    {
+                      target: 'dns',
+                      label:
+                        purity.adultDnsEnabled && (purity.dnsLockedByQr ?? true)
+                          ? '🔒 DNS'
+                          : '🌐 DNS',
+                    },
                     { target: 'display', label: tx(lang, '🔆 Screen', '🔆 আলো', '🔆 شاشة', '🔆 اسکرین', '🔆 Layar') },
                   ] as const
                 ).map((item) => (
                   <button
                     key={item.target}
                     type="button"
-                    onClick={() => openPhoneMainSetting(item.target)}
+                    onClick={() => handleRequestPhoneSetting(item.target)}
                     className="py-1.5 px-1 border border-zinc-700 bg-black text-[10px] text-zinc-200 hover:border-zinc-300 cursor-pointer truncate"
                   >
                     {item.label}
@@ -2783,115 +3003,541 @@ export function App() {
         </div>
       )}
 
-      {/* 15-SECOND ANTI-ESCAPE COMMITMENT GATE MODAL */}
+      {/* =========================================================
+          MODAL 4: ULTRA-STRONG PRIVATE DNS & PHONE SYSTEM SETTINGS FORTRESS MODAL
+          (30s Cooling-Off + Hard Math + Physical QR Code Scan + Auto-Return Watchdog)
+         ========================================================= */}
       {escapeGateTarget && (
-        <div className="fixed inset-0 z-50 bg-black text-zinc-100 flex items-center justify-center p-5">
-          <div className="w-full max-w-md border-2 border-zinc-200 bg-black p-6 space-y-5 font-mono-tech">
-            <div className="text-[10px] uppercase tracking-widest text-zinc-400">
-              {tx(
-                lang,
-                'CORE LAUNCHER ANTI-ESCAPE GUARD // CRAVING INTERCEPT',
-                'লঞ্চার পরিবর্তন সুরক্ষা গার্ড // তাড়না প্রতিরোধ',
-                'حارس منع الهروب // اعتراض الرغبة',
-                'لانچر تبدیلی روک تھام گارڈ',
-                'PENJAGA ANTI-BYPASS PELUNCUR'
-              )}
+        <div className="fixed inset-0 z-50 bg-black/95 text-zinc-100 flex items-center justify-center p-3 overflow-y-auto">
+          <div className="w-full max-w-md border-2 border-zinc-100 bg-black p-4 space-y-3.5 font-mono-tech my-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-zinc-400">
+                  🏰{' '}
+                  {tx(
+                    lang,
+                    isNightHourActive
+                      ? 'NIGHT SYSTEM & PRIVATE DNS FORTRESS // FULL LOCK'
+                      : 'STRONG PRIVATE DNS & SYSTEM SETTINGS FORTRESS',
+                    isNightHourActive
+                      ? 'রাতের ফোন সেটিংস ও প্রাইভেট DNS দুর্গ // সম্পূর্ণ লক'
+                      : 'শক্তিশালী প্রাইভেট DNS ও সিস্টেম সেটিংস সুরক্ষা দুর্গ',
+                    isNightHourActive
+                      ? 'قلعة إعدادات الهاتف و DNS الليلية // قفل كامل'
+                      : 'قلعة حماية DNS الخاص وإعدادات النظام',
+                    isNightHourActive
+                      ? 'رات کا فون سیٹنگز اور پرائیویٹ DNS قلعہ // مکمل لاک'
+                      : 'مضبوط پرائیویٹ DNS اور سسٹم سیٹنگز قلعہ',
+                    isNightHourActive
+                      ? 'BENTENG PENGATURAN & DNS MALAM // KUNCI PENUH'
+                      : 'BENTENG KUAT DNS PRIBADI & PENGATURAN SISTEM'
+                  )}
+                </div>
+                <h2 className="text-sm font-semibold text-zinc-100 mt-0.5">
+                  {escapeGateTarget === 'private-dns-settings' ||
+                  escapeGateTarget === 'unlock-dns-guard'
+                    ? tx(
+                        lang,
+                        'Private DNS Settings Are Strongly Locked',
+                        'প্রাইভেট DNS সেটিংস কঠোরভাবে লক করা রয়েছে',
+                        'إعدادات DNS الخاص مقفلة بحماية مشددة',
+                        'پرائیویٹ DNS سیٹنگز مضبوطی سے لاک ہیں',
+                        'Pengaturan DNS Pribadi Dikunci Sangat Kuat'
+                      )
+                    : tx(
+                        lang,
+                        isNightHourActive
+                          ? 'Full Phone System Settings Locked at Night (10 PM – 6 AM)'
+                          : 'Phone System Settings Protected by Anti-Tamper Lock',
+                        isNightHourActive
+                          ? 'রাত ১০টা – ভোর ৬টা পর্যন্ত ফোনের সম্পূর্ণ সেটিংস সিস্টেম লকড'
+                          : 'ফোনের মূল সিস্টেম সেটিংস সুরক্ষা লকে আবদ্ধ',
+                        isNightHourActive
+                          ? 'نظام إعدادات الهاتف مقفل بالكامل ليلاً (١٠ مساءً – ٦ صباحاً)'
+                          : 'إعدادات نظام الهاتف محمية بقفل الأمان',
+                        isNightHourActive
+                          ? 'رات ١٠ بجے سے صبح ٦ بجے تک فون کا مکمل سیٹنگز سسٹم لاک ہے'
+                          : 'فون کی سسٹم سیٹنگز حفاظتی لاک میں ہیں',
+                        isNightHourActive
+                          ? 'Sistem Pengaturan Ponsel Dikunci Penuh di Malam Hari'
+                          : 'Pengaturan Sistem Ponsel Dilindungi Kunci Anti-Tamper'
+                      )}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  stopNightQrCamera();
+                  setEscapeGateTarget(null);
+                }}
+                className="px-2.5 py-1 border border-zinc-700 text-xs cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
-            <h2 className="text-lg font-semibold text-zinc-100">
+
+            <p className="text-xs text-zinc-300 leading-relaxed">
               {tx(
                 lang,
-                'Are you trying to switch launchers from an impulse?',
-                'আপনি কি হঠাৎ তাড়নার বশে লঞ্চার বা সেটিংস পরিবর্তন করতে চাইছেন?',
-                'هل تحاول تغيير المشغل بدافع الاندفاع؟',
-                'کیا آپ وقتی خواہش کی وجہ سے لانچر بدلنا چاہتے ہیں؟',
-                'Apakah Anda mencoba mengganti peluncur karena dorongan sesaat?'
+                'To prevent impulse removal of Private DNS or tampering with phone settings (especially at night), unlocking requires a 30-second cooling-off timer, math check, and scanning your Physical Emergency QR Card.',
+                'হঠাৎ তাড়নার বশে প্রাইভেট DNS বন্ধ করা বা রাতে ফোনের সেটিংস পরিবর্তন রোধ করতে ৩০ সেকেন্ড অপেক্ষা, গণিত যাচাই এবং আপনার ফিজিক্যাল জরুরি QR কার্ড স্ক্যান করা বাধ্যতামূলক।',
+                'لمنع إزالة DNS الخاص أو العبث بإعدادات الهاتف ليلاً، يتطلب الفتح مؤقت ٣٠ ثانية، مسألة حسابية، ومسح بطاقة QR الفعلية.',
+                'وقتی خواہش میں پرائیویٹ DNS ہٹانے یا رات کو فون سیٹنگز بدلنے سے روکنے کے لیے ٣٠ سیکنڈ ٹائمر، حساب اور فزیکل QR کارڈ اسکین لازمی ہے۔',
+                'Untuk mencegah penghapusan DNS Pribadi atau perubahan pengaturan di malam hari, wajib menunggu 30 detik, hitungan, dan memindai Kartu QR Fisik.'
               )}
-            </h2>
-            <p className="text-xs text-zinc-300 leading-relaxed">
-              “{getTriggerText(activeCalmTrigger, lang)}” —{' '}
-              <span className="text-zinc-500">{getTriggerSource(activeCalmTrigger, lang)}</span>
             </p>
 
-            <div className="border border-zinc-800 p-3 space-y-2 text-xs">
+            {/* Safe 1-Tap Family DNS Setup Shortcut (Allows enabling/restoring DNS without unlocking tamper guard) */}
+            <div className="border border-zinc-500 bg-zinc-950 p-2.5 space-y-1.5">
+              <div className="text-[10px] text-zinc-300 uppercase font-semibold">
+                🛡️{' '}
+                {tx(
+                  lang,
+                  'Want to Set Up or Repair Safe Family DNS? (Keeps Lock ON):',
+                  'নিরাপদ ফ্যামিলি DNS সেটআপ বা মেরামত করতে চান? (লক চালু রেখেই ১-ট্যাপে করুন):',
+                  'هل تريد ضبط أو إصلاح DNS العائلي الآمن؟ (مع إبقاء القفل نشطاً):',
+                  'سیف فیملی DNS سیٹ یا بحال کرنا چاہتے ہیں؟ (لاک آن رکھتے ہوئے ١-ٹیپ کریں):',
+                  'Ingin Mengatur / Memperbaiki DNS Aman? (Tetap Mengunci):'
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  stopNightQrCamera();
+                  setEscapeGateTarget(null);
+                  await handleRequestPhoneSetting('dns', { bypassForDnsSetup: true });
+                }}
+                className="w-full py-2 px-2.5 bg-zinc-100 text-black text-[11px] font-bold uppercase tracking-wider cursor-pointer text-center"
+              >
+                📋{' '}
+                {tx(
+                  lang,
+                  'Copy family.cloudflare-dns.com & Open 35s DNS Setup →',
+                  'family.cloudflare-dns.com কপি ও ৩৫ সেকেন্ডের DNS সেটআপ খুলুন →',
+                  'نسخ family.cloudflare-dns.com وفتح إعداد DNS لمدة ٣٥ ثانية ←',
+                  'family.cloudflare-dns.com کاپی کریں اور ٣٥ سیکنڈ DNS سیٹ اپ کھولیں →',
+                  'Salin family.cloudflare-dns.com & Buka Setup DNS 35d →'
+                )}
+              </button>
+            </div>
+
+            <div className="border border-zinc-800 bg-zinc-950 p-3 space-y-2.5 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400">
-                  {tx(lang, 'Cooling-Off Breath Timer:', 'শান্ত হওয়ার শ্বাস টাইমার:', 'مؤقت التهدئة:', 'پرسکون ہونے کا وقت:', 'Timer Tenang:')}
+                  1.{' '}
+                  {tx(
+                    lang,
+                    '30s Mandatory Cooling-Off Timer:',
+                    '১. ৩০ সেকেন্ডের বাধ্যতামূলক শান্ত হওয়ার টাইমার:',
+                    '١. مؤقت التهدئة الإلزامي (٣٠ ثانية):',
+                    '١. ٣٠ سیکنڈ لازمی کولنگ آف ٹائمر:',
+                    '1. Timer Tenang Wajib (30 Detik):'
+                  )}
                 </span>
-                <span className="text-base font-semibold text-zinc-100">
+                <span className="text-sm font-bold text-zinc-100 px-2 py-0.5 border border-zinc-700">
                   {escapeCooldownSec > 0
-                    ? `${escapeCooldownSec}s`
+                    ? `⏳ ${escapeCooldownSec}s`
                     : `✓ ${tx(lang, 'Ready', 'প্রস্তুত', 'جاهز', 'تیار', 'Siap')}`}
                 </span>
               </div>
-              <div className="text-[11px] text-zinc-400">
-                {tx(
-                  lang,
-                  `Type UNLOCK CORE or your Friend Secret (${vault.friendAccountabilitySecret}):`,
-                  `নিচে UNLOCK CORE অথবা আপনার ফ্রেন্ড কোড (${vault.friendAccountabilitySecret}) লিখুন:`,
-                  `اكتب UNLOCK CORE أو رمز الصديق (${vault.friendAccountabilitySecret}):`,
-                  `نیچے UNLOCK CORE یا اپنا فرینڈ کوڈ (${vault.friendAccountabilitySecret}) لکھیں:`,
-                  `Ketik UNLOCK CORE atau kode teman (${vault.friendAccountabilitySecret}):`
-                )}
+
+              <div className="space-y-1">
+                <label className="block text-[11px] text-zinc-300">
+                  2.{' '}
+                  {tx(
+                    lang,
+                    'Cognitive Verification — Solve: 27 + 38 = ?',
+                    '২. মনোযোগ যাচাই — যোগফল লিখুন: ২৭ + ৩৮ = ?',
+                    '٢. التحقق الذهني — احسب: 27 + 38 = ؟',
+                    '٢. ذہنی تصدیق — حل کریں: 27 + 38 = ؟',
+                    '2. Verifikasi Kognitif — Hitung: 27 + 38 = ?'
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={escapeMathInput}
+                  onChange={(e) => setEscapeMathInput(e.target.value)}
+                  placeholder={tx(lang, 'Enter 65', '65 লিখুন', 'أدخل 65', '65 لکھیں', 'Ketik 65')}
+                  className="w-full bg-black border border-zinc-700 px-3 py-1.5 text-xs text-zinc-100"
+                />
               </div>
-              <input
-                type="text"
-                value={escapePhraseInput}
-                onChange={(e) => setEscapePhraseInput(e.target.value)}
-                placeholder={tx(
-                  lang,
-                  'Type UNLOCK CORE...',
-                  'UNLOCK CORE লিখুন...',
-                  'اكتب UNLOCK CORE...',
-                  'UNLOCK CORE لکھیں...',
-                  'Ketik UNLOCK CORE...'
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-zinc-300">
+                    3.{' '}
+                    {tx(
+                      lang,
+                      'Physical Emergency QR Code Token:',
+                      '৩. ফিজিক্যাল জরুরি QR কোড টোকেন:',
+                      '٣. رمز بطاقة QR الفعلي للطوارئ:',
+                      '٣. فزیکل ایمرجنسی QR کوڈ ٹوکن:',
+                      '3. Token Kartu QR Darurat Fisik:'
+                    )}
+                  </span>
+                  {!nightQrCameraActive ? (
+                    <button
+                      type="button"
+                      onClick={startNightQrCamera}
+                      className="px-2 py-0.5 bg-zinc-100 text-black text-[10px] font-semibold uppercase cursor-pointer"
+                    >
+                      📷 {tx(lang, 'Scan QR Card', 'QR স্ক্যান করুন', 'مسح QR', 'QR اسکین', 'Pindai QR')}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={stopNightQrCamera}
+                      className="px-2 py-0.5 border border-zinc-700 text-[10px] text-zinc-300 cursor-pointer"
+                    >
+                      {tx(lang, 'Close Camera', 'ক্যামেরা বন্ধ', 'إغلاق', 'بند کریں', 'Tutup')}
+                    </button>
+                  )}
+                </div>
+
+                {nightQrCameraActive && (
+                  <div className="space-y-1.5 text-center">
+                    <video
+                      ref={nightVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full max-h-32 bg-black border border-zinc-800 object-cover"
+                    />
+                    {nightQrScanHoldSec > 0 ? (
+                      <div className="text-[10px] text-zinc-300">
+                        {tx(
+                          lang,
+                          `Hold camera steady on your Physical QR Card (${nightQrScanHoldSec}s)...`,
+                          `আপনার প্রিন্ট করা QR কার্ডে ক্যামেরা ধরে রাখুন (${nightQrScanHoldSec} সেকেন্ড)...`,
+                          `ثبت الكاميرا على بطاقة QR (${nightQrScanHoldSec} ثانية)...`,
+                          `اپنے فزیکل QR کارڈ پر کیمرہ رکھیں (${nightQrScanHoldSec} سیکنڈ)...`,
+                          `Tahan kamera pada Kartu QR (${nightQrScanHoldSec} detik)...`
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEscapeQrInput(
+                            getRequiredQrTokenForComplexity(
+                              vault.physicalBrickAnchorCode,
+                              'hard'
+                            )
+                          )
+                        }
+                        className="px-3 py-1 bg-zinc-100 text-black text-[10px] font-bold uppercase cursor-pointer"
+                      >
+                        ✓{' '}
+                        {tx(
+                          lang,
+                          'Capture Verified QR Token',
+                          'যাচাইকৃত QR কোড গ্রহণ করুন',
+                          'التقاط رمز QR',
+                          'تصدیق شدہ QR کوڈ لیں',
+                          'Tangkap Token QR'
+                        )}
+                      </button>
+                    )}
+                  </div>
                 )}
-                className="w-full bg-zinc-950 border border-zinc-700 px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-300"
-              />
+
+                <div className="text-[10px] text-zinc-500">
+                  {tx(lang, 'Required Hard QR:', 'প্রয়োজনীয় হার্ড QR:', 'رمز QR المطلوب:', 'مطلوبہ QR:', 'QR Wajib:')}{' '}
+                  <strong className="text-zinc-300">
+                    {getRequiredQrTokenForComplexity(
+                      vault.physicalBrickAnchorCode,
+                      'hard'
+                    )}
+                  </strong>
+                </div>
+
+                <input
+                  type="text"
+                  value={escapeQrInput}
+                  onChange={(e) => setEscapeQrInput(e.target.value)}
+                  placeholder={tx(
+                    lang,
+                    'Scan or enter Physical QR Token...',
+                    'ফিজিক্যাল QR কোডটি স্ক্যান বা টাইপ করুন...',
+                    'امسح أو أدخل رمز QR الفعلي...',
+                    'فزیکل QR کوڈ اسکین یا ٹائپ کریں...',
+                    'Pindai atau ketik Token QR Fisik...'
+                  )}
+                  className="w-full bg-black border border-zinc-700 px-3 py-1.5 text-xs text-zinc-100"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[11px] text-zinc-300">
+                  4.{' '}
+                  {tx(
+                    lang,
+                    `Type UNLOCK CORE or Friend Secret (${vault.friendAccountabilitySecret}):`,
+                    `৪. নিচে UNLOCK CORE অথবা ফ্রেন্ড কোড (${vault.friendAccountabilitySecret}) লিখুন:`,
+                    `٤. اكتب UNLOCK CORE أو رمز الصديق (${vault.friendAccountabilitySecret}):`,
+                    `٤. UNLOCK CORE یا فرینڈ کوڈ (${vault.friendAccountabilitySecret}) لکھیں:`,
+                    `4. Ketik UNLOCK CORE atau kode teman (${vault.friendAccountabilitySecret}):`
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={escapePhraseInput}
+                  onChange={(e) => setEscapePhraseInput(e.target.value)}
+                  placeholder="UNLOCK CORE"
+                  className="w-full bg-black border border-zinc-700 px-3 py-1.5 text-xs text-zinc-100"
+                />
+              </div>
             </div>
+
+            {escapeError && (
+              <div className="p-2 border border-zinc-500 bg-zinc-900 text-xs text-zinc-200">
+                ⚠ {escapeError}
+              </div>
+            )}
 
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => {
+                  stopNightQrCamera();
                   setEscapeGateTarget(null);
                   setImpulsesStopped((n) => n + 1);
+                  setSlowLearning((prev) => ({ ...prev, xp: prev.xp + 20 }));
                 }}
                 className="flex-1 py-3 bg-zinc-100 text-black text-xs font-semibold uppercase tracking-wider cursor-pointer"
               >
+                ✓{' '}
                 {tx(
                   lang,
-                  'Stay in Minimum Phone',
-                  'Minimum Phone-এই নিরাপদে থাকুন',
-                  'ابق في Minimum Phone',
-                  'Minimum Phone میں ہی رہیں',
-                  'Tetap di Minimum Phone'
+                  'Keep Protected (+20 XP)',
+                  'সুরক্ষা লক বজায় রাখুন (+২০ XP)',
+                  'ابق محمياً (+٢٠ XP)',
+                  'محفوظ رہیں (+٢٠ XP)',
+                  'Tetap Terlindungi (+20 XP)'
                 )}
               </button>
               <button
                 type="button"
-                disabled={
-                  escapeCooldownSec > 0 ||
-                  (escapePhraseInput.trim().toUpperCase() !== 'UNLOCK CORE' &&
-                    escapePhraseInput.trim() !== vault.friendAccountabilitySecret)
-                }
                 onClick={async () => {
+                  const requiredQr = getRequiredQrTokenForComplexity(
+                    vault.physicalBrickAnchorCode,
+                    'hard'
+                  );
+                  if (escapeCooldownSec > 0) {
+                    setEscapeError(
+                      tx(
+                        lang,
+                        `Please wait ${escapeCooldownSec}s for the mandatory cooling-off timer.`,
+                        `বাধ্যতামূলক শান্ত হওয়ার টাইমারের জন্য আরও ${escapeCooldownSec} সেকেন্ড অপেক্ষা করুন।`,
+                        `يرجى الانتظار ${escapeCooldownSec} ثانية حتى ينتهي مؤقت التهدئة.`,
+                        `براہ کرم کولنگ آف ٹائمر کے لیے ${escapeCooldownSec} سیکنڈ انتظار کریں۔`,
+                        `Harap tunggu ${escapeCooldownSec} detik hingga timer selesai.`
+                      )
+                    );
+                    return;
+                  }
+                  if (escapeMathInput.trim() !== '65') {
+                    setEscapeError(
+                      tx(
+                        lang,
+                        'Math check failed: 27 + 38 = 65.',
+                        'গণিত যাচাই সঠিক নয়: ২৭ + ৩৮ = ৬৫ লিখুন।',
+                        'خطأ في الحساب: 27 + 38 = 65.',
+                        'حساب درست نہیں: 27 + 38 = 65 لکھیں۔',
+                        'Hitungan salah: 27 + 38 = 65.'
+                      )
+                    );
+                    return;
+                  }
+                  if (escapeQrInput.trim().toUpperCase() !== requiredQr) {
+                    setEscapeError(
+                      tx(
+                        lang,
+                        `Physical QR Code required: ${requiredQr}`,
+                        `ফিজিক্যাল QR কোড প্রয়োজন: ${requiredQr}`,
+                        `رمز QR الفعلي مطلوب: ${requiredQr}`,
+                        `فزیکل QR کوڈ درکار ہے: ${requiredQr}`,
+                        `Kode QR Fisik diperlukan: ${requiredQr}`
+                      )
+                    );
+                    return;
+                  }
+                  if (
+                    escapePhraseInput.trim().toUpperCase() !== 'UNLOCK CORE' &&
+                    escapePhraseInput.trim() !== vault.friendAccountabilitySecret
+                  ) {
+                    setEscapeError(
+                      tx(
+                        lang,
+                        'Type UNLOCK CORE or your Friend Accountability Secret.',
+                        'UNLOCK CORE অথবা আপনার ফ্রেন্ড সিক্রেট কোড লিখুন।',
+                        'اكتب UNLOCK CORE أو رمز الصديق.',
+                        'UNLOCK CORE یا اپنا فرینڈ کوڈ درج کریں۔',
+                        'Ketik UNLOCK CORE atau kode teman Anda.'
+                      )
+                    );
+                    return;
+                  }
+
                   const target = escapeGateTarget;
+                  const phoneTarget = pendingPhoneSettingTarget;
+                  stopNightQrCamera();
                   setEscapeGateTarget(null);
-                  if (target === 'unpin-kiosk') {
+                  setEscapeError(null);
+
+                  if (target === 'unlock-dns-guard') {
+                    setPurity((prev) => ({
+                      ...prev,
+                      dnsLockedByQr: false,
+                    }));
+                  } else if (target === 'unpin-kiosk') {
                     const s = await toggleHardwareKioskPin(false);
                     setLauncherStatus(s);
                   } else if (target === 'home-settings') {
                     const s = await openSystemHomeSettings();
                     setLauncherStatus(s);
-                  } else if (target === 'system-settings') {
-                    await openPhoneMainSetting('main');
+                  } else if (
+                    target === 'private-dns-settings' ||
+                    target === 'system-settings'
+                  ) {
+                    // Open for a strict 35-second window before snapping back to Minimum Phone
+                    await openPhoneMainSetting(phoneTarget, 35);
                   }
                 }}
-                className="px-4 py-3 border border-zinc-700 text-xs text-zinc-400 disabled:opacity-30 cursor-pointer"
+                className="px-4 py-3 border border-zinc-600 text-xs text-zinc-200 hover:bg-zinc-900 cursor-pointer"
               >
-                {tx(lang, 'Proceed', 'এগিয়ে যান', 'متابعة', 'آگے بڑھیں', 'Lanjut')}
+                {tx(lang, 'Verify & Unlock (35s)', 'যাচাই ও আনলক (৩৫সে)', 'تحقق وافتح (٣٥ث)', 'تصدیق اور ان لاک (٣٥س)', 'Verifikasi & Buka (35d)')}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          MODAL 5: UN-BYPASSABLE PRIVATE DNS REMOVED — AUTOMATIC NIGHT RECOVERY LOCK
+          (Triggered automatically when Private DNS is removed / turned off)
+         ========================================================= */}
+      {purity.privateDnsRemovedAlert && (
+        <div className="fixed inset-0 z-50 bg-black/98 text-zinc-100 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-md border-2 border-zinc-100 bg-black p-5 space-y-4 font-mono-tech my-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+              <div>
+                <div className="text-[10px] text-zinc-300 uppercase tracking-widest font-bold">
+                  🚨{' '}
+                  {tx(
+                    lang,
+                    'PRIVATE DNS REMOVED // NIGHT AUTO-SHIELD ACTIVATED',
+                    'প্রাইভেট DNS সরানো হয়েছে // রাতের স্বয়ংক্রিয় সুরক্ষা লক চালু',
+                    'تمت إزالة DNS الخاص // تم تفعيل الدرع الليلي التلقائي',
+                    'پرائیویٹ DNS ہٹا دیا گیا // رات کی خودکار حفاظتی شیلڈ فعال',
+                    'DNS PRIBADI DIHAPUS // PERISAI MALAM OTOMATIS AKTIF'
+                  )}
+                </div>
+                <h2 className="text-base font-bold text-white mt-0.5">
+                  {tx(
+                    lang,
+                    'Private DNS Auto-Recovery & Browser Lockdown Active',
+                    'প্রাইভেট DNS স্বয়ংক্রিয় পুনরুদ্ধার ও ব্রাউজার লকডাউন সক্রিয়',
+                    'تفعيل الاستعادة التلقائية لـ DNS وقفل المتصفحات',
+                    'پرائیویٹ DNS کی خودکار بحالی اور براؤزر لاک ڈاؤن فعال',
+                    'Pemulihan Otomatis DNS Pribadi & Kunci Browser Aktif'
+                  )}
+                </h2>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-200 leading-relaxed">
+              {tx(
+                lang,
+                'Minimum Phone detected that Private DNS was removed or turned off. Your Night Auto-Protection has automatically re-activated Strict Lockdown and blocked all browsers & social apps until Private DNS (family.cloudflare-dns.com) is restored.',
+                'Minimum Phone শনাক্ত করেছে যে ফোনের প্রাইভেট DNS বন্ধ বা সরিয়ে ফেলা হয়েছে। আপনার রাতের স্বয়ংক্রিয় সুরক্ষা সাথে সাথে সক্রিয় হয়ে সকল ব্রাউজার ও সোশ্যাল অ্যাপ লক করেছে। নিচের বাটনে ১-ট্যাপ করে প্রাইভেট DNS (family.cloudflare-dns.com) পুনরায় চালু করুন।',
+                'اكتشف التطبيق أنه تم إيقاف أو إزالة DNS الخاص. قام نظام الحماية الليلي تلقائياً بإعادة تفعيل القفل وحجب جميع المتصفحات حتى تتم استعادة DNS الآمن (family.cloudflare-dns.com).',
+                'Minimum Phone نے محسوس کیا ہے کہ پرائیویٹ DNS ہٹا دیا گیا ہے۔ خودکار نائٹ شیلڈ نے فوری طور پر تمام براؤزرز اور سوشل ایپس کو لاک کر دیا ہے۔ نیچے ١-ٹیپ کر کے پرائیویٹ DNS بحال کریں۔',
+                'Minimum Phone mendeteksi bahwa DNS Pribadi telah dihapus atau dimatikan. Perisai Malam Otomatis langsung mengunci semua browser hingga DNS Aman (family.cloudflare-dns.com) dipulihkan.'
+              )}
+            </p>
+
+            <div className="border border-zinc-700 bg-zinc-950 p-3 space-y-2 text-xs">
+              <div className="text-zinc-100 font-semibold">
+                ⚡{' '}
+                {tx(
+                  lang,
+                  '1-Tap Instant Restoration (Takes 5 Seconds):',
+                  '১-ট্যাপে তাৎক্ষণিক পুনরুদ্ধার (মাত্র ৫ সেকেন্ড লাগবে):',
+                  'استعادة فورية بضغطة واحدة (تستغرق ٥ ثوانٍ):',
+                  '١-ٹیپ فوری بحالی (صرف ٥ سیکنڈ میں):',
+                  'Pemulihan Instan 1-Sentuh (Hanya 5 Detik):'
+                )}
+              </div>
+              <div className="text-[11px] text-zinc-400">
+                1.{' '}
+                {tx(
+                  lang,
+                  'Tap the button below (auto-copies family.cloudflare-dns.com & opens DNS)',
+                  'নিচের বাটনে ট্যাপ করুন (স্বয়ংক্রিয়ভাবে family.cloudflare-dns.com কপি ও DNS খুলবে)',
+                  'اضغط الزر أدناه (ينسخ family.cloudflare-dns.com ويفتح إعدادات DNS)',
+                  'نیچے بٹن دبائیں (خودکار طور پر family.cloudflare-dns.com کاپی اور DNS کھلے گا)',
+                  'Ketuk tombol di bawah (otomatis menyalin family.cloudflare-dns.com & membuka DNS)'
+                )}
+                <br />
+                2.{' '}
+                {tx(
+                  lang,
+                  'Select “Private DNS provider hostname” → Paste → Save!',
+                  '“Private DNS provider hostname” নির্বাচন করে পেস্ট (Paste) করুন ও Save চাপুন!',
+                  'اختر "Private DNS provider hostname" ← الصق ← احفظ!',
+                  '"Private DNS provider hostname" منتخب کریں ← پیسٹ کریں ← سیو کریں!',
+                  'Pilih "Private DNS provider hostname" → Tempel → Simpan!'
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={async () => {
+                await handleRequestPhoneSetting('dns', { bypassForDnsSetup: true });
+              }}
+              className="w-full py-3.5 px-3 bg-zinc-100 text-black text-xs font-bold uppercase tracking-wider cursor-pointer text-center"
+            >
+              🛡️{' '}
+              {tx(
+                lang,
+                '1-Tap Copy family.cloudflare-dns.com & Restore Private DNS Now →',
+                '১-ট্যাপে family.cloudflare-dns.com কপি ও প্রাইভেট DNS চালু করুন →',
+                'نسخ family.cloudflare-dns.com واستعادة DNS الخاص الآن ←',
+                '١-ٹیپ میں family.cloudflare-dns.com کاپی اور پرائیویٹ DNS بحال کریں →',
+                '1-Sentuh Salin family.cloudflare-dns.com & Pulihkan DNS Sekarang →'
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPurity((prev) => ({
+                  ...prev,
+                  adultDnsEnabled: true,
+                  dnsLockedByQr: true,
+                  autoActivateDnsAtNight: true,
+                  lockFullPhoneSettingsAtNight: true,
+                  privateDnsRemovedAlert: false,
+                  lastDnsAutoRestoreIso: new Date().toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
+                }));
+              }}
+              className="w-full py-2.5 border border-zinc-700 text-zinc-300 text-xs uppercase cursor-pointer"
+            >
+              ✓{' '}
+              {tx(
+                lang,
+                'I Have Restored Private DNS — Lock & Return Home',
+                'আমি প্রাইভেট DNS চালু করেছি — লক করুন ও হোমে ফিরুন',
+                'لقد قمت باستعادة DNS الخاص — اقفل وعد للرئيسية',
+                'میں نے پرائیویٹ DNS بحال کر دیا ہے — لاک کریں اور ہوم پر لوٹیں',
+                'Saya Sudah Memulihkan DNS Pribadi — Kunci & Kembali'
+              )}
+            </button>
           </div>
         </div>
       )}

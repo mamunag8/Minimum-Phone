@@ -7,6 +7,9 @@ export interface NativeLauncherStatus {
   isKioskPinned: boolean;
   batteryLevel: number;
   isCharging: boolean;
+  privateDnsMode?: string;
+  privateDnsSpecifier?: string;
+  privateDnsHostnameActive?: boolean;
   platform: 'android' | 'ios' | 'web';
   deviceFormFactor?: 'phone' | 'tablet' | 'desktop';
   osFamily?: 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'unknown';
@@ -46,7 +49,19 @@ export interface MinimumPhoneNativePluginInterface {
   openHomeSettings(): Promise<NativeLauncherStatus>;
   openPhoneSystemSetting(options: {
     target: PhoneSettingTarget;
-  }): Promise<NativeLauncherStatus & { opened: boolean; target: string }>;
+    autoReturnSeconds?: number;
+  }): Promise<NativeLauncherStatus & { opened: boolean; target: string; autoReturnSeconds?: number }>;
+  enforcePrivateDnsAndSettingsGuard(options: {
+    expectedHost?: string;
+    autoRestore?: boolean;
+    killSystemSettings?: boolean;
+  }): Promise<
+    NativeLauncherStatus & {
+      autoRestoredNatively?: boolean;
+      systemSettingsKilled?: boolean;
+      expectedHost?: string;
+    }
+  >;
   setKioskPinLock(options: { enabled: boolean }): Promise<NativeLauncherStatus>;
   getInstalledApps(): Promise<{ apps: NativeInstalledApp[]; count: number }>;
   launchApp(options: {
@@ -211,11 +226,12 @@ export async function openSystemHomeSettings(): Promise<NativeLauncherStatus> {
 }
 
 export async function openPhoneMainSetting(
-  target: PhoneSettingTarget
+  target: PhoneSettingTarget,
+  autoReturnSeconds = 40
 ): Promise<boolean> {
   if (isAnyNativePlatform()) {
     try {
-      const res = await MinimumPhoneNative.openPhoneSystemSetting({ target });
+      const res = await MinimumPhoneNative.openPhoneSystemSetting({ target, autoReturnSeconds });
       return !!res.opened;
     } catch {
       return false;
@@ -459,4 +475,43 @@ export async function enforceBackgroundSafeApps(
     ),
   };
 }
+
+export async function enforcePrivateDnsAndSettingsGuard(
+  expectedHost = 'family.cloudflare-dns.com',
+  autoRestore = true,
+  killSystemSettings = false
+): Promise<{
+  privateDnsMode: string;
+  privateDnsSpecifier: string;
+  privateDnsHostnameActive: boolean;
+  autoRestoredNatively: boolean;
+  systemSettingsKilled: boolean;
+}> {
+  if (isNativeAndroid()) {
+    try {
+      const res = await MinimumPhoneNative.enforcePrivateDnsAndSettingsGuard({
+        expectedHost,
+        autoRestore,
+        killSystemSettings,
+      });
+      return {
+        privateDnsMode: res.privateDnsMode || 'unknown',
+        privateDnsSpecifier: res.privateDnsSpecifier || '',
+        privateDnsHostnameActive: Boolean(res.privateDnsHostnameActive),
+        autoRestoredNatively: Boolean(res.autoRestoredNatively),
+        systemSettingsKilled: Boolean(res.systemSettingsKilled),
+      };
+    } catch {
+      // Fallback below
+    }
+  }
+  return {
+    privateDnsMode: 'hostname',
+    privateDnsSpecifier: expectedHost,
+    privateDnsHostnameActive: true,
+    autoRestoredNatively: autoRestore,
+    systemSettingsKilled: killSystemSettings,
+  };
+}
+
 
