@@ -10,6 +10,8 @@ export interface NativeLauncherStatus {
   privateDnsMode?: string;
   privateDnsSpecifier?: string;
   privateDnsHostnameActive?: boolean;
+  localFamilyDnsVpnActive?: boolean;
+  fortressWatchdogActive?: boolean;
   platform: 'android' | 'ios' | 'web';
   deviceFormFactor?: 'phone' | 'tablet' | 'desktop';
   osFamily?: 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'unknown';
@@ -62,6 +64,17 @@ export interface MinimumPhoneNativePluginInterface {
       expectedHost?: string;
     }
   >;
+  toggleLocalFamilyDnsVpn(options: {
+    enabled: boolean;
+    autoNight?: boolean;
+  }): Promise<NativeLauncherStatus>;
+  configureFortressWatchdog(options: {
+    enabled: boolean;
+    lockSystemSettings?: boolean;
+    autoNightDnsVpn?: boolean;
+    nightStartHour?: number;
+    nightEndHour?: number;
+  }): Promise<NativeLauncherStatus>;
   setKioskPinLock(options: { enabled: boolean }): Promise<NativeLauncherStatus>;
   getInstalledApps(): Promise<{ apps: NativeInstalledApp[]; count: number }>;
   launchApp(options: {
@@ -171,6 +184,9 @@ export async function fetchNativeLauncherStatus(): Promise<NativeLauncherStatus>
   }
 
   const webBat = await readWebBatteryStatus();
+  const simVpn =
+    typeof localStorage !== 'undefined' &&
+    localStorage.getItem('minimum_phone_sim_dns_vpn') === 'true';
   return {
     isDefaultLauncher: isStandalonePwa,
     currentDefaultPackage: isStandalonePwa
@@ -179,6 +195,11 @@ export async function fetchNativeLauncherStatus(): Promise<NativeLauncherStatus>
     isKioskPinned: Boolean(typeof document !== 'undefined' && document.fullscreenElement),
     batteryLevel: webBat.batteryLevel,
     isCharging: webBat.isCharging,
+    privateDnsMode: simVpn ? 'hostname' : 'unknown',
+    privateDnsSpecifier: simVpn ? '1.1.1.3 (Built-In Family DNS VPN)' : '',
+    privateDnsHostnameActive: simVpn,
+    localFamilyDnsVpnActive: simVpn,
+    fortressWatchdogActive: true,
     platform: 'web',
     osFamily,
     deviceFormFactor,
@@ -513,5 +534,44 @@ export async function enforcePrivateDnsAndSettingsGuard(
     systemSettingsKilled: killSystemSettings,
   };
 }
+
+export async function toggleNativeFamilyDnsVpn(
+  enabled: boolean,
+  autoNight = false
+): Promise<NativeLauncherStatus> {
+  if (isNativeAndroid()) {
+    try {
+      return await MinimumPhoneNative.toggleLocalFamilyDnsVpn({ enabled, autoNight });
+    } catch {
+      // Fallback below
+    }
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('minimum_phone_sim_dns_vpn', enabled ? 'true' : 'false');
+    }
+  } catch {
+    // ignore
+  }
+  return await fetchNativeLauncherStatus();
+}
+
+export async function configureNativeFortressWatchdog(options: {
+  enabled: boolean;
+  lockSystemSettings?: boolean;
+  autoNightDnsVpn?: boolean;
+  nightStartHour?: number;
+  nightEndHour?: number;
+}): Promise<NativeLauncherStatus> {
+  if (isNativeAndroid()) {
+    try {
+      return await MinimumPhoneNative.configureFortressWatchdog(options);
+    } catch {
+      // Fallback below
+    }
+  }
+  return await fetchNativeLauncherStatus();
+}
+
 
 

@@ -41,9 +41,13 @@ import {
 } from '../services/nativeLauncherBridge';
 import { ImpactReportAndReferralHub } from './ImpactReportAndReferralHub';
 
+export type SettingsSubTab = 'both' | 'report' | 'apps' | 'phone' | 'language';
+
 interface AnalyticsAndKasbViewProps {
   lang: LanguageCode;
   onChangeLanguage: (lang: LanguageCode) => void;
+  activeSubTab?: SettingsSubTab;
+  onSelectSubTab?: (tab: SettingsSubTab) => void;
   platform: PlatformMode;
   onChangePlatform: (p: PlatformMode) => void;
   inspirationMode: InspirationMode;
@@ -87,6 +91,8 @@ interface AnalyticsAndKasbViewProps {
 export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   lang,
   onChangeLanguage,
+  activeSubTab,
+  onSelectSubTab,
   platform,
   onChangePlatform,
   inspirationMode,
@@ -130,7 +136,12 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   const [nativeStatusLog, setNativeStatusLog] = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [showHowToGuideModal, setShowHowToGuideModal] = useState<boolean>(false);
-  const [settingsSubTab, setSettingsSubTab] = useState<'both' | 'report' | 'settings'>('both');
+  const [internalSubTab, setInternalSubTab] = useState<SettingsSubTab>(activeSubTab || 'both');
+  const settingsSubTab: SettingsSubTab = activeSubTab || internalSubTab;
+  const setSettingsSubTab = (tab: SettingsSubTab) => {
+    setInternalSubTab(tab);
+    onSelectSubTab?.(tab);
+  };
 
   // Active Apps Manager local search, staged draft & explicit Save button state
   const [appFilterQuery, setAppFilterQuery] = useState<string>('');
@@ -685,42 +696,29 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
           )}
         </div>
 
-        {/* SUB-VIEW SWITCHER: IMPACT REPORT & REFERRAL VS ALL SETTINGS */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-2 border-t border-zinc-800">
+        {/* SUB-VIEW SWITCHER: 5 EASY NAVIGATION SUB-TABS FOR SETTINGS & IMPACT PAGE */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-2 border-t border-zinc-800">
           {(
             [
               {
-                id: 'both',
-                label: tx(
-                  lang,
-                  '📑 Full View (Report + Settings)',
-                  '📑 সম্পূর্ণ ভিউ (রিপোর্ট + সেটিংস)',
-                  '📑 العرض الكامل (التقرير + الإعدادات)',
-                  '📑 مکمل ویو (رپورٹ + سیٹنگز)',
-                  '📑 Tampilan Penuh (Laporan + Pengaturan)'
-                ),
+                id: 'both' as SettingsSubTab,
+                label: tx(lang, '📋 All Settings', '📋 সব সেটিংস', '📋 كل الإعدادات', '📋 تمام سیٹنگز', '📋 Semua'),
               },
               {
-                id: 'report',
-                label: tx(
-                  lang,
-                  '📊 Impact Graphics & Refer Friends',
-                  '📊 সাফল্য গ্রাফিক্স ও বন্ধুদের আমন্ত্রণ',
-                  '📊 رسوم الأثر ودعوة الأصدقاء',
-                  '📊 کامیابی کے گرافکس اور دوستوں کو دعوت',
-                  '📊 Grafik Dampak & Bagikan ke Teman'
-                ),
+                id: 'report' as SettingsSubTab,
+                label: tx(lang, '📊 Impact & Share', '📊 সাফল্য ও শেয়ার', '📊 الأثر والمشاركة', '📊 رپورٹ اور شیئر', '📊 Laporan'),
               },
               {
-                id: 'settings',
-                label: tx(
-                  lang,
-                  '⚙️ App List & Protection Settings',
-                  '⚙️ অ্যাপ তালিকা ও সুরক্ষা সেটিংস',
-                  '⚙️ قائمة التطبيقات وإعدادات الحماية',
-                  '⚙️ ایپ لسٹ اور حفاظتی سیٹنگز',
-                  '⚙️ Daftar Aplikasi & Pengaturan'
-                ),
+                id: 'apps' as SettingsSubTab,
+                label: tx(lang, '📱 App & Night Rules', '📱 অ্যাপ ও নাইট লক', '📱 التطبيقات والليل', '📱 ایپس اور نائٹ لاک', '📱 Aturan Aplikasi'),
+              },
+              {
+                id: 'phone' as SettingsSubTab,
+                label: tx(lang, '⚙️ Phone & Launcher', '⚙️ ফোন ও লঞ্চার', '⚙️ الهاتف والمشغل', '⚙️ فون اور لانچر', '⚙️ Ponsel & Home'),
+              },
+              {
+                id: 'language' as SettingsSubTab,
+                label: tx(lang, '📚 Language & Quiz', '📚 ভাষা ও কুইজ', '📚 اللغة والاختبار', '📚 زبان اور کوئز', '📚 Bahasa & Kuis'),
               },
             ] as const
           ).map((tab) => (
@@ -728,9 +726,9 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setSettingsSubTab(tab.id)}
-              className={`py-2 px-2.5 border text-xs font-mono-tech text-center cursor-pointer transition ${
+              className={`py-2 px-2 border text-[10px] font-mono-tech font-bold uppercase tracking-wider text-center cursor-pointer transition truncate ${
                 settingsSubTab === tab.id
-                  ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                  ? 'border-zinc-100 bg-zinc-100 text-black'
                   : 'border-zinc-800 bg-black text-zinc-300 hover:border-zinc-600'
               }`}
             >
@@ -754,9 +752,11 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
         />
       )}
 
-      {(settingsSubTab === 'both' || settingsSubTab === 'settings') && (
+      {settingsSubTab !== 'report' && (
         <div className="space-y-5">
           {/* 2. LANGUAGE SWITCHER (FULL APP TRANSLATION: ENGLISH, BANGLA, ARABIC, URDU, INDONESIAN) */}
+          {(settingsSubTab === 'both' || settingsSubTab === 'language') && (
+          <>
           <div className="border border-zinc-800 bg-zinc-950/60 p-3.5 sm:p-5 space-y-3">
             <div className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
               {tx(
@@ -1164,8 +1164,12 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               )}
             </button>
           </div>
+          </>
+          )}
 
           {/* 5. EASY APP LIST, CALLING/WHATSAPP & SLEEPING-TIME NIGHT QR MANAGER */}
+          {(settingsSubTab === 'both' || settingsSubTab === 'apps') && (
+          <>
           <div className="border-2 border-zinc-300 bg-zinc-950 p-3 sm:p-4 space-y-3 overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-zinc-800 pb-3">
               <div className="min-w-0 flex-1">
@@ -2040,8 +2044,12 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               </div>
             </div>
           </div>
+          </>
+          )}
 
           {/* 6. DISPLAY, SYSTEM GRAYSCALE & DEFAULT HABIT-WALL */}
+          {(settingsSubTab === 'both' || settingsSubTab === 'phone') && (
+          <>
           <div className="border border-zinc-800 bg-zinc-950/60 p-4 sm:p-5 space-y-4">
             <div className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500">
               {tx(
@@ -2580,6 +2588,8 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               )}
             </p>
           </div>
+          </>
+          )}
         </div>
       )}
 

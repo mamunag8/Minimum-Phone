@@ -37,14 +37,19 @@ import {
   tx,
 } from './i18n/translations';
 import { InhaleInterceptModal } from './components/InhaleInterceptModal';
-import { PurityGuardView } from './components/PurityGuardView';
+import { PurityGuardView, type GuardSubTab } from './components/PurityGuardView';
 import {
   DigestAndFocusView,
   getRequiredQrTokenForComplexity,
+  type FocusSubTab,
 } from './components/DigestAndFocusView';
-import { AnalyticsAndKasbView } from './components/AnalyticsAndKasbView';
+import {
+  AnalyticsAndKasbView,
+  type SettingsSubTab,
+} from './components/AnalyticsAndKasbView';
 import { FirstTimeSetupModal } from './components/FirstTimeSetupModal';
 import {
+  configureNativeFortressWatchdog,
   enforceBackgroundSafeApps,
   enforcePrivateDnsAndSettingsGuard,
   fetchNativeLauncherStatus,
@@ -55,6 +60,7 @@ import {
   openSystemHomeSettings,
   requestDefaultHomeLauncher,
   toggleHardwareKioskPin,
+  toggleNativeFamilyDnsVpn,
   type NativeLauncherStatus,
   type PhoneSettingTarget,
 } from './services/nativeLauncherBridge';
@@ -184,6 +190,13 @@ export function App() {
   const [activeTab, setActiveTab] = useState<
     'home' | 'drawer' | 'purity' | 'digest-focus' | 'system-kasb'
   >('home');
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [drawerSubTab, setDrawerSubTab] = useState<
+    'all' | 'essential' | 'utility' | 'restricted' | 'night-qr'
+  >('all');
+  const [guardSubTab, setGuardSubTab] = useState<GuardSubTab>('all');
+  const [focusSubTab, setFocusSubTab] = useState<FocusSubTab>('all');
+  const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>('both');
 
   const [homeProfile, setHomeProfile] = useState<HomeProfileType>('work');
   const [apps, setApps] = useState<AppItem[]>(() =>
@@ -442,13 +455,26 @@ export function App() {
       refreshNativeStatus();
     };
 
+    const onInterceptedSystemSettings = () => {
+      refreshNativeStatus();
+      setPendingPhoneSettingTarget('main');
+      setEscapeCooldownSec(30);
+      setEscapePhraseInput('');
+      setEscapeMathInput('');
+      setEscapeQrInput('');
+      setEscapeError(null);
+      setEscapeGateTarget('system-settings');
+    };
+
     window.addEventListener('minimumphone:home', onHomePressed);
     window.addEventListener('minimumphone:back', onBackPressed);
     window.addEventListener('minimumphone:resume', onResume);
+    window.addEventListener('minimumphone:intercepted_settings', onInterceptedSystemSettings);
     return () => {
       window.removeEventListener('minimumphone:home', onHomePressed);
       window.removeEventListener('minimumphone:back', onBackPressed);
       window.removeEventListener('minimumphone:resume', onResume);
+      window.removeEventListener('minimumphone:intercepted_settings', onInterceptedSystemSettings);
     };
   }, []);
 
@@ -704,21 +730,40 @@ export function App() {
       .slice(0, 7);
   }, [apps, homeProfile]);
 
-  // Search-First App Drawer Filtering with Asymmetric Friction
+  // Search-First App Drawer Filtering with Asymmetric Friction + Sub-Tab Categories
   const drawerSearchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const matchesSubTab = (app: AppItem): boolean => {
+      if (drawerSubTab === 'essential') return app.tier === 'essential';
+      if (drawerSubTab === 'utility') return app.tier === 'utility';
+      if (drawerSubTab === 'restricted') return app.tier === 'restricted';
+      if (drawerSubTab === 'night-qr') return Boolean(app.nightQrLocked);
+      return true;
+    };
+
     if (!q) {
-      if (revealRestrictedInDrawer) return apps;
-      return apps.filter((a) => a.tier !== 'restricted' && a.tier !== 'adult-blocked');
+      if (
+        revealRestrictedInDrawer ||
+        drawerSubTab === 'restricted' ||
+        drawerSubTab === 'night-qr'
+      ) {
+        return apps.filter(matchesSubTab);
+      }
+      return apps.filter(
+        (a) =>
+          a.tier !== 'restricted' && a.tier !== 'adult-blocked' && matchesSubTab(a)
+      );
     }
 
     return apps.filter((app) => {
+      if (!matchesSubTab(app)) return false;
       const nameEn = app.name.toLowerCase();
       const nameLocalized = getAppDisplayName(app, lang).toLowerCase();
       const nameBn = (app.nameBn || '').toLowerCase();
       if (
         (app.tier === 'restricted' || app.tier === 'adult-blocked') &&
-        !revealRestrictedInDrawer
+        !revealRestrictedInDrawer &&
+        drawerSubTab === 'all'
       ) {
         return (
           q.length >= 3 &&
@@ -730,7 +775,7 @@ export function App() {
       }
       return nameEn.includes(q) || nameLocalized.includes(q) || nameBn.includes(q);
     });
-  }, [apps, searchQuery, revealRestrictedInDrawer, lang]);
+  }, [apps, searchQuery, revealRestrictedInDrawer, drawerSubTab, lang]);
 
   // Check if current hour is within Night Window (default 22:00 - 06:00) or forced test mode
   const isNightHourActive = useMemo(() => {
@@ -839,6 +884,34 @@ export function App() {
     purity.privateDnsRemovedAlert,
     launcherStatus.platform,
     launcherStatus.privateDnsMode,
+  ]);
+
+  // Sync Native Android OS Fortress Watchdog preferences whenever Purity / Vault settings change
+  useEffect(() => {
+    configureNativeFortressWatchdog({
+      enabled: Boolean(
+        purity.adultDnsEnabled ||
+          (purity.dnsLockedByQr ?? true) ||
+          (purity.lockFullPhoneSettingsAtNight ?? true) ||
+          vault.uninstallProtectionEnabled
+      ),
+      autoNightDnsVpn: purity.autoActivateDnsAtNight ?? true,
+      lockSystemSettings: Boolean(
+        (purity.lockFullPhoneSettingsAtNight ?? true) ||
+          (purity.dnsLockedByQr ?? true) ||
+          vault.uninstallProtectionEnabled
+      ),
+      nightStartHour: vault.nightQrStartHour ?? 22,
+      nightEndHour: vault.nightQrEndHour ?? 6,
+    });
+  }, [
+    purity.adultDnsEnabled,
+    purity.dnsLockedByQr,
+    purity.autoActivateDnsAtNight,
+    purity.lockFullPhoneSettingsAtNight,
+    vault.uninstallProtectionEnabled,
+    vault.nightQrStartHour,
+    vault.nightQrEndHour,
   ]);
 
   // Open the Strong Private DNS & Phone System Settings Fortress Modal (30s Cooldown + Math + Physical QR)
@@ -1545,6 +1618,77 @@ export function App() {
         </div>
       )}
 
+      {/* PERSISTENT TOP NAVIGATION BAR WITH SLIDE-OUT SIDEBAR MENU (☰) ON EVERY PAGE */}
+      <header className="w-full shrink-0 border-b border-zinc-800 bg-black px-2.5 sm:px-6 py-2 flex items-center justify-between gap-2 font-mono-tech z-30">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            className="px-2.5 py-1.5 border border-zinc-300 bg-zinc-900 hover:bg-zinc-100 hover:text-black text-zinc-100 text-xs font-bold uppercase tracking-wider cursor-pointer shrink-0 transition"
+            aria-label="Open Navigation Sidebar"
+          >
+            ☰ {tx(lang, 'Menu', 'মেনু', 'القائمة', 'مینو', 'Menu')}
+          </button>
+          <div className="min-w-0 truncate">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-100 truncate">
+              {activeTab === 'home'
+                ? t.navHome
+                : activeTab === 'drawer'
+                ? t.navDrawer
+                : activeTab === 'purity'
+                ? t.navPurity
+                : activeTab === 'digest-focus'
+                ? t.navDigestFocus
+                : t.navSystemKasb}
+            </div>
+            <div className="text-[9px] text-zinc-400 truncate">
+              {purity.adultDnsEnabled || launcherStatus.localFamilyDnsVpnActive
+                ? tx(lang, '🛡️ DNS 1.1.1.3 Locked', '🛡️ DNS ১.১.১.৩ লকড', '🛡️ DNS 1.1.1.3 مفعل', '🛡️ DNS 1.1.1.3 لاکڈ', '🛡️ DNS 1.1.1.3 Aktif')
+                : tx(lang, '⚠ DNS Unverified', '⚠ DNS যাচাই করুন', '⚠ تحقق من DNS', '⚠ DNS چیک کریں', '⚠ Cek DNS')}{' '}
+              ·{' '}
+              {isNightHourActive
+                ? tx(lang, '🌙 Night Lock ON', '🌙 নাইট লক চালু', '🌙 قفل الليل', '🌙 نائٹ لاک آن', '🌙 Kunci Malam')
+                : `${formattedClock}`}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setGuardSubTab('dns-fortress');
+              setActiveTab('purity');
+            }}
+            className={`px-2 py-1 border text-[10px] font-bold cursor-pointer ${
+              purity.privateDnsRemovedAlert
+                ? 'border-zinc-100 bg-zinc-100 text-black'
+                : 'border-zinc-700 bg-zinc-950 text-zinc-200 hover:border-zinc-400'
+            }`}
+          >
+            🛡️ {tx(lang, 'DNS', 'DNS', 'DNS', 'DNS', 'DNS')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowFirstTimeSetupModal(true)}
+            className="px-2 py-1 border border-zinc-600 bg-zinc-900 text-[10px] text-zinc-100 hover:bg-zinc-800 cursor-pointer"
+          >
+            🪄 {tx(lang, 'Setup', 'সেটআপ', 'إعداد', 'سیٹ اپ', 'Setup')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const order: LanguageCode[] = ['en', 'bn', 'ar', 'ur', 'id'];
+              const nextIdx = (order.indexOf(lang) + 1) % order.length;
+              setLang(order[nextIdx]);
+            }}
+            className="px-2 py-1 border border-zinc-700 bg-zinc-950 text-[10px] text-zinc-200 hover:border-zinc-400 cursor-pointer"
+          >
+            🌐 {currentLangMeta.nativeName}
+          </button>
+        </div>
+      </header>
+
       {/* MAIN 100% DEVICE-FIT LAUNCHER VIEWPORT */}
       <main className="w-full max-w-full min-w-0 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto overflow-x-hidden px-2.5 sm:px-6 md:px-10 py-2.5">
         {/* =========================================================
@@ -1948,10 +2092,58 @@ export function App() {
         )}
 
         {/* =========================================================
-            TAB 2: ASYMMETRIC SEARCH-FIRST APP DRAWER
+            TAB 2: ASYMMETRIC SEARCH-FIRST APP DRAWER + CATEGORY SUB-TABS
            ========================================================= */}
         {activeTab === 'drawer' && (
           <div className="w-full max-w-4xl min-w-0 mx-auto flex-1 flex flex-col space-y-3">
+            {/* Sticky Sub-Navigation Tabs for App Drawer */}
+            <div className="sticky top-0 z-20 bg-black/95 backdrop-blur border-b border-zinc-800 py-2 -mx-1 px-1">
+              <div className="grid grid-cols-5 gap-1">
+                {(
+                  [
+                    {
+                      id: 'all',
+                      label: tx(lang, '📋 All', '📋 সব', '📋 الكل', '📋 سب', '📋 Semua'),
+                    },
+                    {
+                      id: 'essential',
+                      label: tx(lang, '📞 Calls', '📞 কল/চ্যাট', '📞 اتصال', '📞 کالز', '📞 Panggil'),
+                    },
+                    {
+                      id: 'utility',
+                      label: tx(lang, '⚡ Utility', '⚡ দরকারি', '⚡ أدوات', '⚡ یوٹیلیٹی', '⚡ Utilitas'),
+                    },
+                    {
+                      id: 'restricted',
+                      label: tx(lang, '📚 20s Quiz', '📚 ২০সে কুইজ', '📚 اختبار', '📚 کوئز', '📚 Kuis 20d'),
+                    },
+                    {
+                      id: 'night-qr',
+                      label: tx(lang, '🌙 Night QR', '🌙 নাইট QR', '🌙 قفل ليلي', '🌙 نائٹ QR', '🌙 QR Malam'),
+                    },
+                  ] as const
+                ).map((sub) => (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    onClick={() => {
+                      setDrawerSubTab(sub.id);
+                      if (sub.id === 'restricted' || sub.id === 'night-qr') {
+                        setRevealRestrictedInDrawer(true);
+                      }
+                    }}
+                    className={`py-2 px-1 border text-[10px] font-mono-tech font-bold uppercase tracking-wider transition cursor-pointer truncate ${
+                      drawerSubTab === sub.id
+                        ? 'border-zinc-100 bg-zinc-100 text-black'
+                        : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-500 truncate">
@@ -2070,6 +2262,9 @@ export function App() {
               showArabicScript={showArabicScript}
               inspirationMode={inspirationMode}
               isNightHourActive={isNightHourActive}
+              localFamilyDnsVpnActive={Boolean(launcherStatus.localFamilyDnsVpnActive)}
+              activeSubTab={guardSubTab}
+              onSelectSubTab={setGuardSubTab}
               openSosImmediately={openPuritySosImmediately}
               onClearImmediateSos={() => setOpenPuritySosImmediately(false)}
               onUpdatePurity={setPurity}
@@ -2077,6 +2272,7 @@ export function App() {
               onRequestUnlockDnsFortress={() =>
                 openStrongSettingsFortressModal('unlock-dns-guard', 'dns')
               }
+              onRefreshNativeStatus={refreshNativeStatus}
             />
           </div>
         )}
@@ -2090,6 +2286,8 @@ export function App() {
               lang={lang}
               notifications={notifications}
               vault={vault}
+              activeSubTab={focusSubTab}
+              onSelectSubTab={setFocusSubTab}
               onAddSimulatedNotification={(item) =>
                 setNotifications((prev) => [item, ...prev])
               }
@@ -2122,6 +2320,8 @@ export function App() {
             <AnalyticsAndKasbView
               lang={lang}
               onChangeLanguage={setLang}
+              activeSubTab={settingsSubTab}
+              onSelectSubTab={setSettingsSubTab}
               platform={platform}
               onChangePlatform={setPlatform}
               inspirationMode={inspirationMode}
@@ -2196,6 +2396,362 @@ export function App() {
           </button>
         ))}
       </nav>
+
+      {/* =========================================================
+          SLIDE-OUT SIDEBAR DRAWER (GLOBAL QUICK NAVIGATION & 1-TAP FORTRESS)
+         ========================================================= */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex"
+          onClick={() => setSidebarOpen(false)}
+        >
+          <aside
+            className="w-[86vw] max-w-[330px] h-full bg-zinc-950 border-r border-zinc-800 flex flex-col justify-between overflow-y-auto p-3.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="space-y-3.5">
+              {/* Top Brand + Close */}
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+                <div>
+                  <p className="text-[10px] font-mono-tech uppercase tracking-widest text-emerald-400 font-bold">
+                    MINIMUM PHONE v1.8 • OS FORTRESS
+                  </p>
+                  <h2 className="text-sm font-bold text-zinc-100 mt-0.5">
+                    {lang === 'bn'
+                      ? 'দ্রুত সাইডবার নেভিগেশন'
+                      : lang === 'ar'
+                      ? 'القائمة الجانبية السريعة'
+                      : lang === 'ur'
+                      ? 'تیز سائیڈ بار نیویگیشن'
+                      : lang === 'id'
+                      ? 'Menu Samping Cepat'
+                      : 'Quick Navigation & Shield'}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen(false)}
+                  className="px-2.5 py-1 border border-zinc-700 bg-zinc-900 text-zinc-300 text-xs font-mono-tech cursor-pointer hover:border-zinc-500"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Live Status Badges */}
+              <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono-tech">
+                <div className="p-2 border border-emerald-800/70 bg-emerald-950/25 text-emerald-200">
+                  <span className="block text-[9px] text-emerald-400/80 uppercase">
+                    {lang === 'bn' ? 'ফ্যামিলি ডিএনএস' : 'Family DNS'}
+                  </span>
+                  <span className="font-bold">
+                    🛡️ 1.1.1.3 {purity.adultDnsEnabled || launcherStatus.localFamilyDnsVpnActive ? 'ON' : 'READY'}
+                  </span>
+                </div>
+                <div className="p-2 border border-amber-800/70 bg-amber-950/25 text-amber-200">
+                  <span className="block text-[9px] text-amber-400/80 uppercase">
+                    {lang === 'bn' ? 'রাতের সেটিংস লক' : 'Night OS Lock'}
+                  </span>
+                  <span className="font-bold">
+                    {isNightHourActive && (purity.lockFullPhoneSettingsAtNight ?? true)
+                      ? '🌙 LOCKED NOW'
+                      : '⏰ 22:00 AUTO'}
+                  </span>
+                </div>
+              </div>
+
+              {/* 1-Tap Maximum Protection Card */}
+              <div className="p-2.5 border border-emerald-600/80 bg-emerald-950/30 space-y-2">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] font-mono-tech uppercase tracking-wider text-emerald-300 font-bold">
+                    ⚡ {lang === 'bn' ? '১-ট্যাপ সর্বোচ্চ সুরক্ষা' : lang === 'ar' ? 'حماية قصوى بنقرة واحدة' : lang === 'ur' ? '1-ٹیپ مکمل تحفظ' : lang === 'id' ? '1-Tap Proteksi Maksimal' : '1-Tap Maximum Protection'}
+                  </span>
+                  <span className="text-[9px] font-mono-tech px-1.5 py-0.5 bg-emerald-900/60 text-emerald-200 border border-emerald-700">
+                    VPN + QR Lock
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const nextPurity: PurityState = {
+                      ...purity,
+                      adultDnsEnabled: true,
+                      selectedDnsProvider: 'cloudflare-family',
+                      dnsLockedByQr: true,
+                      autoActivateDnsAtNight: true,
+                      lockFullPhoneSettingsAtNight: true,
+                      strictPornLockdown: true,
+                      nightGuardLock: true,
+                      privateDnsRemovedAlert: false,
+                    };
+                    setPurity(nextPurity);
+                    await toggleNativeFamilyDnsVpn(true, true);
+                    await configureNativeFortressWatchdog({
+                      enabled: true,
+                      autoNightDnsVpn: true,
+                      lockSystemSettings: true,
+                      nightStartHour: vault.nightQrStartHour ?? 22,
+                      nightEndHour: vault.nightQrEndHour ?? 6,
+                    });
+                    setSidebarOpen(false);
+                    setActiveTab('purity');
+                    setGuardSubTab('dns-fortress');
+                  }}
+                  className="w-full py-2 px-2.5 border border-emerald-400 bg-emerald-500 text-black font-mono-tech text-[11px] font-bold uppercase tracking-wider cursor-pointer hover:bg-emerald-400"
+                >
+                  🛡️ {lang === 'bn' ? '১.১.১.৩ ডিএনএস + সেটিংস লক চালু করুন' : lang === 'ar' ? 'تفعيل DNS 1.1.1.3 + قفل الإعدادات' : lang === 'ur' ? '1.1.1.3 DNS + سیٹنگز لاک فعال کریں' : lang === 'id' ? 'Aktifkan DNS 1.1.1.3 + Kunci Pengaturan' : 'Activate 1.1.1.3 DNS + OS Settings Lock'}
+                </button>
+                <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSidebarOpen(false);
+                      handleRequestPhoneSetting('wifi');
+                    }}
+                    className="py-1.5 px-2 border border-zinc-700 bg-black text-zinc-200 text-[10px] font-mono-tech cursor-pointer hover:border-zinc-500"
+                  >
+                    📶 {lang === 'bn' ? 'নিরাপদ Wi-Fi' : 'Safe Wi-Fi'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSidebarOpen(false);
+                      handleRequestPhoneSetting('bluetooth');
+                    }}
+                    className="py-1.5 px-2 border border-zinc-700 bg-black text-zinc-200 text-[10px] font-mono-tech cursor-pointer hover:border-zinc-500"
+                  >
+                    🔹 {lang === 'bn' ? 'নিরাপদ Bluetooth' : 'Safe Bluetooth'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Direct Page & Sub-Tab Navigation Tree */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
+                  {lang === 'bn' ? 'সব পেজ ও সাব-ট্যাব' : lang === 'ar' ? 'جميع الصفحات والأقسام' : lang === 'ur' ? 'تمام صفحات اور ذیلی ٹیبز' : lang === 'id' ? 'Semua Halaman & Sub-Tab' : 'All Pages & Sub-Tabs'}
+                </p>
+
+                {/* 1. Home */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('home');
+                    setSidebarOpen(false);
+                  }}
+                  className={`w-full text-left px-2.5 py-2 border font-mono-tech text-xs flex items-center justify-between cursor-pointer ${
+                    activeTab === 'home'
+                      ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                      : 'border-zinc-800 bg-zinc-900/50 text-zinc-200'
+                  }`}
+                >
+                  <span>🏠 {t.navHome}</span>
+                  <span className="text-[10px] opacity-75">→</span>
+                </button>
+
+                {/* 2. App Drawer + Sub-Tabs */}
+                <div className="border border-zinc-800 bg-zinc-900/30 p-2 space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('drawer');
+                      setDrawerSubTab('all');
+                      setSidebarOpen(false);
+                    }}
+                    className="w-full text-left font-mono-tech text-xs font-bold text-zinc-100 flex items-center justify-between cursor-pointer"
+                  >
+                    <span>📱 {t.navDrawer}</span>
+                    <span className="text-[10px] text-zinc-400">{apps.length} apps</span>
+                  </button>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(
+                      [
+                        { id: 'all', label: lang === 'bn' ? 'সব অ্যাপ' : 'All Apps' },
+                        { id: 'essential', label: lang === 'bn' ? 'জরুরি কল/SMS' : 'Essential' },
+                        { id: 'restricted', label: lang === 'bn' ? 'সীমিত অ্যাপ' : 'Restricted' },
+                        { id: 'night-qr', label: lang === 'bn' ? '🌙 রাতের QR লক' : '🌙 Night QR' },
+                      ] as const
+                    ).map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveTab('drawer');
+                          setDrawerSubTab(st.id);
+                          setSidebarOpen(false);
+                        }}
+                        className="px-2 py-1 border border-zinc-800 bg-black text-zinc-300 text-[10px] font-mono-tech text-left truncate cursor-pointer hover:border-zinc-500"
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3. Purity & DNS Guard + Sub-Tabs */}
+                <div className="border border-zinc-800 bg-zinc-900/30 p-2 space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('purity');
+                      setGuardSubTab('all');
+                      setSidebarOpen(false);
+                    }}
+                    className="w-full text-left font-mono-tech text-xs font-bold text-emerald-300 flex items-center justify-between cursor-pointer"
+                  >
+                    <span>🛡️ {t.navPurity}</span>
+                    <span className="text-[10px] text-emerald-400">1.1.1.3</span>
+                  </button>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(
+                      [
+                        { id: 'dns-fortress', label: lang === 'bn' ? '🛡️ ডিএনএস ও রাত লক' : '🛡️ DNS & Night Lock' },
+                        { id: 'sos-streak', label: lang === 'bn' ? '🚨 প্যানিক ও স্ট্রিক' : '🚨 SOS & Streak' },
+                        { id: 'keywords-logs', label: lang === 'bn' ? '🔍 কিওয়ার্ড ও লগ' : '🔍 Keywords & Logs' },
+                        { id: 'all', label: lang === 'bn' ? 'সব দেখুন' : 'View All' },
+                      ] as const
+                    ).map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveTab('purity');
+                          setGuardSubTab(st.id);
+                          setSidebarOpen(false);
+                        }}
+                        className="px-2 py-1 border border-zinc-800 bg-black text-zinc-300 text-[10px] font-mono-tech text-left truncate cursor-pointer hover:border-emerald-500"
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4. Focus & Digest + Sub-Tabs */}
+                <div className="border border-zinc-800 bg-zinc-900/30 p-2 space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('digest-focus');
+                      setFocusSubTab('all');
+                      setSidebarOpen(false);
+                    }}
+                    className="w-full text-left font-mono-tech text-xs font-bold text-zinc-100 flex items-center justify-between cursor-pointer"
+                  >
+                    <span>🧘 {t.navDigestFocus}</span>
+                    <span className="text-[10px] text-zinc-400">Monk & QR</span>
+                  </button>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(
+                      [
+                        { id: 'digest', label: lang === 'bn' ? '📬 নোটিফিকেশন ব্যাচ' : '📬 Digest Batch' },
+                        { id: 'monk-schedule', label: lang === 'bn' ? '🧘 মঙ্ক ও ঘুম' : '🧘 Monk & Sleep' },
+                        { id: 'qr-safelist', label: lang === 'bn' ? '🧱 QR ও রাতের লক' : '🧱 QR & Night Lock' },
+                        { id: 'all', label: lang === 'bn' ? 'সব দেখুন' : 'View All' },
+                      ] as const
+                    ).map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveTab('digest-focus');
+                          setFocusSubTab(st.id);
+                          setSidebarOpen(false);
+                        }}
+                        className="px-2 py-1 border border-zinc-800 bg-black text-zinc-300 text-[10px] font-mono-tech text-left truncate cursor-pointer hover:border-zinc-500"
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 5. Settings & Impact + Sub-Tabs */}
+                <div className="border border-zinc-800 bg-zinc-900/30 p-2 space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsSubTab('both');
+                      setSidebarOpen(false);
+                      handleSelectNavigationTab('system-kasb');
+                    }}
+                    className="w-full text-left font-mono-tech text-xs font-bold text-amber-300 flex items-center justify-between cursor-pointer"
+                  >
+                    <span>⚙️ {t.navSystemKasb}</span>
+                    <span className="text-[10px] text-amber-400">
+                      {settingsSessionUnlocked ? 'Unlocked' : '🔒 Locked'}
+                    </span>
+                  </button>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(
+                      [
+                        { id: 'report', label: lang === 'bn' ? '📊 ইমপ্যাক্ট রিপোর্ট' : '📊 Impact Report' },
+                        { id: 'apps', label: lang === 'bn' ? '📱 অ্যাপ ও রুলস' : '📱 App Rules' },
+                        { id: 'phone', label: lang === 'bn' ? '🔐 ফোন ও সিস্টেম' : '🔐 Phone & System' },
+                        { id: 'language', label: lang === 'bn' ? '🌐 ভাষা ও ডিসপ্লে' : '🌐 Language & UI' },
+                      ] as const
+                    ).map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => {
+                          setSettingsSubTab(st.id);
+                          setSidebarOpen(false);
+                          handleSelectNavigationTab('system-kasb');
+                        }}
+                        className="px-2 py-1 border border-zinc-800 bg-black text-zinc-300 text-[10px] font-mono-tech text-left truncate cursor-pointer hover:border-amber-500"
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer: 5-Language Switcher + Setup Wizard */}
+            <div className="pt-3 mt-3 border-t border-zinc-800 space-y-2">
+              <div className="grid grid-cols-5 gap-1">
+                {(['en', 'bn', 'ar', 'ur', 'id'] as LanguageCode[]).map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => setLang(code)}
+                    className={`py-1.5 border text-[10px] font-mono-tech uppercase cursor-pointer ${
+                      lang === code
+                        ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                        : 'border-zinc-800 bg-black text-zinc-400'
+                    }`}
+                  >
+                    {code}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setShowFirstTimeSetupModal(true);
+                  }}
+                  className="py-1.5 px-2 border border-zinc-700 bg-zinc-900 text-zinc-200 text-[10px] font-mono-tech cursor-pointer"
+                >
+                  ✨ {lang === 'bn' ? 'সেটআপ গাইড' : 'Setup Wizard'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsSessionUnlocked(false);
+                    setSidebarOpen(false);
+                    setActiveTab('home');
+                  }}
+                  className="py-1.5 px-2 border border-amber-700/80 bg-amber-950/30 text-amber-200 text-[10px] font-mono-tech cursor-pointer"
+                >
+                  🔒 {lang === 'bn' ? 'লক সেটিংস' : 'Lock Settings'}
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {/* =========================================================
           MODAL 0: VERY EASY 1ST-TIME STEP-BY-STEP SETUP WIZARD IN USER LANGUAGES

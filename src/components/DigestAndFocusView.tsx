@@ -11,10 +11,14 @@ import {
   tx,
 } from '../i18n/translations';
 
+export type FocusSubTab = 'all' | 'digest' | 'monk-schedule' | 'qr-safelist';
+
 interface DigestAndFocusViewProps {
   lang: LanguageCode;
   notifications: NotificationItem[];
   vault: FocusVaultState;
+  activeSubTab?: FocusSubTab;
+  onSelectSubTab?: (tab: FocusSubTab) => void;
   onAddSimulatedNotification: (notif: NotificationItem) => void;
   onClearDigestSlot: (slot: '12:00 PM' | '06:00 PM') => void;
   onUpdateVault: (updater: (prev: FocusVaultState) => FocusVaultState) => void;
@@ -36,6 +40,8 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
   lang,
   notifications,
   vault,
+  activeSubTab,
+  onSelectSubTab,
   onAddSimulatedNotification,
   onClearDigestSlot,
   onUpdateVault,
@@ -43,6 +49,12 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
   onOpenAppFromNotification,
 }) => {
   const t = TRANSLATIONS[lang];
+  const [internalSubTab, setInternalSubTab] = useState<FocusSubTab>(activeSubTab || 'all');
+  const currentSubTab: FocusSubTab = activeSubTab || internalSubTab;
+  const setSubTab = (tab: FocusSubTab) => {
+    setInternalSubTab(tab);
+    onSelectSubTab?.(tab);
+  };
 
   const [activeSlot, setActiveSlot] = useState<'12:00 PM' | '06:00 PM'>('06:00 PM');
   const [monkInputTitle, setMonkInputTitle] = useState<string>(() =>
@@ -210,8 +222,48 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-8">
+    <div className="space-y-5 pb-8">
+      {/* Sticky Sub-Navigation Tabs for Focus & Digest Page */}
+      <div className="sticky top-0 z-20 bg-black/95 backdrop-blur border-b border-zinc-800 py-2 -mx-1 px-1">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+          {(
+            [
+              {
+                id: 'all' as FocusSubTab,
+                label: tx(lang, '📋 All Focus', '📋 সব ফোকাস', '📋 كل التركيز', '📋 تمام فوکس', '📋 Semua'),
+              },
+              {
+                id: 'digest' as FocusSubTab,
+                label: tx(lang, '📬 Digest Guard', '📬 নোটিফিকেশন ব্যাচ', '📬 دفعة الإشعارات', '📬 نوٹیفکیشن ڈائجسٹ', '📬 Digest'),
+              },
+              {
+                id: 'monk-schedule' as FocusSubTab,
+                label: tx(lang, '🧘 Monk & Vault', '🧘 মঙ্ক মোড ও সময়', '🧘 وضع الراهب', '🧘 مونک اور شیڈول', '🧘 Monk & Jadwal'),
+              },
+              {
+                id: 'qr-safelist' as FocusSubTab,
+                label: tx(lang, '📷 QR & Night Lock', '📷 QR কার্ড ও লক', '📷 بطاقة QR الليلية', '📷 QR کارڈ اور لاک', '📷 Kartu QR'),
+              },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setSubTab(tab.id)}
+              className={`py-2 px-2 border text-[10px] font-mono-tech font-bold uppercase tracking-wider transition cursor-pointer truncate ${
+                currentSubTab === tab.id
+                  ? 'border-zinc-100 bg-zinc-100 text-black'
+                  : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* SECTION 1: MONK MODE DEEP WORK BLOCK */}
+      {(currentSubTab === 'all' || currentSubTab === 'monk-schedule') && (
       <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-zinc-900 pb-2.5">
           <div>
@@ -298,8 +350,10 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       {/* SECTION 2: TWICE-DAILY NOTIFICATION DIGEST + NOTIFICATION APP-LAUNCH CONTROL */}
+      {(currentSubTab === 'all' || currentSubTab === 'digest') && (
       <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
         <div className="border-b border-zinc-900 pb-2.5 flex items-start justify-between gap-2">
           <div>
@@ -719,8 +773,10 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* SECTION 3: QR CODE SCANNER WITH COMPLEXITY SETTINGS (EASY / MEDIUM / HARD) & NIGHT BROWSER QR LOCK */}
+      {(currentSubTab === 'all' || currentSubTab === 'qr-safelist' || currentSubTab === 'monk-schedule') && (
       <div className="border border-zinc-800 bg-zinc-950/60 p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-zinc-900 pb-2.5">
           <div>
@@ -1270,6 +1326,7 @@ export const DigestAndFocusView: React.FC<DigestAndFocusViewProps> = ({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };

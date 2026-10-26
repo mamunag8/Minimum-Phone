@@ -12,7 +12,14 @@ import {
 } from '../data/calmTriggers';
 import { TRANSLATIONS, tx } from '../i18n/translations';
 import { NativeBridge } from '../services/nativeBridge';
-import { openPhoneMainSetting, type PhoneSettingTarget } from '../services/nativeLauncherBridge';
+import {
+  openPhoneMainSetting,
+  toggleNativeFamilyDnsVpn,
+  configureNativeFortressWatchdog,
+  type PhoneSettingTarget,
+} from '../services/nativeLauncherBridge';
+
+export type GuardSubTab = 'dns-fortress' | 'sos-streak' | 'keywords-logs' | 'all';
 
 interface PurityGuardViewProps {
   purity: PurityState;
@@ -21,6 +28,9 @@ interface PurityGuardViewProps {
   showArabicScript: boolean;
   inspirationMode?: InspirationMode;
   isNightHourActive?: boolean;
+  localFamilyDnsVpnActive?: boolean;
+  activeSubTab?: GuardSubTab;
+  onSelectSubTab?: (tab: GuardSubTab) => void;
   openSosImmediately?: boolean;
   onClearImmediateSos?: () => void;
   onUpdatePurity: (updater: (prev: PurityState) => PurityState) => void;
@@ -29,6 +39,7 @@ interface PurityGuardViewProps {
     options?: { bypassForDnsSetup?: boolean }
   ) => void;
   onRequestUnlockDnsFortress?: () => void;
+  onRefreshNativeStatus?: () => void;
 }
 
 const DEFAULT_ADULT_KEYWORDS = [
@@ -121,13 +132,23 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
   showArabicScript,
   inspirationMode = 'blended',
   isNightHourActive = false,
+  localFamilyDnsVpnActive = false,
+  activeSubTab,
+  onSelectSubTab,
   openSosImmediately,
   onClearImmediateSos,
   onUpdatePurity,
   onRequestPhoneSetting,
   onRequestUnlockDnsFortress,
+  onRefreshNativeStatus,
 }) => {
   const t = TRANSLATIONS[lang];
+  const [internalSubTab, setInternalSubTab] = useState<GuardSubTab>(activeSubTab || 'all');
+  const currentSubTab: GuardSubTab = activeSubTab || internalSubTab;
+  const setSubTab = (tab: GuardSubTab) => {
+    setInternalSubTab(tab);
+    onSelectSubTab?.(tab);
+  };
 
   const purityTriggers = CALM_MIND_TRIGGERS.filter((item) => {
     if (inspirationMode === 'islamic') {
@@ -442,12 +463,51 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           onClick={() =>
             onUpdatePurity((prev) => ({ ...prev, discreetMode: !prev.discreetMode }))
           }
-          className="px-2.5 py-1 border border-zinc-700 text-[11px] font-mono-tech text-zinc-300 hover:bg-zinc-900 cursor-pointer"
+          className="px-2.5 py-1 border border-zinc-700 text-[11px] font-mono-tech text-zinc-300 hover:bg-zinc-900 cursor-pointer shrink-0"
         >
           {purity.discreetMode
             ? tx(lang, 'Discreet: ON', 'গোপন মোড: চালু', 'الوضع المخفي: مفعل', 'خفیہ موڈ: آن', 'Mode Samar: ON')
             : tx(lang, 'Discreet: OFF', 'গোপন মোড: বন্ধ', 'الوضع المخفي: متوقف', 'خفیہ موڈ: آف', 'Mode Samar: OFF')}
         </button>
+      </div>
+
+      {/* Sticky Sub-Navigation Tabs for Fast 1-Tap Section Switching */}
+      <div className="sticky top-0 z-20 bg-black/95 backdrop-blur border-b border-zinc-800 py-2 -mx-1 px-1">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+          {(
+            [
+              {
+                id: 'all' as GuardSubTab,
+                label: tx(lang, '📋 All Guard', '📋 সব সুরক্ষা', '📋 كل الحماية', '📋 تمام گارڈ', '📋 Semua'),
+              },
+              {
+                id: 'dns-fortress' as GuardSubTab,
+                label: tx(lang, '🌐 DNS & Night Lock', '🌐 DNS ও নাইট লক', '🌐 DNS وقفل الليل', '🌐 DNS اور نائٹ لاک', '🌐 DNS & Malam'),
+              },
+              {
+                id: 'sos-streak' as GuardSubTab,
+                label: tx(lang, '🆘 SOS & Streak', '🆘 SOS ও স্ট্রিক', '🆘 طوارئ والعداد', '🆘 SOS اور سٹریک', '🆘 SOS & Hari'),
+              },
+              {
+                id: 'keywords-logs' as GuardSubTab,
+                label: tx(lang, '🚫 Keywords & Logs', '🚫 শব্দ ব্লক ও লগ', '🚫 الكلمات والسجل', '🚫 الفاظ اور لاگ', '🚫 Kata & Log'),
+              },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setSubTab(tab.id)}
+              className={`py-2 px-2 border text-[10px] font-mono-tech font-bold uppercase tracking-wider transition cursor-pointer truncate ${
+                currentSubTab === tab.id
+                  ? 'border-zinc-100 bg-zinc-100 text-black'
+                  : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Live 15-Minute Emergency Browser Lockdown Active Banner */}
@@ -484,6 +544,8 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
       )}
 
       {/* Live Clean Streak Counter Card */}
+      {(currentSubTab === 'all' || currentSubTab === 'sos-streak') && (
+      <>
       <div className="border border-zinc-800 bg-zinc-950/60 p-5">
         <div className="flex items-center justify-between text-xs font-mono-tech text-zinc-400 mb-3">
           <span>{t.cleanStreakLabel}</span>
@@ -616,8 +678,11 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           — {getTriggerSource(activePurityTrigger, lang)}
         </p>
       </div>
+      </>
+      )}
 
       {/* 4-LAYER COMPLETE PORN ADDICTION RESTRICTION & SYSTEM SHIELD */}
+      {(currentSubTab === 'all' || currentSubTab === 'dns-fortress' || currentSubTab === 'keywords-logs') && (
       <div className="border border-zinc-800 p-4 space-y-4 bg-zinc-950/40">
         <div className="text-xs font-mono-tech uppercase tracking-wider text-zinc-300">
           {tx(
@@ -734,6 +799,93 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
                   ? tx(lang, '🌙 NIGHT FORTRESS ACTIVE', '🌙 রাতের দুর্গ সক্রিয়', '🌙 القلعة الليلية نشطة', '🌙 نائٹ قلعہ فعال', '🌙 BENTENG MALAM AKTIF')
                   : tx(lang, '🛡️ 24/7 GUARD READY', '🛡️ ২৪/৭ সুরক্ষা প্রস্তুত', '🛡️ حماية ٢٤/٧ جاهزة', '🛡️ ٢٤/٧ گارڈ تیار', '🛡️ SIAGA 24/7')}
               </span>
+            </div>
+
+            {/* NEW: 1-TAP BUILT-IN NATIVE FAMILY DNS (1.1.1.3) AUTO-VPN SHIELD (No Manual Settings Paste Needed!) */}
+            <div className="border-2 border-zinc-100 bg-zinc-900/90 p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-mono-tech font-bold text-white">
+                    ⚡{' '}
+                    {tx(
+                      lang,
+                      '1-Tap Built-In Family DNS Shield (1.1.1.3 Auto-VPN)',
+                      '১-ক্লিকে অটোমেটিক Family DNS শিল্ড (১.১.১.৩ — সেটিংসে পেস্ট করার দরকার নেই!)',
+                      'درع DNS العائلي المدمج بضغطة واحدة (1.1.1.3 تلقائي)',
+                      '١-کلک بلٹ ان فیملی DNS شیلڈ (1.1.1.3 آٹو وی پی این)',
+                      'Perisai DNS Keluarga Bawaan 1-Sentuh (1.1.1.3 Auto-VPN)'
+                    )}
+                  </div>
+                  <div className="text-[10px] text-zinc-300 mt-1 leading-snug">
+                    {tx(
+                      lang,
+                      'Activates Cloudflare Family (1.1.1.3 / 1.0.0.3) & CleanBrowsing directly inside Minimum Phone with 0% battery drain — and automatically turns ON at 10:00 PM every night even if turned off!',
+                      'ফোনের সেটিংসে গিয়ে কিছু কপি-পেস্ট না করেই সরাসরি অ্যাপের ভেতর থেকে ১-ক্লিকে পর্ন ও অ্যাডাল্ট সাইট ব্লকার (1.1.1.3) চালু করে এবং রাতে কেউ বন্ধ করলেও রাত ১০টায় নিজে থেকেই চালু হয়ে যায়!',
+                      'يفعّل فلتر العائلة (1.1.1.3) مباشرة من داخل التطبيق بضغطة واحدة بدون استهلاك البطارية، ويعمل تلقائياً كل ليلة الساعة ١٠ مساءً!',
+                      'فون سیٹنگز میں پیسٹ کیے بغیر براہِ راست ایپ سے ١-کلک میں فحش سائٹ بلاکر (1.1.1.3) آن کرتا ہے اور رات ١٠ بجے خودکار فعال ہو جاتا ہے!',
+                      'Mengaktifkan filter dewasa (1.1.1.3) langsung dari dalam aplikasi dalam 1 ketukan tanpa menguras baterai, dan otomatis menyala pukul 22:00!'
+                    )}
+                  </div>
+                </div>
+                <span
+                  className={`px-2 py-0.5 text-[10px] font-mono-tech font-bold shrink-0 ${
+                    localFamilyDnsVpnActive || purity.adultDnsEnabled
+                      ? 'bg-zinc-100 text-black'
+                      : 'border border-zinc-600 text-zinc-400'
+                  }`}
+                >
+                  {localFamilyDnsVpnActive
+                    ? tx(lang, '🛡️ 1.1.1.3 LIVE', '🛡️ ১.১.১.৩ চালু', '🛡️ 1.1.1.3 نشط', '🛡️ 1.1.1.3 فعال', '🛡️ 1.1.1.3 AKTIF')
+                    : tx(lang, 'READY', 'প্রস্তুত', 'جاهز', 'تیار', 'SIAP')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  await toggleNativeFamilyDnsVpn(true, true);
+                  await configureNativeFortressWatchdog({
+                    enabled: true,
+                    lockSystemSettings: true,
+                    autoNightDnsVpn: true,
+                    nightStartHour: 22,
+                    nightEndHour: 6,
+                  });
+                  onUpdatePurity((prev) => ({
+                    ...prev,
+                    adultDnsEnabled: true,
+                    dnsLockedByQr: true,
+                    autoActivateDnsAtNight: true,
+                    lockFullPhoneSettingsAtNight: true,
+                    privateDnsRemovedAlert: false,
+                    lastDnsAutoRestoreIso: new Date().toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }),
+                  }));
+                  onRefreshNativeStatus?.();
+                  setDnsStatusMessage(
+                    tx(
+                      lang,
+                      '✓ 1-Tap Family DNS (1.1.1.3) + Night System Settings Lock Watchdog Activated!',
+                      '✓ ১-ক্লিকে Family DNS (1.1.1.3) এবং রাতের ফোন সেটিংস লক ওয়াচডগ সফলভাবে চালু হয়েছে!',
+                      '✓ تم تفعيل درع DNS العائلي (1.1.1.3) وقفل إعدادات الهاتف الليلي بنجاح!',
+                      '✓ ١-کلک فیملی DNS (1.1.1.3) اور نائٹ فون سیٹنگز لاک کامیابی سے فعال ہو گیا!',
+                      '✓ Perisai DNS Keluarga (1.1.1.3) & Kunci Pengaturan Malam Berhasil Diaktifkan!'
+                    )
+                  );
+                }}
+                className="w-full py-2.5 bg-zinc-100 text-black font-mono-tech text-xs font-bold uppercase tracking-wider hover:bg-white cursor-pointer"
+              >
+                🛡️{' '}
+                {tx(
+                  lang,
+                  'Activate 1-Tap Family DNS (1.1.1.3) + Full Night Lock Now',
+                  '১-ক্লিকে অটো Family DNS (1.1.1.3) ও ফুল নাইট লক চালু করুন',
+                  'تفعيل درع DNS (1.1.1.3) والقفل الليلي الكامل بضغطة واحدة',
+                  '١-کلک میں آٹو فیملی DNS (1.1.1.3) اور مکمل نائٹ لاک آن کریں',
+                  'Aktifkan 1-Sentuh DNS Keluarga (1.1.1.3) + Kunci Malam Penuh'
+                )}
+              </button>
             </div>
 
             {/* Control 1: If Private DNS Removed -> Automatically Active at Night */}
@@ -1298,8 +1450,11 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* 90-Day Neuro-Rewiring Milestones */}
+      {(currentSubTab === 'all' || currentSubTab === 'sos-streak' || currentSubTab === 'keywords-logs') && (
+      <>
       <div className="border border-zinc-800 p-4 space-y-3 bg-zinc-950/40">
         <div className="text-xs font-mono-tech uppercase tracking-wider text-zinc-400">
           {tx(
@@ -1374,6 +1529,8 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           )}
         </button>
       </div>
+      </>
+      )}
 
       {/* Relapse Root-Cause Modal */}
       {showRelapseModal && (

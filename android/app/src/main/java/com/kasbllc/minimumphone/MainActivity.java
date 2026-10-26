@@ -78,14 +78,33 @@ public class MainActivity extends BridgeActivity {
                 dispatchWebEvent("minimumphone:back");
             }
         });
+
+        // Start Real-Time System Settings Lock & Night Fortress Watchdog Service
+        try {
+            NightFortressReceiver.startWatchdogSafely(this);
+            NightFortressReceiver.scheduleNightAlarm(this, 22);
+        } catch (Exception ignored) {}
+
+        checkInterceptedIntent(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        // When Home button is pressed while Minimum Phone is default launcher, snap back to Home screen
-        dispatchWebEvent("minimumphone:home");
+        if (!checkInterceptedIntent(intent)) {
+            // When Home button is pressed while Minimum Phone is default launcher, snap back to Home screen
+            dispatchWebEvent("minimumphone:home");
+        }
+    }
+
+    private boolean checkInterceptedIntent(Intent intent) {
+        if (intent != null && intent.getBooleanExtra("intercepted_system_settings", false)) {
+            intent.removeExtra("intercepted_system_settings");
+            dispatchWebEvent("minimumphone:intercepted_settings");
+            return true;
+        }
+        return false;
     }
 
     @Override
