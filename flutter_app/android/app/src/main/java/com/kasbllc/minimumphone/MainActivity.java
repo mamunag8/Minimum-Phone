@@ -16,6 +16,8 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
 import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
@@ -63,6 +65,7 @@ public class MainActivity extends FlutterActivity {
     private MethodChannel.Result pendingQrScanResult = null;
     private String pendingScanPrompt = null;
     private WebView printWebView = null;
+    private boolean isTorchEnabled = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -292,6 +295,9 @@ public class MainActivity extends FlutterActivity {
                         case "generateQrMatrix": {
                             String data = call.argument("data");
                             if (data == null || data.trim().isEmpty()) {
+                                data = call.argument("content");
+                            }
+                            if (data == null || data.trim().isEmpty()) {
                                 data = "KASB-BRICK-77";
                             }
                             result.success(buildIsoQrMatrixMap(data.trim()));
@@ -300,6 +306,9 @@ public class MainActivity extends FlutterActivity {
 
                         case "printQrCodeSheet": {
                             String data = call.argument("data");
+                            if (data == null || data.trim().isEmpty()) {
+                                data = call.argument("qrSecret");
+                            }
                             String title = call.argument("title");
                             String subtitle = call.argument("subtitle");
                             if (data == null || data.trim().isEmpty()) {
@@ -307,6 +316,14 @@ public class MainActivity extends FlutterActivity {
                             }
                             printPhysicalQrSheet(data.trim(), title, subtitle);
                             result.success(true);
+                            break;
+                        }
+
+                        case "toggleFlashlight": {
+                            boolean nowOn = toggleFlashlightTorch(ctx);
+                            Map<String, Object> res = new HashMap<>();
+                            res.put("torchOn", nowOn);
+                            result.success(res);
                             break;
                         }
 
@@ -424,16 +441,75 @@ public class MainActivity extends FlutterActivity {
         return res;
     }
 
+    private boolean toggleFlashlightTorch(Context ctx) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                CameraManager cm = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
+                if (cm != null) {
+                    for (String id : cm.getCameraIdList()) {
+                        CameraCharacteristics chars = cm.getCameraCharacteristics(id);
+                        Boolean hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                        if (hasFlash != null && hasFlash) {
+                            isTorchEnabled = !isTorchEnabled;
+                            cm.setTorchMode(id, isTorchEnabled);
+                            return isTorchEnabled;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                isTorchEnabled = false;
+            }
+        }
+        return isTorchEnabled;
+    }
+
     private void openSafePhoneSetting(Context ctx, String target) {
+        if ("torch".equalsIgnoreCase(target) || "flashlight".equalsIgnoreCase(target)) {
+            toggleFlashlightTorch(ctx);
+            return;
+        }
+
         SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit()
-            .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 35000L)
+            .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 45000L)
             .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "safe_sub_setting")
             .apply();
+
+        if ("calculator".equalsIgnoreCase(target)) {
+            try {
+                Intent calcIntent = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALCULATOR);
+                calcIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(calcIntent);
+                return;
+            } catch (Exception ignored) {}
+        }
+
+        if ("alarm".equalsIgnoreCase(target) || "clock".equalsIgnoreCase(target)) {
+            try {
+                Intent alarmIntent = new Intent(AlarmClock.ACTION_SHOW_ALARMS);
+                alarmIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(alarmIntent);
+                return;
+            } catch (Exception ignored) {}
+        }
+
+        if ("hotspot".equalsIgnoreCase(target)) {
+            try {
+                Intent tetherIntent = new Intent();
+                tetherIntent.setClassName("com.android.settings", "com.android.settings.TetherSettings");
+                tetherIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(tetherIntent);
+                return;
+            } catch (Exception ignored) {}
+        }
 
         String action = Settings.ACTION_SETTINGS;
         if ("wifi".equalsIgnoreCase(target)) {
             action = Settings.ACTION_WIFI_SETTINGS;
+        } else if ("mobile_data".equalsIgnoreCase(target) || "data".equalsIgnoreCase(target)) {
+            action = Settings.ACTION_DATA_ROAMING_SETTINGS;
+        } else if ("hotspot".equalsIgnoreCase(target)) {
+            action = Settings.ACTION_WIRELESS_SETTINGS;
         } else if ("bluetooth".equalsIgnoreCase(target)) {
             action = Settings.ACTION_BLUETOOTH_SETTINGS;
         } else if ("private_dns".equalsIgnoreCase(target)) {
@@ -454,6 +530,12 @@ public class MainActivity extends FlutterActivity {
             action = Settings.ACTION_SOUND_SETTINGS;
         } else if ("display".equalsIgnoreCase(target)) {
             action = Settings.ACTION_DISPLAY_SETTINGS;
+        } else if ("battery".equalsIgnoreCase(target)) {
+            action = Settings.ACTION_BATTERY_SAVER_SETTINGS;
+        } else if ("location".equalsIgnoreCase(target)) {
+            action = Settings.ACTION_LOCATION_SOURCE_SETTINGS;
+        } else if ("airplane".equalsIgnoreCase(target)) {
+            action = Settings.ACTION_AIRPLANE_MODE_SETTINGS;
         }
 
         try {

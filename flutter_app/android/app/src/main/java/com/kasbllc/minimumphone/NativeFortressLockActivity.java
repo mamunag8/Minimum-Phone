@@ -30,6 +30,7 @@ import android.widget.Toast;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
 
+import java.util.Calendar;
 import java.util.Random;
 
 /**
@@ -46,6 +47,7 @@ public class NativeFortressLockActivity extends Activity {
     private int mathC = 9;
     private int expectedMathAnswer = 73;
     private String expectedQrCode = "KASB-BRICK-77";
+    private boolean isNightWindow = false;
 
     private TextView timerBadge;
     private TextView dnsStatusView;
@@ -87,6 +89,10 @@ public class NativeFortressLockActivity extends Activity {
         if (expectedQrCode == null || expectedQrCode.trim().isEmpty()) {
             expectedQrCode = "KASB-BRICK-77";
         }
+
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        isNightWindow = (hour >= 22 || hour < 6);
+        cooldownSeconds = isNightWindow ? 30 : 15;
 
         Random rng = new Random();
         mathA = 12 + rng.nextInt(12);
@@ -215,9 +221,11 @@ public class NativeFortressLockActivity extends Activity {
         mathInput.setBackground(inputBg1);
         root.addView(mathInput);
 
-        // Step 3: Physical QR Code Camera Scanner + Input (No Secret Leaked on Screen!)
+        // Step 3: Physical QR Code Camera Scanner + Input (Strictly required at Night 22:00-06:00; Daytime Work Bypass available in Day)
         TextView qrLabel = new TextView(this);
-        qrLabel.setText("🧱 STEP 3: SCAN PHYSICAL QR FORTRESS CARD\n(আপনার অন্য ঘরে রাখা প্রিন্টেড QR কোডটি স্ক্যান করুন)");
+        qrLabel.setText(isNightWindow
+            ? "🧱 STEP 3 (NIGHT LOCK 22:00–06:00): SCAN PHYSICAL QR CARD\n(রাতে ফিজিক্যাল QR কোড স্ক্যান ছাড়া আনলক করা যাবে না)"
+            : "☀️ STEP 3 (DAYTIME 06:00–22:00): QR SCAN OR DAYTIME WORK BYPASS\n(দিনের বেলা কাজের প্রয়োজনে QR ছাড়াই ধাপ ১ ও ২ পূর্ণ করে আনলক করতে পারবেন)");
         qrLabel.setTextColor(Color.parseColor("#E4E4E7"));
         qrLabel.setTextSize(12f);
         qrLabel.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -262,10 +270,12 @@ public class NativeFortressLockActivity extends Activity {
         errorView.setPadding(0, dp(8), 0, dp(4));
         root.addView(errorView);
 
-        // Unlock Settings for 35 Seconds Button
+        // Unlock Settings Button
         unlockButton = new Button(this);
         unlockButton.setAllCaps(false);
-        unlockButton.setText("🔓 Verify & Unlock Settings for 35 Seconds");
+        unlockButton.setText(isNightWindow
+            ? "🔓 Verify QR & Unlock Settings for 45 Seconds"
+            : "☀️ Daytime Work Bypass: Unlock Settings for 60s (After Step 1 & 2)");
         unlockButton.setTextColor(Color.BLACK);
         unlockButton.setBackgroundColor(Color.parseColor("#F4F4F5"));
         unlockButton.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -390,15 +400,16 @@ public class NativeFortressLockActivity extends Activity {
         }
 
         String qrStr = qrInput.getText() != null ? qrInput.getText().toString().trim() : "";
-        if (!qrStr.equalsIgnoreCase(expectedQrCode)) {
-            errorView.setText("⚠️ Step 3 Physical QR Code is invalid! Please scan your printed Physical QR Card kept in the other room.");
+        if (isNightWindow && !qrStr.equalsIgnoreCase(expectedQrCode)) {
+            errorView.setText("⚠️ Night Lock Active (22:00–06:00): Physical QR Code is strictly required at night! Please scan your printed QR Card.");
             return;
         }
 
-        // Grant 35-second temporary unlock lease
+        // Grant temporary unlock lease (60s in daytime, 45s at night)
+        long leaseMs = isNightWindow ? 45000L : 60000L;
         SharedPreferences prefs = getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 35000L).apply();
-        Toast.makeText(this, "🔓 Settings unlocked for 35 seconds. Will auto-lock after 35s!", Toast.LENGTH_LONG).show();
+        prefs.edit().putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + leaseMs).apply();
+        Toast.makeText(this, "🔓 Settings unlocked temporarily. Will auto-lock soon!", Toast.LENGTH_LONG).show();
         finish();
     }
 
