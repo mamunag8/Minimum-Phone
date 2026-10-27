@@ -158,7 +158,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   String _lang = 'en';
   String _themeMode = 'oled'; // 'oled', 'eink', 'amber'
   String _activeProfile = 'work'; // 'work', 'personal', 'sunset'
-  String _userLocation = '';
+  String _backgroundLocation = 'Auto GPS';
   String _searchQuery = '';
   int _wisdomIndex = 0;
   bool _torchOn = false;
@@ -454,7 +454,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           _lang = data['lang'] ?? _lang;
           _themeMode = data['themeMode'] ?? _themeMode;
           _activeProfile = data['activeProfile'] ?? _activeProfile;
-          _userLocation = (data['userLocation'] ?? '').toString();
           _dnsProvider = data['dnsProvider'] ?? 'cloudflare';
           _dnsHost = data['dnsHost'] ?? 'family.cloudflare-dns.com';
           _phoneSettingsLocked = data['phoneSettingsLocked'] ?? true;
@@ -521,7 +520,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'lang': _lang,
         'themeMode': _themeMode,
         'activeProfile': _activeProfile,
-        'userLocation': _userLocation,
         'homeListsV23': true,
         'dnsProvider': _dnsProvider,
         'dnsHost': _dnsHost,
@@ -547,6 +545,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   Future<void> _syncFortressToNative() async {
     try {
       await _channel.invokeMethod('configureFortress', {
+        'lang': _lang,
         'phoneSettingsLocked': _phoneSettingsLocked,
         'lockSystemSettings': _phoneSettingsLocked,
         'nightAutoDnsEnabled': _nightAutoDnsEnabled,
@@ -579,6 +578,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           _osDnsIsFamilySafe = (status['privateDnsActive'] == true) ||
               (status['osDnsIsFamilySafe'] == true);
           _batteryLevel = (status['batteryLevel'] as int?) ?? 100;
+          final String bgLoc =
+              (status['backgroundLocation'] ?? '').toString().trim();
+          if (bgLoc.isNotEmpty) {
+            _backgroundLocation = bgLoc;
+          }
         });
       }
     } catch (_) {}
@@ -644,6 +648,38 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   String _tr(String key) => AppDataDefaults.tr(_lang, key);
+
+  String _displayNoteTitle(KeepNoteItem n) {
+    if (n.id == 'note_1' && n.title == 'Today\'s Core Priorities') {
+      return _tr('defaultNote1Title');
+    }
+    if (n.id == 'note_2' && n.title == 'Digital Detox Intention') {
+      return _tr('defaultNote2Title');
+    }
+    return n.title;
+  }
+
+  String _displayNoteContent(KeepNoteItem n) {
+    if (n.id == 'note_2' && n.content.startsWith('Every time I feel the urge')) {
+      return _tr('defaultNote2Body');
+    }
+    return n.content;
+  }
+
+  String _displayChecklistText(KeepNoteItem n, int idx, String raw) {
+    if (n.id == 'note_1') {
+      if (idx == 0 && raw.startsWith('Activate Safe Private DNS')) {
+        return _tr('defaultNote1Item1');
+      }
+      if (idx == 1 && raw.startsWith('Complete 90m Deep Work')) {
+        return _tr('defaultNote1Item2');
+      }
+      if (idx == 2 && raw.startsWith('Read Quran')) {
+        return _tr('defaultNote1Item3');
+      }
+    }
+    return raw;
+  }
 
   String _trCategory(String rawCat) {
     switch (rawCat.toLowerCase()) {
@@ -2074,6 +2110,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   Widget _buildGlobalDrawer(BuildContext ctx) {
+    final String bgLocLabel =
+        _backgroundLocation == 'Auto GPS' || _backgroundLocation.isEmpty
+            ? _tr('gpsAutoBadge')
+            : _backgroundLocation;
     return Drawer(
       backgroundColor: _cardColor,
       child: SafeArea(
@@ -2109,7 +2149,75 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
+            // Live Background GPS Location + Day/Night Gate Status + Battery/Streak inside Sidebar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: _bgColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.my_location_rounded,
+                        size: 13,
+                        color: _accentColor,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        bgLocLabel,
+                        style: TextStyle(
+                          color: _textColor,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _isNightWindow
+                          ? Colors.purpleAccent.withValues(alpha: 0.16)
+                          : _accentColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      _isNightWindow
+                          ? '🌙 ${_tr('nightModeBadge')}'
+                          : '☀️ ${_tr('dayModeBadge')}',
+                      style: TextStyle(
+                        color: _isNightWindow
+                            ? Colors.purpleAccent
+                            : _accentColor,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '🔋 $_batteryLevel% • 🔥 $_cleanStreakDays${_tr('daysShort')}',
+                    style: TextStyle(
+                      color: _subTextColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
 
             // MAIN NAVIGATION IN SIDEBAR
             Text(
@@ -2127,6 +2235,30 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               icon: Icons.home_rounded,
               title: _tr('drawerHome'),
               tab: 0,
+            ),
+            ListTile(
+              dense: true,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+              leading: Icon(
+                Icons.tune_rounded,
+                color: _accentColor,
+                size: 20,
+              ),
+              title: Text(
+                '⚙️ ${_tr('editHomeListBtn')}',
+                style: TextStyle(
+                  color: _accentColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12.5,
+                ),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showHomeListsSetupModal(ctx, initialProfile: _activeProfile);
+              },
             ),
             _buildDrawerNavTile(
               ctx,
@@ -2326,17 +2458,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               ),
             ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                _buildLangChip('en', 'EN'),
-                _buildLangChip('bn', 'বাংলা'),
-                _buildLangChip('ar', 'العربية'),
-                _buildLangChip('ur', 'اردو'),
-                _buildLangChip('id', 'ID'),
-              ],
-            ),
+            _buildLanguageDropdown(),
           ],
         ),
       ),
@@ -2523,24 +2645,53 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     );
   }
 
-  Widget _buildLangChip(String code, String label) {
-    final bool active = _lang == code;
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          color: active ? Colors.black : _textColor,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
+  Widget _buildLanguageDropdown() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        color: _bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _accentColor.withValues(alpha: 0.45)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: AppDataDefaults.supportedLanguages
+                  .any((l) => l['code'] == _lang)
+              ? _lang
+              : 'en',
+          isExpanded: true,
+          dropdownColor: const Color(0xFF14161F),
+          icon: Icon(Icons.keyboard_arrow_down_rounded, color: _accentColor),
+          style: TextStyle(
+            color: _textColor,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+          items: AppDataDefaults.supportedLanguages.map((langMap) {
+            final String code = langMap['code'] ?? 'en';
+            final String name = langMap['name'] ?? code;
+            return DropdownMenuItem<String>(
+              value: code,
+              child: Text(
+                name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          }).toList(),
+          onChanged: (String? nextCode) {
+            if (nextCode != null && nextCode != _lang) {
+              setState(() => _lang = nextCode);
+              _saveState();
+              _syncFortressToNative();
+            }
+          },
         ),
       ),
-      selected: active,
-      selectedColor: _accentColor,
-      backgroundColor: _bgColor,
-      onSelected: (_) {
-        setState(() => _lang = code);
-        _saveState();
-      },
     );
   }
 
@@ -2596,16 +2747,14 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   // =========================================================================
-  // PAGE 1: ULTRA-CLEAN MINIMALIST HOMEPAGE (ZERO DNS TEXT, ZERO BRANDING)
+  // PAGE 1: ULTRA-CLEAN MINIMALIST HOMEPAGE (ZERO DNS TEXT, ZERO BRANDING,
+  //         NO LOCATION PILL, NO DAY MODE BADGE, NO SETUP LINE ON HOME)
   // =========================================================================
   Widget _buildHomePage(BuildContext ctx) {
     final String hh = _now.hour.toString().padLeft(2, '0');
     final String mm = _now.minute.toString().padLeft(2, '0');
     final String dateStr =
         '${_trWeekday(_now.weekday)}, ${_now.day} ${_trMonth(_now.month)} ${_now.year}';
-    final String locLabel = _userLocation.trim().isEmpty
-        ? _tr('defaultLocationLabel')
-        : _userLocation.trim();
 
     final List<AppItem> pinnedApps =
         _apps.where((a) => a.profiles.contains(_activeProfile)).toList();
@@ -2620,9 +2769,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       children: [
-        // 1. Minimalist Centered Watchface Hero (Time, Date & Location in Suitable Place)
+        // 1. Ultra-Clean Centered Watchface Hero (Pure Time & Localized Date Only!)
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
           decoration: BoxDecoration(
             color: _cardColor.withValues(alpha: 0.65),
             borderRadius: BorderRadius.circular(18),
@@ -2630,90 +2779,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           ),
           child: Column(
             children: [
-              // Top Row: Location Pill (Tap to edit) + Day/Night Badge + Battery/Streak
-              Wrap(
-                alignment: WrapAlignment.center,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  InkWell(
-                    onTap: () => _showLocationEditDialog(ctx),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _bgColor,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _accentColor.withValues(alpha: 0.4),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.location_on_rounded,
-                            size: 13,
-                            color: _accentColor,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            locLabel,
-                            style: TextStyle(
-                              color: _textColor,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                          Icon(
-                            Icons.edit_outlined,
-                            size: 11,
-                            color: _subTextColor,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _isNightWindow
-                          ? Colors.purpleAccent.withValues(alpha: 0.16)
-                          : _accentColor.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _isNightWindow
-                          ? '🌙 ${_tr('nightModeBadge')}'
-                          : '☀️ ${_tr('dayModeBadge')}',
-                      style: TextStyle(
-                        color: _isNightWindow
-                            ? Colors.purpleAccent
-                            : _accentColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    '🔋 $_batteryLevel% • 🔥 $_cleanStreakDays${_tr('daysShort')}',
-                    style: TextStyle(
-                      color: _subTextColor,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
               // Centered Large Minimalist Time
               Text(
                 '$hh:$mm',
@@ -2742,7 +2807,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         ),
         const SizedBox(height: 14),
 
-        // 2. Three Separate Homepage Lists Switcher + Setup Button
+        // 2. Three Separate Homepage Lists Switcher (Clean — Setup is in Sidebar)
         Row(
           children: [
             _buildProfileButton('work', '💼 ${_tr('profileWork')}'),
@@ -2750,38 +2815,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             _buildProfileButton('personal', '🏠 ${_tr('profilePersonal')}'),
             const SizedBox(width: 6),
             _buildProfileButton('sunset', '🌆 ${_tr('profileSunset')}'),
-            const SizedBox(width: 6),
-            InkWell(
-              onTap: () =>
-                  _showHomeListsSetupModal(ctx, initialProfile: _activeProfile),
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(
-                  color: _cardColor,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: _accentColor.withValues(alpha: 0.5),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.tune_rounded, size: 15, color: _accentColor),
-                    const SizedBox(width: 4),
-                    Text(
-                      _tr('customizeListsBtn'),
-                      style: TextStyle(
-                        color: _accentColor,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -2789,8 +2822,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         // 3. Clean Typography Homepage App List (Untranslated App Name + Translated Category)
         if (pinnedApps.isEmpty)
           InkWell(
-            onTap: () =>
-                _showHomeListsSetupModal(ctx, initialProfile: _activeProfile),
+            onTap: () => _scaffoldKey.currentState?.openDrawer(),
             borderRadius: BorderRadius.circular(12),
             child: Container(
               padding: const EdgeInsets.all(16),
@@ -2846,38 +2878,20 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               ),
             ),
           ),
-        Row(
-          children: [
-            TextButton.icon(
-              style: TextButton.styleFrom(
-                foregroundColor: _subTextColor,
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-              ),
-              icon: const Icon(Icons.apps_rounded, size: 15),
-              label: Text(
-                '${_tr('allApps')} (${_apps.length}) →',
-                style: const TextStyle(fontSize: 12),
-              ),
-              onPressed: () => setState(() => _currentTab = 1),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: _subTextColor,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
             ),
-            const Spacer(),
-            TextButton.icon(
-              style: TextButton.styleFrom(
-                foregroundColor: _accentColor,
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-              ),
-              icon: const Icon(Icons.checklist_rtl_rounded, size: 15),
-              label: Text(
-                _tr('customizeListsBtn'),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              onPressed: () =>
-                  _showHomeListsSetupModal(ctx, initialProfile: _activeProfile),
+            icon: const Icon(Icons.apps_rounded, size: 15),
+            label: Text(
+              '${_tr('allApps')} (${_apps.length}) →',
+              style: const TextStyle(fontSize: 12),
             ),
-          ],
+            onPressed: () => setState(() => _currentTab = 1),
+          ),
         ),
 
         const Divider(height: 22, color: Colors.white10),
@@ -2961,12 +2975,17 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               if (pinnedNotes.isNotEmpty) ...[
                 const Divider(height: 14, color: Colors.white10),
                 ...pinnedNotes.map((n) {
+                  final String dispTitle = _displayNoteTitle(n);
                   final String summary = n.isChecklist
-                      ? n.checklist
-                          .take(2)
-                          .map((c) => '${c.done ? "☑" : "☐"} ${c.text}')
-                          .join('  •  ')
-                      : n.content;
+                      ? List.generate(
+                          n.checklist.length > 2 ? 2 : n.checklist.length,
+                          (idx) {
+                            final c = n.checklist[idx];
+                            final txt = _displayChecklistText(n, idx, c.text);
+                            return '${c.done ? "☑" : "☐"} $txt';
+                          },
+                        ).join('  •  ')
+                      : _displayNoteContent(n);
                   return InkWell(
                     onTap: () {
                       setState(() => _currentTab = 5);
@@ -2979,8 +2998,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           const Text('📌 ', style: TextStyle(fontSize: 11)),
                           Expanded(
                             child: Text(
-                              n.title.isNotEmpty
-                                  ? '${n.title}: $summary'
+                              dispTitle.isNotEmpty
+                                  ? '$dispTitle: $summary'
                                   : summary,
                               style: TextStyle(
                                 color: _subTextColor,
@@ -3039,104 +3058,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           ),
         ),
       ],
-    );
-  }
-
-  void _showLocationEditDialog(BuildContext ctx) {
-    final TextEditingController locCtrl =
-        TextEditingController(text: _userLocation);
-    final List<String> presets = [
-      'Dhaka',
-      'Chattogram',
-      'Makkah',
-      'Madinah',
-      'Jakarta',
-      'Karachi',
-      'London',
-      'New York',
-    ];
-    showDialog(
-      context: ctx,
-      builder: (dCtx) => AlertDialog(
-        backgroundColor: const Color(0xFF14161F),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: _accentColor),
-        ),
-        title: Text(
-          '📍 ${_tr('setLocationTitle')}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: locCtrl,
-              autofocus: true,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              decoration: InputDecoration(
-                hintText: _tr('setLocationHint'),
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
-                filled: true,
-                fillColor: Colors.black26,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: presets
-                  .map(
-                    (city) => ActionChip(
-                      backgroundColor: Colors.white10,
-                      label: Text(
-                        city,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                        ),
-                      ),
-                      onPressed: () {
-                        locCtrl.text = city;
-                      },
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dCtx),
-            child: Text(_tr('cancelBtn')),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.black,
-            ),
-            onPressed: () {
-              setState(() {
-                _userLocation = locCtrl.text.trim();
-              });
-              _saveState();
-              Navigator.pop(dCtx);
-            },
-            child: Text(
-              _tr('saveBtn'),
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -3574,6 +3495,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   Widget _buildKeepNoteCard(BuildContext ctx, KeepNoteItem note) {
     final Color cardBg =
         _keepNotePalette[note.colorIndex % _keepNotePalette.length];
+    final String dispTitle = _displayNoteTitle(note);
+    final String dispContent = _displayNoteContent(note);
     return InkWell(
       onTap: () => _openKeepNoteEditorModal(ctx, existing: note),
       borderRadius: BorderRadius.circular(14),
@@ -3596,7 +3519,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               children: [
                 Expanded(
                   child: Text(
-                    note.title.isEmpty ? _tr('untitledNote') : note.title,
+                    dispTitle.isEmpty ? _tr('untitledNote') : dispTitle,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -3621,48 +3544,54 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             ),
             const SizedBox(height: 8),
             if (note.isChecklist)
-              ...note.checklist.take(4).map(
-                    (item) => InkWell(
-                      onTap: () {
-                        setState(() => item.done = !item.done);
-                        _saveState();
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Row(
-                          children: [
-                            Icon(
-                              item.done
-                                  ? Icons.check_box_rounded
-                                  : Icons.check_box_outline_blank_rounded,
-                              size: 15,
-                              color: item.done ? _accentColor : Colors.white60,
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                item.text,
-                                style: TextStyle(
-                                  color: item.done
-                                      ? Colors.white38
-                                      : Colors.white,
-                                  fontSize: 12,
-                                  decoration: item.done
-                                      ? TextDecoration.lineThrough
-                                      : null,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+              ...List.generate(
+                note.checklist.length > 4 ? 4 : note.checklist.length,
+                (idx) {
+                  final item = note.checklist[idx];
+                  final String itemText =
+                      _displayChecklistText(note, idx, item.text);
+                  return InkWell(
+                    onTap: () {
+                      setState(() => item.done = !item.done);
+                      _saveState();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            item.done
+                                ? Icons.check_box_rounded
+                                : Icons.check_box_outline_blank_rounded,
+                            size: 15,
+                            color: item.done ? _accentColor : Colors.white60,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              itemText,
+                              style: TextStyle(
+                                color: item.done
+                                    ? Colors.white38
+                                    : Colors.white,
+                                fontSize: 12,
+                                decoration: item.done
+                                    ? TextDecoration.lineThrough
+                                    : null,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
-                  )
+                  );
+                },
+              )
             else
               Text(
-                note.content,
+                dispContent,
                 style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 12,
@@ -3726,19 +3655,26 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     bool isNewChecklist = false,
   }) {
     final bool isEditing = existing != null;
-    final TextEditingController titleCtrl =
-        TextEditingController(text: existing?.title ?? '');
-    final TextEditingController bodyCtrl =
-        TextEditingController(text: existing?.content ?? '');
+    final TextEditingController titleCtrl = TextEditingController(
+      text: existing != null ? _displayNoteTitle(existing) : '',
+    );
+    final TextEditingController bodyCtrl = TextEditingController(
+      text: existing != null ? _displayNoteContent(existing) : '',
+    );
     final TextEditingController newCheckItemCtrl = TextEditingController();
     bool isChecklist = existing?.isChecklist ?? isNewChecklist;
     bool pinned = existing?.pinned ?? true;
     String label = existing?.label ?? 'Idea';
     int colorIndex = existing?.colorIndex ?? 0;
     List<ChecklistEntry> checklist = existing != null
-        ? existing.checklist
-            .map((c) => ChecklistEntry(text: c.text, done: c.done))
-            .toList()
+        ? List.generate(
+            existing.checklist.length,
+            (i) => ChecklistEntry(
+              text: _displayChecklistText(
+                  existing, i, existing.checklist[i].text),
+              done: existing.checklist[i].done,
+            ),
+          )
         : [];
 
     showModalBottomSheet(
@@ -5560,17 +5496,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             ),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _buildLangChip('en', 'English'),
-              _buildLangChip('bn', 'বাংলা'),
-              _buildLangChip('ar', 'العربية'),
-              _buildLangChip('ur', 'اردو'),
-              _buildLangChip('id', 'Bahasa Indonesia'),
-            ],
-          ),
+          _buildLanguageDropdown(),
           const Divider(height: 24, color: Colors.white12),
           Text(
             _tr('themeCardTitle'),

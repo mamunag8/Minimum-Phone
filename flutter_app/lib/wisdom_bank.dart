@@ -3,12 +3,34 @@ import 'i18n.dart';
 /// 535+ Curated Islamic (Quran, Hadith, Spiritual Positive Thinking) & Universal Motivational Quotes
 /// with full English & Bangla translations and interactive reflection quizzes.
 class WisdomBank {
+  static final Map<String, List<WisdomEntry>> _expandedCache = {};
+
   static List<WisdomEntry> getEntries(String lang) {
     if (lang == 'bn') return entriesBn;
-    if (lang == 'ar') return entriesAr;
-    if (lang == 'ur') return entriesUr;
-    if (lang == 'id') return entriesId;
-    return entriesEn;
+    if (lang == 'en') return entriesEn;
+    if (_expandedCache.containsKey(lang)) return _expandedCache[lang]!;
+    final List<WisdomEntry> seeds = _seedByLang[lang] ?? entriesEn;
+    final List<String> reflections = _reflectionsByLang[lang] ?? const [];
+    if (reflections.isEmpty) return seeds;
+    final List<WisdomEntry> expanded = List<WisdomEntry>.from(seeds);
+    int num = seeds.length + 1;
+    for (final String r in reflections) {
+      for (final WisdomEntry s in seeds) {
+        expanded.add(
+          WisdomEntry(
+            category: s.category,
+            text: '${s.text} — $r',
+            ref: '${s.ref} • #$num',
+            question: s.question,
+            options: s.options,
+            correctIndex: s.correctIndex,
+          ),
+        );
+        num++;
+      }
+    }
+    _expandedCache[lang] = expanded;
+    return expanded;
   }
 
   static const List<WisdomEntry> entriesEn = [
@@ -1120,5 +1142,184 @@ class WisdomBank {
     WisdomEntry(category: 'hadith', text: 'Di antara tanda kebaikan Islam seseorang adalah meninggalkan hal yang tidak bermanfaat baginya.', ref: 'HR. Tirmidzi 2317', question: 'Apa tanda kesempurnaan iman dan akhlak seseorang?', options: ['Meninggalkan distraksi yang tidak bermanfaat', 'Mengikuti semua tren', 'Berdebat online', 'Menonton video pendek semalaman'], correctIndex: 0),
     WisdomEntry(category: 'hadith', text: 'Orang yang kuat bukanlah yang pandai bergulat, melainkan orang yang mampu mengendalikan dirinya saat marah dan tergoda.', ref: 'HR. Bukhari 6114', question: 'Siapakah orang yang benar-benar kuat menurut Hadis ini?', options: ['Yang mampu mengendalikan diri dari dorongan nafsu', 'Yang terus scrolling', 'Yang menunda pekerjaan', 'Yang mematikan proteksi'], correctIndex: 0),
     WisdomEntry(category: 'proverb', text: 'Ke mana perhatianmu pergi, ke sanalah hidupmu tumbuh. Jagalah fokusmu seperti harta paling berharga.', ref: 'Prinsip Fokus & Pikiran Positif', question: 'Kebiasaan positif apa yang dibangun oleh kutipan ini?', options: ['Melindungi fokus mendalam dari distraksi ponsel', 'Scrolling di malam hari', 'Membiarkan tugas terbengkalai', 'Mengecek setiap notifikasi'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Dan barangsiapa bertawakal kepada Allah, niscaya Allah akan mencukupkan keperluannya.', ref: 'Al-Quran 65:3', question: 'Apa pelajaran utama dari ayat ini?', options: ['Bertawakal penuh kepada Allah dan berusaha dengan jujur', 'Scrolling tanpa henti', 'Menunda tugas', 'Membuang waktu'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Amalan yang paling dicintai Allah adalah amalan yang dilakukan secara konsisten meskipun sedikit.', ref: 'HR. Bukhari 6464', question: 'Bagaimana cara membangun kebiasaan baik yang dicintai Allah?', options: ['Konsisten setiap hari dalam kebaikan kecil', 'Scrolling semalaman', 'Menyerah pada godaan', 'Mematikan proteksi'], correctIndex: 0),
   ];
+
+  static const List<WisdomEntry> entriesTr = [
+    WisdomEntry(category: 'quran', text: 'Bilesiniz ki, kalpler ancak Allah\'ı anmakla huzur bulur.', ref: 'Kur\'an 13:28', question: 'Kalpler gerçek huzuru ne ile bulur?', options: ['Allah\'ı zikretmek ve hatırlamakla', 'Amaçsızca ekran kaydırmakla', 'Zamanı boşa harcamakla', 'Hedefi unutmakla'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Şüphesiz her zorlukla beraber bir kolaylık vardır.', ref: 'Kur\'an 94:6', question: 'Bu ayetin temel mesajı nedir?', options: ['Sabır ve Allah\'ın yardımına güvenmek', 'Amaçsızca gezinmek', 'İşi yarım bırakmak', 'Gece geç saatlere kadar telefona bakmak'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Bir toplum kendi iç dünyasını değiştirmedikçe Allah onların durumunu değiştirmez.', ref: 'Kur\'an 13:11', question: 'Hayatımızda gerçek değişim nasıl başlar?', options: ['Niyetimizi ve günlük alışkanlıklarımızı değiştirerek', 'Duvar kağıdını değiştirerek', 'Başkalarını suçlayarak', 'Vakti boşa harcayarak'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Mümin erkeklere söyle, gözlerini haramdan sakınsınlar ve iffetlerini korusunlar; bu onlar için daha temizdir.', ref: 'Kur\'an 24:30', question: 'Gözü haramdan korumak kalbe ne kazandırır?', options: ['Kalp temizliği ve iç huzuru', 'Kaygı ve dağınıklık', 'Yorgunluk', 'Odak kaybı'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Asra yemin olsun ki insan ziyandadır; ancak iman edenler, salih amel işleyenler, hakkı ve sabrı tavsiye edenler مستثنadır.', ref: 'Kur\'an 103:1-3', question: 'Zamanı ziyandan korumanın yolu nedir?', options: ['İman, salih amel ve sabır', 'Kısa videolar izlemek', 'Görevleri ertelemek', 'Uykusuz kalmak'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'İki nimet vardır ki insanların çoğu কাদrini bilmez: sağlık ve boş vakit.', ref: 'Buhârî 6412', question: 'İnsanların çoğunun kıymetini bilmediği iki nimet nedir?', options: ['Sağlık ve boş vakit', 'Pil ve Wi-Fi', 'Beğeni ve takipçiler', 'Bildirimler'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Kişinin kendisini ilgilendirmeyen boş şeyleri terk etmesi, İslam\'ının güzelliğindendir.', ref: 'Tirmizî 2317', question: 'Güzel ahlakın ve olgun imanın işareti nedir?', options: ['Faydasız meşguliyetleri ve dikkat dağıtıcıları bırakmak', 'Her akımı takip etmek', 'Tartışmalara girmek', 'Gece boyu uyanık kalmak'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Güçlü kimse insanları güreşte yenen değil, öfke ve arzu anında nefsine hakim olandır.', ref: 'Buhârî 6114', question: 'Gerçek güç nedir?', options: ['Öfke ve dürtü anında kendine hakim olmak', 'Ekran başında vakit kaybetmek', 'Pes etmek', 'Korumayı kapatmak'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Sana fayda veren şeye حرصla sarıl, Allah\'tan yardım dile ve acizlik gösterme.', ref: 'Müslim 2664', question: 'Bu hadis bize neyi öğütlüyor?', options: ['Faydalı işlere odaklanıp Allah\'a güvenmek', 'Tembellik etmek', 'Amaçsız kaydırmak', 'Pes etmek'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Dikkatin nereye giderse hayatın orada büyür; odağını en değerli hazinen gibi koru.', ref: 'Odak ve Disiplin İlkesi', question: 'Bu söz hangi olumlu alışkanlığı kazandırır?', options: ['Derin odağı bildirimlerden korumak', 'Gece boyu ekran kaydırmak', 'İşleri yarım bırakmak', 'Her bildirime bakmak'], correctIndex: 0),
+  ];
+
+  static const List<WisdomEntry> entriesHi = [
+    WisdomEntry(category: 'quran', text: 'याद रखो, अल्लाह के ज़िक्र (स्मरण) से ही दिलों को सुकून मिलता है।', ref: 'क़ुरआन 13:28', question: 'दिलों को सच्चा सुकून किस चीज़ से मिलता है?', options: ['अल्लाह के स्मरण और ध्यान से', 'बिना मक़सद फ़ोन स्क्रॉल करने से', 'समय बर्बाद करने से', 'लक्ष्य भूल जाने से'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'निःसंदेह हर कठिनाई के साथ आसानी है।', ref: 'क़ुरआन 94:6', question: 'इस आयत की मुख्य सीख क्या है?', options: ['धैर्य और ईश्वर की मदद पर भरोसा', 'लगातार स्क्रॉलिंग', 'काम अधूरा छोड़ना', 'देर रात तक जागना'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'अल्लाह किसी क़ौम की हालत नहीं बदलता जब तक वे ख़ुद अपने भीतर बदलाव न लाएँ।', ref: 'क़ुरआन 13:11', question: 'जीवन में सकारात्मक बदलाव कैसे शुरू होता है?', options: ['अपनी आदतों और इरादों को सुधारने से', 'वॉलपेपर बदलने से', 'दूसरों को दोष देने से', 'समय गँवाने से'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'ईमान वालों से कह दो कि अपनी निगाहें नीची रखें और अपनी पवित्रता की रक्षा करें; यह उनके लिए अधिक पवित्र है।', ref: 'क़ुरआन 24:30', question: 'निगाहों की हिफ़ाज़त से मन को क्या मिलता है?', options: ['मन की पवित्रता और आत्मिक शांति', 'बेचैनी', 'भटकाव', 'थकान'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'दो नेमतें ऐसी हैं जिनमें बहुत से लोग धोखे में रहते हैं: सेहत और खाली समय।', ref: 'सहीह बुख़ारी 6412', question: 'वे दो अनमोल वरदान कौन से हैं जिन्हें लोग अक्सर खो देते हैं?', options: ['स्वास्थ्य और खाली समय', 'बैटरी और वाई-फ़ाई', 'लाइक्स और फ़ॉलोअर्स', 'नोटिफ़िकेशन'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'इंसान के इस्लाम की ख़ूबसूरती यह है कि वह बेफ़ायदा और व्यर्थ की चीज़ों को छोड़ दे।', ref: 'सुनन तिर्मिज़ी 2317', question: 'अच्छे आचरण की पहचान क्या है?', options: ['व्यर्थ के भटकाव और फ़ालतू स्क्रॉलिंग को छोड़ना', 'हर ट्रेंड देखना', 'ऑनलाइन बहस करना', 'रात भर जागना'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'ताक़तवर वह नहीं जो कुश्ती में पछाड़ दे, बल्कि ताक़तवर वह है जो क्रोध और लालच के समय ख़ुद पर क़ाबू रखे।', ref: 'सहीह बुख़ारी 6114', question: 'सच्चा शक्तिशाली व्यक्ति कौन है?', options: ['जो अपनी इच्छाओं और क्रोध पर नियंत्रण रखे', 'जो समय बर्बाद करे', 'जो स्क्रॉल करता रहे', 'जो सुरक्षा बंद कर दे'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'जो काम तुम्हें लाभ दे उसके लिए प्रयास करो, अल्लाह से मदद माँगो और हिम्मत मत हारो।', ref: 'सहीह मुस्लिम 2664', question: 'यह हदीस हमें क्या सिखाती है?', options: ['सार्थक मेहनत करना और हिम्मत न हारना', 'आलस्य करना', 'बिना वजह फ़ोन चलाना', 'काम टालना'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'जहाँ आपका ध्यान जाता है, वहीं आपका जीवन बढ़ता है; अपने फ़ोकस की रक्षा सबसे क़ीमती ख़ज़ाने की तरह करें।', ref: 'फ़ोकस और अनुशासन सिद्धांत', question: 'यह विचार कौन सी अच्छी आदत सिखाता है?', options: ['गहरे फ़ोकस को नोटिफ़िकेशन से बचाना', 'रात को स्क्रॉल करना', 'काम अधूरा छोड़ना', 'बार-बार फ़ोन देखना'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'किसी आवेग और कार्य के बीच 15 सेकंड का विराम आपके विवेक को जगाने के लिए काफ़ी है।', ref: 'माइंडफ़ुलनेस सिद्धांत', question: 'यह विचार हमें क्या करने की प्रेरणा देता है?', options: ['ध्यान भटकाने वाले ऐप खोलने से पहले 15 सेकंड रुकना', 'रात भर स्क्रॉल करना', 'काम छोड़ना', 'सुरक्षा बंद करना'], correctIndex: 0),
+  ];
+
+  static const List<WisdomEntry> entriesMs = [
+    WisdomEntry(category: 'quran', text: 'Ketahuilah, hanya dengan mengingati Allah hati menjadi tenang dan tenteram.', ref: 'Al-Quran 13:28', question: 'Dengan apakah hati mendapat ketenangan sejati?', options: ['Mengingati Allah (Zikir)', 'Tatalan tanpa tujuan', 'Melupakan matlamat', 'Membazir masa'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Sesungguhnya bersama setiap kesukaran itu ada kemudahan.', ref: 'Al-Quran 94:6', question: 'Apakah pengajaran utama ayat ini?', options: ['Sabar dan yakin dengan pertolongan Allah', 'Tatalan tanpa henti', 'Tangguh kerja', 'Berjaga malam dengan telefon'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Sesungguhnya Allah tidak mengubah keadaan sesuatu kaum sehingga mereka mengubah apa yang ada pada diri mereka sendiri.', ref: 'Al-Quran 13:11', question: 'Bagaimanakah perubahan positif bermula?', options: ['Mengubah tabiat dan niat dalaman kita', 'Menukar kertas dinding', 'Menyalahkan orang lain', 'Membazir masa'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Katakanlah kepada orang lelaki yang beriman supaya mereka menyekat pandangan mereka dan memelihara kehormatan mereka.', ref: 'Al-Quran 24:30', question: 'Apakah manfaat menjaga pandangan?', options: ['Kesucian hati dan ketenangan jiwa', 'Keresahan', 'Kebosanan', 'Hilang tumpuan'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Dua nikmat yang ramai manusia terpedaya dengannya: kesihatan dan masa lapang.', ref: 'Sahih Bukhari 6412', question: 'Apakah dua nikmat yang sering disia-siakan?', options: ['Kesihatan dan masa lapang', 'Bateri dan Wi-Fi', 'Tanda suka dan pengikut', 'Pemberitahuan'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Antara keelokan Islam seseorang ialah meninggalkan perkara yang tidak bermanfaat baginya.', ref: 'Sunan Tirmizi 2317', question: 'Apakah tanda kesempurnaan akhlak seorang Muslim?', options: ['Meninggalkan gangguan yang sia-sia', 'Mengikut semua trend', 'Bertengkar dalam talian', 'Menonton video pendek semalaman'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Orang yang kuat bukanlah yang menang bergusti, tetapi yang mampu mengawal dirinya ketika marah dan tergoda.', ref: 'Sahih Bukhari 6114', question: 'Siapakah orang yang benar-benar kuat?', options: ['Yang mengawal diri daripada dorongan nafsu', 'Yang terus menatal skrin', 'Yang menangguhkan kerja', 'Yang mematikan perlindungan'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Bersungguh-sungguhlah dalam perkara yang memberi manfaat kepadamu, mohonlah pertolongan Allah dan jangan berputus asa.', ref: 'Sahih Muslim 2664', question: 'Apakah nasihat utama hadis ini?', options: ['Berusaha pada perkara bermanfaat dengan tawakal', 'Bermalas-malasan', 'Tatalan tanpa arah', 'Berputus asa'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Ke mana tumpuan anda pergi, di situlah hidup anda berkembang; peliharalah fokus anda seperti harta paling bernilai.', ref: 'Prinsip Fokus & Disiplin', question: 'Apakah tabiat positif daripada kata-kata ini?', options: ['Melindungi fokus mendalam daripada gangguan telefon', 'Menatal skrin pada waktu malam', 'Meninggalkan kerja separuh jalan', 'Memeriksa setiap notifikasi'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Berhenti sejenak selama 15 saat sebelum bertindak sudah cukup untuk menyedarkan akal fikiran yang waras.', ref: 'Hikmah Kesedaran Diri', question: 'Apakah tabiat positif yang dibina oleh kata-kata ini?', options: ['Berhenti 15 saat sebelum membuka aplikasi yang melalaikan', 'Berjaga malam', 'Meninggalkan tugas', 'Mematikan kunci QR'], correctIndex: 0),
+  ];
+
+  static const List<WisdomEntry> entriesEs = [
+    WisdomEntry(category: 'quran', text: 'En verdad, en el recuerdo de Dios los corazones encuentran paz y sosiego.', ref: 'Corán 13:28', question: '¿Dónde encuentra el corazón la verdadera paz?', options: ['En el recuerdo de Dios y la gratitud', 'En el desplazamiento infinito', 'En perder el tiempo', 'En olvidar nuestro propósito'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Ciertamente, con cada dificultad viene la facilidad.', ref: 'Corán 94:6', question: '¿Cuál es la lección principal de este versículo?', options: ['Paciencia y confianza en que llegará el alivio', 'Desplazarse sin rumbo', 'Dejar el trabajo incompleto', 'Trasnochar con el teléfono'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Dios no cambia la condición de un pueblo hasta que ellos cambian lo que hay en sí mismos.', ref: 'Corán 13:11', question: '¿Cómo comienza el cambio verdadero en nuestra vida?', options: ['Cambiando nuestros hábitos e intenciones internas', 'Cambiando el fondo de pantalla', 'Culpando a otros', 'Perdiendo el tiempo'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Diles a los creyentes que bajen la mirada y protejan su modestia; eso es más puro para ellos.', ref: 'Corán 24:30', question: '¿Qué aporta al corazón proteger la mirada?', options: ['Pureza interior y paz mental', 'Ansiedad y distracción', 'Aburrimiento', 'Falta de enfoque'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Hay dos bendiciones que muchas personas desaprovechan: la salud y el tiempo libre para hacer el bien.', ref: 'Sahih al-Bujari 6412', question: '¿Cuáles son las dos bendiciones que muchos pierden?', options: ['La salud y el tiempo libre', 'La batería y el Wi-Fi', 'Los seguidores y me gusta', 'Las notificaciones'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Parte de la excelencia de una persona es dejar de lado aquello que no le aporta beneficio.', ref: 'Sunan al-Tirmidhi 2317', question: '¿Cuál es la señal de madurez y excelencia?', options: ['Dejar las distracciones inútiles', 'Seguir todas las modas', 'Discutir en redes', 'Dormir tarde'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'El fuerte no es quien vence a otros por la fuerza, sino quien se domina a sí mismo ante la ira y la tentación.', ref: 'Sahih al-Bujari 6114', question: '¿Quién es verdaderamente fuerte?', options: ['Quien controla sus impulsos y emociones', 'Quien pierde horas en la pantalla', 'Quien se rinde', 'Quien apaga la protección'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Esfuérzate en lo que te beneficia, pide ayuda a Dios y no decaigas.', ref: 'Sahih Muslim 2664', question: '¿Qué nos enseña esta sabiduría?', options: ['Perseguir el trabajo útil con constancia', 'Postergar todo', 'Navegar sin rumbo', 'Rendirse'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Donde va tu atención, crece tu vida; protege tu enfoque como tu tesoro más valioso.', ref: 'Principio de Enfoque Profundo', question: '¿Qué hábito positivo construye esta frase?', options: ['Proteger la concentración profunda de las notificaciones', 'Mirar el móvil de madrugada', 'Dejar tareas a medias', 'Revisar cada alerta'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Una pausa consciente de 15 segundos entre un impulso y una acción basta para despertar tu mente racional.', ref: 'Neurociencia y Atención Plena', question: '¿Qué acción práctica nos recuerda esta cita?', options: ['Hacer una pausa de 15 segundos antes de abrir apps distractivas', 'Desplazarse sin fin', 'Abandonar metas', 'Desactivar el bloqueo'], correctIndex: 0),
+  ];
+
+  static const List<WisdomEntry> entriesFr = [
+    WisdomEntry(category: 'quran', text: 'N\'est-ce point par l\'évocation de Dieu que les cœurs s\'apaisent ?', ref: 'Coran 13:28', question: 'Comment les cœurs trouvent-ils la vraie paix ?', options: ['Par le souvenir de Dieu et la pleine conscience', 'Par le défilement sans fin', 'En perdant son temps', 'En oubliant son but'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'À côté de la difficulté est, certes, une facilité.', ref: 'Coran 94:6', question: 'Quelle est la leçon essentielle de ce verset ?', options: ['La patience et la confiance dans le soulagement', 'Le défilement compulsif', 'L\'abandon du travail', 'La veille tardive sur l\'écran'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Dieu ne change l\'état d\'un peuple que s\'ils changent ce qui est en eux-mêmes.', ref: 'Coran 13:11', question: 'Par quoi commence tout changement positif ?', options: ['Par la transformation de nos habitudes et intentions', 'Par le changement de fond d\'écran', 'En blâmant les autres', 'En gaspillant son temps'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Dis aux croyants de baisser leurs regards et de préserver leur pudeur : c\'est plus pur pour eux.', ref: 'Coran 24:30', question: 'Qu\'apporte la préservation du regard ?', options: ['La pureté du cœur et la sérénité intérieure', 'L\'anxiété', 'La dispersion', 'La fatigue'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Il y a deux bienfaits que beaucoup de gens négligent : la santé et le temps libre.', ref: 'Sahih al-Bukhari 6412', question: 'Quels sont les deux bienfaits précieux souvent gaspillés ?', options: ['La santé et le temps libre', 'La batterie et le Wi-Fi', 'Les mentions j\'aime', 'Les notifications'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Fait partie de l\'excellence d\'une personne le fait de délaisser ce qui ne la concerne pas.', ref: 'Sunan al-Tirmidhi 2317', question: 'Quel est le signe de la sagesse et de la maîtrise ?', options: ['Délaisser les distractions futiles', 'Suivre toutes les tendances', 'Polémiquer en ligne', 'Veiller toute la nuit'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'L\'homme fort n\'est pas celui qui terrasse les autres, mais celui qui se maîtrise face à la colère et à la tentation.', ref: 'Sahih al-Bukhari 6114', question: 'Qui est véritablement fort ?', options: ['Celui qui maîtrise ses impulsions', 'Celui qui fait défiler son écran sans fin', 'Celui qui abandonne', 'Celui qui désactive la protection'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Recherche ce qui t\'est profitable, implore l\'aide de Dieu et ne faiblis pas.', ref: 'Sahih Muslim 2664', question: 'Que nous enseigne cette parole ?', options: ['Persévérer dans les actions utiles avec confiance', 'Remettre au lendemain', 'Flâner sur le téléphone', 'Baisser les bras'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Là où va votre attention, votre vie grandit ; protégez votre concentration comme votre trésor le plus précieux.', ref: 'Principe de Concentration Profonde', question: 'Quelle habitude positive cette citation encourage-t-elle ?', options: ['Protéger son attention profonde contre les notifications', 'Regarder son écran tard la nuit', 'Laisser ses tâches inachevées', 'Vérifier chaque alerte'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Une pause consciente de 15 secondes entre une impulsion et une action suffit à réveiller votre esprit rationnel.', ref: 'Neurosciences & Pleine Conscience', question: 'Quel geste concret cette maxime nous rappelle-t-elle ?', options: ['Observer une pause de 15 secondes avant d\'ouvrir une application distrayante', 'Faire défiler sans arrêt', 'Oublier ses priorités', 'Désactiver le verrouillage'], correctIndex: 0),
+  ];
+
+  static const List<WisdomEntry> entriesDe = [
+    WisdomEntry(category: 'quran', text: 'Wahrlich, im Gedenken Gottes finden die Herzen Ruhe.', ref: 'Koran 13:28', question: 'Wodurch finden die Herzen wahren Frieden?', options: ['Durch das Gedenken Gottes und innere Achtsamkeit', 'Durch endloses Scrollen', 'Durch Zeitverschwendung', 'Durch das Vergessen unserer Ziele'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Wahrlich, mit jeder Erschwernis kommt Erleichterung.', ref: 'Koran 94:6', question: 'Was ist die Kernbotschaft dieses Verses?', options: ['Geduld und Vertrauen auf kommende Erleichterung', 'Zielloses Scrollen', 'Aufgaben unerledigt lassen', 'Nachts am Bildschirm bleiben'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Gott ändert die Lage eines Volkes nicht, bis sie das ändern, was in ihnen selbst ist.', ref: 'Koran 13:11', question: 'Wie beginnt echte Veränderung im Leben?', options: ['Durch die Änderung unserer eigenen Gewohnheiten und Absichten', 'Durch ein neues Hintergrundbild', 'Indem man anderen die Schuld gibt', 'Durch Aufschieben'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Sprich zu den Gläubigen, dass sie ihre Blicke senken und ihre Keuschheit bewahren; das ist reiner für sie.', ref: 'Koran 24:30', question: 'Was bewirkt das Bewahren des Blickes im Herzen?', options: ['Reinheit des Herzens und innere Ruhe', 'Unruhe und Zerstreuung', 'Langeweile', 'Konzentrationsverlust'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Es gibt zwei Gaben, über die viele Menschen hinweggetäuscht sind: Gesundheit und freie Zeit.', ref: 'Sahih al-Bukhari 6412', question: 'Welche zwei kostbaren Gaben werden oft verschwendet?', options: ['Gesundheit und freie Zeit', 'Akku und WLAN', 'Likes und Follower', 'Benachrichtigungen'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Zur Vollkommenheit des Glaubens eines Menschen gehört es, das zu unterlassen, was ihn nichts angeht.', ref: 'Sunan al-Tirmidhi 2317', question: 'Was zeichnet geistige Reife und Disziplin aus?', options: ['Nutzlose Ablenkungen konsequent wegzulassen', 'Jedem Trend zu folgen', 'Online zu streiten', 'Die Nacht durchzuscrollen'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Stark ist nicht, wer andere im Ringkampf besiegt, sondern wer sich im Zorn und in der Versuchung selbst beherrscht.', ref: 'Sahih al-Bukhari 6114', question: 'Wer besitzt wahre Stärke?', options: ['Wer seine Impulse und Emotionen beherrscht', 'Wer stundenlang auf den Bildschirm schaut', 'Wer sofort nachgibt', 'Wer den Schutz ausschaltet'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Strebe nach dem, was dir nützt, bitte Gott um Hilfe und gib nicht auf.', ref: 'Sahih Muslim 2664', question: 'Wozu ermutigt uns diese Weisheit?', options: ['Nützliche Arbeit entschlossen und vertrauensvoll anzugehen', 'Aufgaben aufzuschieben', 'Ziellos zu surfen', 'Den Mut zu verlieren'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Wohin deine Aufmerksamkeit fließt, dorthin wächst dein Leben; schütze deinen Fokus wie deinen wertvollsten Schatz.', ref: 'Prinzip für tiefe Konzentration', question: 'Welche positive Gewohnheit fördert dieses Zitat?', options: ['Tiefen Fokus vor ständigen Benachrichtigungen schützen', 'Nachts endlos scrollen', 'Arbeit halbfertig liegen lassen', 'Jede Meldung sofort prüfen'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Eine bewusste Pause von 15 Sekunden zwischen Impuls und Handlung genügt, um den klaren Verstand zu wecken.', ref: 'Neurowissenschaft & Achtsamkeit', question: 'Welche Gewohnheit stärkt dieser Grundsatz?', options: ['15 Sekunden innehalten, bevor man ablenkende Apps öffnet', 'Impulsiv weiterklicken', 'Ziele vergessen', 'Die Sperre umgehen'], correctIndex: 0),
+  ];
+
+  static const List<WisdomEntry> entriesRu = [
+    WisdomEntry(category: 'quran', text: 'Воистину, поминанием Бога утешаются сердца.', ref: 'Коран 13:28', question: 'В чём сердца находят истинный покой?', options: ['В поминании Бога и осознанности', 'В бесконечной прокрутке ленты', 'В пустой трате времени', 'В забвении своей цели'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Воистину, за каждой трудностью наступает облегчение.', ref: 'Коран 94:6', question: 'Каков главный урок этого аята?', options: ['Терпение и уверенность в помощи Всевышнего', 'Бесцельный скроллинг', 'Оставление дел незавершёнными', 'Ночное сидение в телефоне'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Всевышний не меняет положения людей, пока они не изменят самих себя.', ref: 'Коран 13:11', question: 'С чего начинаются настоящие перемены в жизни?', options: ['С изменения собственных привычек и намерений', 'Со смены обоев на экране', 'С обвинения окружающих', 'С потери времени'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Скажи верующим, чтобы они потупляли свои взоры и оберегали свою чистоту — так будет чище для них.', ref: 'Коран 24:30', question: 'Что даёт сердцу охрана взгляда от запретного?', options: ['Чистоту сердца и душевное спокойствие', 'Тревогу и рассеянность', 'Усталость', 'Потерю концентрации'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Есть два блага, которые многие люди не ценят должным образом: здоровье и свободное время.', ref: 'Сахих аль-Бухари 6412', question: 'Какие два бесценных дара люди часто теряют впустую?', options: ['Здоровье и свободное время', 'Заряд батареи и Wi-Fi', 'Лайки и подписчиков', 'Уведомления'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'К красоте веры человека относится оставление того, что не приносит ему пользы.', ref: 'Сунан ат-Тирмизи 2317', question: 'В чём проявляется зрелость и дисциплина?', options: ['В отказе от бесполезных отвлечений и пустого шума', 'В слежке за всеми трендами', 'В спорах в сети', 'В бессонных ночах у экрана'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Силён не тот, кто побеждает других в борьбе, а тот, кто владеет собой в гневе и искушении.', ref: 'Сахих аль-Бухари 6114', question: 'Кто по-настоящему силён?', options: ['Тот, кто контролирует свои порывы и страсти', 'Тот, кто часами листает ленту', 'Тот, кто сдаётся', 'Тот, кто отключает защиту'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Стремись к тому, что приносит тебе пользу, проси помощи у Бога и не опускай руки.', ref: 'Сахих Муслим 2664', question: 'Чему учит нас эта мудрость?', options: ['Упорно трудиться над полезным делом и не сдаваться', 'Откладывать дела на потом', 'Тратить часы в телефоне', 'Терять надежду'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Куда направлено твоё внимание, там растёт твоя жизнь; береги свой фокус как самое ценное сокровище.', ref: 'Принцип глубокого фокуса', question: 'Какую полезную привычку формирует эта мысль?', options: ['Защищать глубокую концентрацию от постоянных уведомлений', 'Листать ленту по ночам', 'Бросать работу на полпути', 'Проверять каждый сигнал'], correctIndex: 0),
+    WisdomEntry(category: 'proverb', text: 'Осознанная 15-секундная пауза между импульсом и действием пробуждает разум и спасает часы жизни.', ref: 'Нейронаука и осознанность', question: 'О каком практическом шаге напоминает эта цитата?', options: ['Делать 15-секундную паузу перед открытием отвлекающих приложений', 'Продолжать скроллинг', 'Забывать о приоритетах', 'Отключать защиту'], correctIndex: 0),
+  ];
+
+  static const Map<String, List<WisdomEntry>> _seedByLang = {
+    'ar': entriesAr,
+    'ur': entriesUr,
+    'id': entriesId,
+    'tr': entriesTr,
+    'hi': entriesHi,
+    'ms': entriesMs,
+    'es': entriesEs,
+    'fr': entriesFr,
+    'de': entriesDe,
+    'ru': entriesRu,
+  };
+
+  static const Map<String, List<String>> _reflectionsByLang = {
+    'ar': [
+      'ابدأ ساعتك هذه ببسم الله ونَفَسٍ عميق وأولوية واضحة.',
+      'حين يحلّ الليل، احفظ نومك وقلبك بإغلاق أبواب المشتتات.',
+      'كل مرة تختار فيها الانضباط على التشتت يزداد قلبك نوراً وقوة.',
+      'اجعل هاتفك أداةً تخدم رسالتك، لا قيداً يسرق عمرك.',
+      'ركّز على عملٍ نافع واحد الآن، وستذوق حلاوة الإنجاز.',
+    ],
+    'ur': [
+      'اس گھنٹے کا آغاز بسم اللہ، گہرے سانس اور واضح مقصد سے کریں۔',
+      'جب رات ہو جائے تو اپنی نیند اور ایمان کی حفاظت کے لیے فون دور رکھیں۔',
+      'ہر بار جب آپ خواہش پر قابو پاتے ہیں، آپ کا دل مزید مضبوط ہوتا ہے۔',
+      'فون کو اپنا غلام بنائیں، خود اسکرین کے غلام نہ بنیں۔',
+      'ابھی کسی ایک مفید کام پر پوری توجہ دیں اور وقت کی برکت دیکھیں۔',
+    ],
+    'id': [
+      'Mulailah jam ini dengan bismillah, napas dalam, dan prioritas yang jelas.',
+      'Saat malam tiba, lindungi tidur dan hatimu dengan menjauhkan ponsel.',
+      'Setiap kali kamu memilih disiplin daripada distraksi, hatimu semakin kuat.',
+      'Jadikan ponsel sebagai alat untuk tujuanmu, bukan tuan atas waktumu.',
+      'Selesaikan satu pekerjaan penting sekarang dengan fokus penuh.',
+    ],
+    'tr': [
+      'Bu saate besmele, derin bir nefes ve net bir öncelikle başla.',
+      'Gece olduğunda uykunu ve kalbini korumak için dijital dikkat dağıtıcıları kapat.',
+      'Dağınıklık yerine disiplini seçtiğin her an iraden daha da güçlenir.',
+      'Telefonun senin amacına hizmet etsin, sen ekranın اسيري olma.',
+      'Şimdi tek bir faydalı işe odaklan ve huzurla tamamla.',
+    ],
+    'hi': [
+      'इस घंटे की शुरुआत गहरी साँस और एक स्पष्ट प्राथमिकता के साथ करें।',
+      'रात होने पर अपनी नींद और मन की शांति के लिए फ़ोन को दूर रखें।',
+      'हर बार जब आप भटकाव के बजाय अनुशासन चुनते हैं, आपका आत्मबल बढ़ता है।',
+      'फ़ोन को अपने लक्ष्य का साधन बनाएँ, समय चुराने वाला मालिक नहीं।',
+      'अभी किसी एक सार्थक कार्य पर पूरा ध्यान लगाएँ।',
+    ],
+    'ms': [
+      'Mulakan jam ini dengan bismillah, nafas tenang, dan keutamaan yang jelas.',
+      'Apabila malam tiba, lindungi tidur dan jiwa anda daripada gangguan skrin.',
+      'Setiap kali anda memilih disiplin berbanding lalai, hati anda bertambah teguh.',
+      'Jadikan telefon alat untuk matlamat anda, bukan penghalang masa depan anda.',
+      'Tumpukan perhatian penuh pada satu tugasan penting sekarang.',
+    ],
+    'es': [
+      'Comienza esta hora con una respiración profunda y una prioridad clara.',
+      'Cuando llegue la noche, protege tu descanso dejando el teléfono fuera de la habitación.',
+      'Cada vez que eliges la disciplina sobre la distracción, tu voluntad se fortalece.',
+      'Haz que tu pantalla sirva a tu propósito, y no al revés.',
+      'Concéntrate ahora en una sola tarea valiosa con presencia total.',
+    ],
+    'fr': [
+      'Commencez cette heure par une profonde respiration et une priorité claire.',
+      'Lorsque la nuit tombe, protégez votre sommeil en éloignant les écrans.',
+      'Chaque fois que vous choisissez la discipline plutôt que la distraction, votre esprit se renforce.',
+      'Faites de votre téléphone un outil au service de vos objectifs.',
+      'Concentrez-vous maintenant sur une seule tâche essentielle avec sérénité.',
+    ],
+    'de': [
+      'Beginne diese Stunde mit einem tiefen Atemzug und einer klaren Priorität.',
+      'Wenn die Nacht hereinbricht, schütze deinen Schlaf und lege das Telefon in einen anderen Raum.',
+      'Jedes Mal, wenn du Disziplin statt Ablenkung wählst, wächst deine Willenskraft.',
+      'Mach dein Smartphone zum Werkzeug für deine Ziele, nicht zum Herrn deiner Zeit.',
+      'Widme dich jetzt einer einzigen sinnvollen Aufgabe mit voller Aufmerksamkeit.',
+    ],
+    'ru': [
+      'Начните этот час с глубокого вдоха и ясного приоритета.',
+      'Когда наступает ночь, защитите свой сон и оставьте телефон в другой комнате.',
+      'Каждый раз, выбирая дисциплину вместо отвлечения, вы укрепляете силу воли.',
+      'Пусть телефон служит вашим целям, а не крадёт ваше время.',
+      'Сосредоточьтесь сейчас на одной важной задаче с полным присутствием.',
+    ],
+  };
 }

@@ -18,6 +18,10 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.location.Address;
+import android.location.Geocoder;
+import android.location.Location;
+import android.location.LocationManager;
 import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
@@ -50,7 +54,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
@@ -169,6 +175,7 @@ public class MainActivity extends FlutterActivity {
                             Number emergencyUntil = call.argument("emergencyLockdownUntil");
                             Integer startH = call.argument("nightStartHour");
                             Integer endH = call.argument("nightEndHour");
+                            String lang = call.argument("lang");
 
                             SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
                             SharedPreferences.Editor ed = prefs.edit();
@@ -181,6 +188,7 @@ public class MainActivity extends FlutterActivity {
                             if (emergencyUntil != null) ed.putLong(FortressWatchdogService.KEY_EMERGENCY_LOCKDOWN_UNTIL_MS, emergencyUntil.longValue());
                             if (startH != null) ed.putInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, startH);
                             if (endH != null) ed.putInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, endH);
+                            if (lang != null && !lang.isEmpty()) ed.putString("app_lang", lang);
                             ed.apply();
 
                             NightFortressReceiver.startWatchdogSafely(ctx);
@@ -382,7 +390,45 @@ public class MainActivity extends FlutterActivity {
         map.put("osDnsMode", dnsMode);
         map.put("watchdogActive", watchdogActive);
         map.put("isNightWindow", isNightNow);
+        map.put("backgroundLocation", resolveBackgroundLocation(ctx));
         return map;
+    }
+
+    private String resolveBackgroundLocation(Context ctx) {
+        try {
+            LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
+            if (lm != null) {
+                boolean hasCoarse = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                    || ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                    || ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+                if (hasCoarse) {
+                    Location loc = lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
+                    if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+                    if (loc == null) loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                    if (loc != null && Geocoder.isPresent()) {
+                        Geocoder geo = new Geocoder(ctx, Locale.getDefault());
+                        List<Address> addrs = geo.getFromLocation(loc.getLatitude(), loc.getLongitude(), 1);
+                        if (addrs != null && !addrs.isEmpty()) {
+                            Address a = addrs.get(0);
+                            if (a.getLocality() != null && !a.getLocality().isEmpty()) {
+                                return a.getLocality();
+                            }
+                            if (a.getSubAdminArea() != null && !a.getSubAdminArea().isEmpty()) {
+                                return a.getSubAdminArea();
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        try {
+            String tz = TimeZone.getDefault().getID();
+            if (tz != null && tz.contains("/")) {
+                String city = tz.substring(tz.lastIndexOf('/') + 1).replace('_', ' ');
+                if (!city.isEmpty()) return city;
+            }
+        } catch (Exception ignored) {}
+        return "Auto GPS";
     }
 
     private Map<String, Object> activateSafePrivateDns(Context ctx, String targetHost, boolean openSettingsIfNeeded) {
