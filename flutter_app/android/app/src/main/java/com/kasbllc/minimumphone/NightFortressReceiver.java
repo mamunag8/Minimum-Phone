@@ -42,7 +42,19 @@ public class NightFortressReceiver extends BroadcastReceiver {
             : (hour >= nightStartHour && hour < nightEndHour);
 
         if (isNightNow && autoNightDns) {
-            FortressWatchdogService.ensurePrivateDnsActiveAtNight(context);
+            boolean ok = FortressWatchdogService.ensurePrivateDnsActiveAtNight(context);
+            if (!ok && !FortressWatchdogService.isOsPrivateDnsConfigured(context)) {
+                try {
+                    Intent lockIntent = new Intent(context, NativeFortressLockActivity.class);
+                    lockIntent.addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK |
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP |
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    );
+                    lockIntent.putExtra("intercept_reason", "dns_removed");
+                    context.startActivity(lockIntent);
+                } catch (Exception ignored) {}
+            }
         }
     }
 

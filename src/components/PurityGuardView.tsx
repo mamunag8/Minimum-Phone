@@ -9,6 +9,7 @@ import {
   CALM_MIND_TRIGGERS,
   getTriggerSource,
   getTriggerText,
+  pickRandomQuoteIndex,
 } from '../data/calmTriggers';
 import { TRANSLATIONS, tx } from '../i18n/translations';
 import { NativeBridge } from '../services/nativeBridge';
@@ -163,7 +164,9 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [sosModalOpen, setSosModalOpen] = useState<boolean>(false);
   const [sosTimer, setSosTimer] = useState<number>(60);
-  const [sosTriggerIndex, setSosTriggerIndex] = useState<number>(0);
+  const [sosTriggerIndex, setSosTriggerIndex] = useState<number>(() =>
+    Math.floor(Math.random() * CALM_MIND_TRIGGERS.length)
+  );
   const [sosChecks, setSosChecks] = useState<boolean[]>([false, false, false]);
   const [showRelapseModal, setShowRelapseModal] = useState<boolean>(false);
   const [selectedTriggerCause, setSelectedTriggerCause] = useState<
@@ -187,6 +190,14 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
     const interval = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Automatically change purity motivational quote from time to time
+  useEffect(() => {
+    const quoteTimer = setInterval(() => {
+      setSosTriggerIndex((prev) => pickRandomQuoteIndex(prev, purityTriggers.length));
+    }, 25000);
+    return () => clearInterval(quoteTimer);
+  }, [purityTriggers.length]);
 
   useEffect(() => {
     if (!sosModalOpen || sosTimer <= 0) return;
@@ -657,10 +668,14 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
           </span>
           <button
             type="button"
-            onClick={() => setSosTriggerIndex((i) => i + 1)}
+            onClick={() =>
+              setSosTriggerIndex((prev) =>
+                pickRandomQuoteIndex(prev, purityTriggers.length)
+              )
+            }
             className="underline hover:text-zinc-300 cursor-pointer"
           >
-            {t.nextWhisperBtn}
+            🎲 {t.nextWhisperBtn} ↻
           </button>
         </div>
         {showArabicScript &&
@@ -1663,10 +1678,14 @@ export const PurityGuardView: React.FC<PurityGuardViewProps> = ({
                 <span>— {getTriggerSource(activePurityTrigger, lang)}</span>
                 <button
                   type="button"
-                  onClick={() => setSosTriggerIndex((i) => i + 1)}
+                  onClick={() =>
+                    setSosTriggerIndex((prev) =>
+                      pickRandomQuoteIndex(prev, purityTriggers.length)
+                    )
+                  }
                   className="underline hover:text-white cursor-pointer"
                 >
-                  {t.nextWhisperBtn}
+                  🎲 {t.nextWhisperBtn} ↻
                 </button>
               </div>
             </div>

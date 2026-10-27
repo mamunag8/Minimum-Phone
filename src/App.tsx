@@ -4,6 +4,7 @@ import type {
   AppFrictionTier,
   AppItem,
   CalmTrigger,
+  FavoriteQuoteCategory,
   FocusVaultState,
   HabitWallType,
   HomeProfileType,
@@ -20,8 +21,12 @@ import type {
 } from './types/app';
 import {
   CALM_MIND_TRIGGERS,
+  filterMotivationalQuotes,
+  getQuoteCategoryLabel,
+  getTriggerQuoteCategory,
   getTriggerSource,
   getTriggerText,
+  pickRandomQuoteIndex,
 } from './data/calmTriggers';
 import { DEFAULT_APPS, INITIAL_NOTIFICATIONS } from './data/defaultApps';
 import {
@@ -153,6 +158,13 @@ export function App() {
   );
   const [wisdomPack, setWisdomPack] = useState<WisdomPackSource>(
     () => initialSaved.wisdomPack || 'blended'
+  );
+  const [favoriteQuoteCategory, setFavoriteQuoteCategory] =
+    useState<FavoriteQuoteCategory>(
+      () => initialSaved.favoriteQuoteCategory || 'all'
+    );
+  const [quoteRotationSeconds, setQuoteRotationSeconds] = useState<number>(
+    () => initialSaved.quoteRotationSeconds || 30
   );
   const [showArabicScript, setShowArabicScript] = useState<boolean>(true);
   const [defaultHabitWall, setDefaultHabitWall] = useState<HabitWallType>(
@@ -353,7 +365,9 @@ export function App() {
   const [interceptedApp, setInterceptedApp] = useState<AppItem | null>(null);
   const [interceptForce15sReopen, setInterceptForce15sReopen] = useState<boolean>(false);
   const [reopenLockedAppIds, setReopenLockedAppIds] = useState<string[]>([]);
-  const [triggerIndex, setTriggerIndex] = useState<number>(0);
+  const [triggerIndex, setTriggerIndex] = useState<number>(() =>
+    Math.floor(Math.random() * CALM_MIND_TRIGGERS.length)
+  );
   const [activeSession, setActiveSession] = useState<{
     app: AppItem;
     intentReason: string;
@@ -519,6 +533,10 @@ export function App() {
         if (parsed.lang) setLang(parsed.lang);
         if (parsed.inspirationMode) setInspirationMode(parsed.inspirationMode);
         if (parsed.wisdomPack) setWisdomPack(parsed.wisdomPack);
+        if (parsed.favoriteQuoteCategory)
+          setFavoriteQuoteCategory(parsed.favoriteQuoteCategory);
+        if (parsed.quoteRotationSeconds)
+          setQuoteRotationSeconds(parsed.quoteRotationSeconds);
         if (typeof parsed.grayscaleEnabled === 'boolean')
           setGrayscaleEnabled(parsed.grayscaleEnabled);
         if (parsed.defaultHabitWall) setDefaultHabitWall(parsed.defaultHabitWall);
@@ -558,6 +576,8 @@ export function App() {
           lang,
           inspirationMode,
           wisdomPack,
+          favoriteQuoteCategory,
+          quoteRotationSeconds,
           grayscaleEnabled,
           defaultHabitWall,
           firstTimeSetupCompleted,
@@ -577,6 +597,8 @@ export function App() {
     lang,
     inspirationMode,
     wisdomPack,
+    favoriteQuoteCategory,
+    quoteRotationSeconds,
     grayscaleEnabled,
     defaultHabitWall,
     firstTimeSetupCompleted,
@@ -666,10 +688,16 @@ export function App() {
     if (mode === 'islamic') {
       setShowArabicScript(true);
       setWisdomPack('quran');
+      if (favoriteQuoteCategory === 'proverbs') {
+        setFavoriteQuoteCategory('all');
+      }
       setSlowLearning((prev) => ({ ...prev, track: 'islam', currentLessonIndex: 0 }));
     } else if (mode === 'universal') {
       setShowArabicScript(false);
       setWisdomPack('proverbs');
+      if (favoriteQuoteCategory === 'quran' || favoriteQuoteCategory === 'hadith') {
+        setFavoriteQuoteCategory('proverbs');
+      }
       setSlowLearning((prev) => ({
         ...prev,
         track: prev.track === 'islam' ? 'mindfulness' : prev.track,
@@ -678,36 +706,41 @@ export function App() {
     } else {
       setWisdomPack('blended');
     }
+    setTriggerIndex((prev) => pickRandomQuoteIndex(prev, CALM_MIND_TRIGGERS.length));
   };
 
-  // Filtered Calm Mind Triggers based on user's Mode of Inspiration & Wisdom Pack
+  const handleChangeFavoriteQuoteCategory = (category: FavoriteQuoteCategory) => {
+    setFavoriteQuoteCategory(category);
+    if (category === 'quran') {
+      setWisdomPack('quran');
+    } else if (category === 'hadith') {
+      setWisdomPack('hadith');
+    } else if (category === 'proverbs') {
+      setWisdomPack('proverbs');
+    } else {
+      setWisdomPack('blended');
+    }
+    const nextPool = filterMotivationalQuotes(inspirationMode, wisdomPack, category);
+    setTriggerIndex((prev) => pickRandomQuoteIndex(prev, nextPool.length));
+  };
+
+  // Filtered Motivational Quotes based on user's Mode of Inspiration, Wisdom Pack & Favourite Quote Category
   const filteredCalmTriggers = useMemo<CalmTrigger[]>(() => {
-    const nonPurity = CALM_MIND_TRIGGERS.filter((item) => item.category !== 'purity');
-    if (inspirationMode === 'islamic') {
-      if (wisdomPack === 'hadith') {
-        return nonPurity.filter((item) => item.category === 'hadith');
-      }
-      if (wisdomPack === 'quran') {
-        return nonPurity.filter((item) => item.category === 'quran');
-      }
-      return nonPurity.filter(
-        (item) => item.category === 'quran' || item.category === 'hadith'
-      );
-    }
-    if (inspirationMode === 'universal') {
-      return nonPurity.filter((item) => item.category === 'proverb');
-    }
-    if (wisdomPack === 'quran') {
-      return nonPurity.filter((item) => item.category === 'quran');
-    }
-    if (wisdomPack === 'hadith') {
-      return nonPurity.filter((item) => item.category === 'hadith');
-    }
-    if (wisdomPack === 'proverbs') {
-      return nonPurity.filter((item) => item.category === 'proverb');
-    }
-    return nonPurity;
-  }, [inspirationMode, wisdomPack]);
+    return filterMotivationalQuotes(inspirationMode, wisdomPack, favoriteQuoteCategory);
+  }, [inspirationMode, wisdomPack, favoriteQuoteCategory]);
+
+  const rotateRandomQuote = () => {
+    setTriggerIndex((prev) => pickRandomQuoteIndex(prev, filteredCalmTriggers.length));
+  };
+
+  // Automatically change motivational quote randomly from time to time
+  useEffect(() => {
+    const intervalMs = Math.max(10, quoteRotationSeconds || 30) * 1000;
+    const timer = setInterval(() => {
+      setTriggerIndex((prev) => pickRandomQuoteIndex(prev, filteredCalmTriggers.length));
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [quoteRotationSeconds, filteredCalmTriggers.length]);
 
   const activeCalmTrigger =
     filteredCalmTriggers[triggerIndex % Math.max(1, filteredCalmTriggers.length)] ||
@@ -1126,7 +1159,7 @@ export function App() {
       (purity.strictPornLockdown ?? true) && app.category === 'browser';
 
     if (app.tier === 'restricted' || isStrictBrowserGate || requires15sReopenGate) {
-      setTriggerIndex((i) => i + 1);
+      rotateRandomQuote();
       setInterceptForce15sReopen(requires15sReopenGate);
       setInterceptedApp(app);
       return;
@@ -1153,7 +1186,7 @@ export function App() {
           setShowScratchpad(true);
           setActiveTab('home');
         } else if (app.id === 'quran-sunnah' || app.id === 'quran-reader') {
-          setTriggerIndex((i) => i + 1);
+          rotateRandomQuote();
           setRestlessOverlayOpen(true);
         } else if (app.id === 'calculator') {
           setCalcDisplay('0');
@@ -1296,7 +1329,7 @@ export function App() {
       apps[0];
 
     if (vault.blockNotificationAppLaunch ?? true) {
-      setTriggerIndex((i) => i + 1);
+      rotateRandomQuote();
       setInterceptForce15sReopen(true);
       setInterceptedApp(matched);
     } else {
@@ -1373,7 +1406,7 @@ export function App() {
       const targetBrowser = nightBrowserQrApp;
       stopNightQrCamera();
       setNightBrowserQrApp(null);
-      setTriggerIndex((i) => i + 1);
+      rotateRandomQuote();
       setInterceptForce15sReopen(true);
       setInterceptedApp(targetBrowser);
     } else {
@@ -2043,7 +2076,7 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setTriggerIndex((i) => i + 1);
+                      rotateRandomQuote();
                       setRestlessOverlayOpen(true);
                     }}
                     className="py-2 border border-zinc-800 text-[10px] font-mono-tech opacity-80 hover:opacity-100 cursor-pointer"
@@ -2054,18 +2087,43 @@ export function App() {
               </div>
             )}
 
-            {/* Bottom Calm Mind Trigger Bar (Small Strong Line Only) */}
+            {/* Bottom Random Motivational Quote Bar (Changes Time to Time + Category Badge) */}
             <div className="border-t border-zinc-800/90 pt-2.5 space-y-1">
-              <div className="flex items-center justify-between text-[10px] font-mono-tech uppercase tracking-widest opacity-60">
-                <span>
-                  {t.calmWhisperLabel} · 🏅 {masteryRank}
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono-tech uppercase tracking-widest opacity-70">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="truncate">
+                    {t.calmWhisperLabel} · 🏅 {masteryRank}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsSubTab('language');
+                      handleSelectNavigationTab('system-kasb');
+                    }}
+                    className="px-1.5 py-0.5 border border-zinc-700 bg-zinc-950/80 text-[9px] text-zinc-200 hover:border-zinc-400 cursor-pointer truncate shrink-0"
+                    title={tx(
+                      lang,
+                      'Change Favourite Quote Category in Settings',
+                      'সেটিংস থেকে পছন্দের বাণীর ক্যাটাগরি পরিবর্তন করুন',
+                      'تغيير فئة الاقتباسات المفضلة من الإعدادات',
+                      'سیٹنگز سے پسندیدہ اقوال کی کیٹیگری تبدیل کریں',
+                      'Ubah Kategori Kutipan Favorit di Pengaturan'
+                    )}
+                  >
+                    {getQuoteCategoryLabel(
+                      favoriteQuoteCategory === 'all'
+                        ? getTriggerQuoteCategory(activeCalmTrigger)
+                        : favoriteQuoteCategory,
+                      lang
+                    )}
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setTriggerIndex((i) => i + 1)}
-                  className="hover:opacity-100 underline cursor-pointer"
+                  onClick={rotateRandomQuote}
+                  className="hover:opacity-100 underline cursor-pointer shrink-0"
                 >
-                  {t.nextWhisperBtn} ↻
+                  🎲 {t.nextWhisperBtn} ↻
                 </button>
               </div>
 
@@ -2084,8 +2142,12 @@ export function App() {
               <p className="text-xs sm:text-sm font-normal leading-snug">
                 “{getTriggerText(activeCalmTrigger, lang)}”
               </p>
-              <div className="text-[10px] font-mono-tech opacity-55">
-                — {getTriggerSource(activeCalmTrigger, lang)}
+              <div className="flex items-center justify-between text-[10px] font-mono-tech opacity-55">
+                <span>— {getTriggerSource(activeCalmTrigger, lang)}</span>
+                <span>
+                  ⏱ {quoteRotationSeconds}s{' '}
+                  {tx(lang, 'auto-rotate', 'স্বয়ংক্রিয় পরিবর্তন', 'تبديل تلقائي', 'خودکار تبدیلی', 'putar otomatis')}
+                </span>
               </div>
             </div>
           </div>
@@ -2327,7 +2389,19 @@ export function App() {
               inspirationMode={inspirationMode}
               onChangeInspirationMode={handleChangeInspirationMode}
               wisdomPack={wisdomPack}
-              onChangeWisdomPack={setWisdomPack}
+              onChangeWisdomPack={(w) => {
+                setWisdomPack(w);
+                if (w === 'quran' || w === 'hadith' || w === 'proverbs') {
+                  setFavoriteQuoteCategory(w);
+                }
+                rotateRandomQuote();
+              }}
+              favoriteQuoteCategory={favoriteQuoteCategory}
+              onChangeFavoriteQuoteCategory={handleChangeFavoriteQuoteCategory}
+              quoteRotationSeconds={quoteRotationSeconds}
+              onChangeQuoteRotationSeconds={setQuoteRotationSeconds}
+              activeCalmTrigger={activeCalmTrigger}
+              onRotateRandomQuote={rotateRandomQuote}
               showArabicScript={showArabicScript}
               onToggleArabicScript={() => setShowArabicScript((v) => !v)}
               grayscaleEnabled={grayscaleEnabled}
@@ -3408,7 +3482,7 @@ export function App() {
           }
           onCancelReturnToPeace={handleReturnToPeaceFromIntercept}
           onUnlockApproved={handleApproveRestrictedUnlock}
-          onRotateTrigger={() => setTriggerIndex((i) => i + 1)}
+          onRotateTrigger={rotateRandomQuote}
         />
       )}
 
@@ -3454,7 +3528,7 @@ export function App() {
             <div className="flex gap-2 justify-center pt-2">
               <button
                 type="button"
-                onClick={() => setTriggerIndex((i) => i + 1)}
+                onClick={rotateRandomQuote}
                 className="px-4 py-3 border border-zinc-700 text-xs font-mono-tech text-zinc-300 cursor-pointer"
               >
                 {t.nextWhisperBtn} ↻

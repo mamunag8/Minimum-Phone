@@ -6,6 +6,26 @@ export type VisualTheme = 'oled-black' | 'eink-paper' | 'sunset-amber';
 
 export type WisdomPackSource = 'quran' | 'hadith' | 'proverbs' | 'blended';
 
+export type FavoriteQuoteCategory =
+  | 'all'
+  | 'focus-discipline'
+  | 'time-purpose'
+  | 'peace-sakinah'
+  | 'self-mastery'
+  | 'resilience-growth'
+  | 'quran'
+  | 'hadith'
+  | 'proverbs';
+
+export type CalmTriggerThemeTag =
+  | 'sakinah'
+  | 'time'
+  | 'stillness'
+  | 'purity-gaze'
+  | 'self-mastery'
+  | 'focus-discipline'
+  | 'resilience-growth';
+
 export type InspirationMode = 'islamic' | 'universal' | 'blended';
 
 export type SlowLearningTrack = 'islam' | 'language' | 'mindfulness';
@@ -41,6 +61,7 @@ export interface CalmTrigger {
   id: string;
   category: 'quran' | 'hadith' | 'proverb' | 'purity';
   subType?: 'quran' | 'hadith' | 'proverb';
+  quoteCategory?: 'focus-discipline' | 'time-purpose' | 'peace-sakinah' | 'self-mastery' | 'resilience-growth';
   arabic?: string;
   text: {
     en: string;
@@ -54,7 +75,7 @@ export interface CalmTrigger {
     bn: string;
     ar?: string;
   };
-  themeTag: 'sakinah' | 'time' | 'stillness' | 'purity-gaze' | 'self-mastery';
+  themeTag: CalmTriggerThemeTag;
 }
 
 export interface NotificationItem {

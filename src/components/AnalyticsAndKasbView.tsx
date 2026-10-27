@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import type {
   AppFrictionTier,
   AppItem,
+  CalmTrigger,
+  FavoriteQuoteCategory,
   FocusVaultState,
   HabitWallType,
   HomeProfileType,
@@ -15,6 +17,14 @@ import type {
   VisualTheme,
   WisdomPackSource,
 } from '../types/app';
+import {
+  filterMotivationalQuotes,
+  getQuoteCategoryLabel,
+  getTriggerQuoteCategory,
+  getTriggerSource,
+  getTriggerText,
+  QUOTE_CATEGORY_OPTIONS,
+} from '../data/calmTriggers';
 import {
   HOW_TO_USE_SECTIONS,
   HOW_TO_USE_SUBTITLE,
@@ -54,6 +64,12 @@ interface AnalyticsAndKasbViewProps {
   onChangeInspirationMode: (mode: InspirationMode) => void;
   wisdomPack: WisdomPackSource;
   onChangeWisdomPack: (w: WisdomPackSource) => void;
+  favoriteQuoteCategory?: FavoriteQuoteCategory;
+  onChangeFavoriteQuoteCategory?: (category: FavoriteQuoteCategory) => void;
+  quoteRotationSeconds?: number;
+  onChangeQuoteRotationSeconds?: (sec: number) => void;
+  activeCalmTrigger?: CalmTrigger;
+  onRotateRandomQuote?: () => void;
   showArabicScript: boolean;
   onToggleArabicScript: () => void;
   grayscaleEnabled: boolean;
@@ -99,6 +115,12 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
   onChangeInspirationMode,
   wisdomPack,
   onChangeWisdomPack,
+  favoriteQuoteCategory = 'all',
+  onChangeFavoriteQuoteCategory,
+  quoteRotationSeconds = 30,
+  onChangeQuoteRotationSeconds,
+  activeCalmTrigger,
+  onRotateRandomQuote,
   showArabicScript,
   onToggleArabicScript,
   grayscaleEnabled,
@@ -718,7 +740,7 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               },
               {
                 id: 'language' as SettingsSubTab,
-                label: tx(lang, '📚 Language & Quiz', '📚 ভাষা ও কুইজ', '📚 اللغة والاختبار', '📚 زبان اور کوئز', '📚 Bahasa & Kuis'),
+                label: tx(lang, '💬 Quotes, Lang & Quiz', '💬 বাণী, ভাষা ও কুইজ', '💬 الحكم واللغة والاختبار', '💬 اقوال، زبان اور کوئز', '💬 Kutipan, Bahasa & Kuis'),
               },
             ] as const
           ).map((tab) => (
@@ -865,33 +887,199 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
               ))}
             </div>
 
-            {/* Fine-Grained Quote Source Filter */}
-            <div className="pt-2 border-t border-zinc-900">
-              <div className="text-xs font-mono-tech text-zinc-400 mb-2">{t.wisdomPackLabel}:</div>
-              <div className="grid grid-cols-2 gap-2">
-                {(
-                  [
-                    { id: 'quran', label: t.packQuran },
-                    { id: 'hadith', label: t.packHadith },
-                    { id: 'proverbs', label: t.packProverbs },
-                    { id: 'blended', label: t.packBlended },
-                  ] as const
-                ).map((pack) => (
-                  <button
-                    key={pack.id}
-                    type="button"
-                    onClick={() => onChangeWisdomPack(pack.id)}
-                    className={`py-2.5 px-3 border text-left text-xs font-mono-tech cursor-pointer ${
-                      wisdomPack === pack.id
-                        ? 'border-zinc-100 bg-zinc-900 text-white font-semibold'
-                        : 'border-zinc-800 text-zinc-400 hover:border-zinc-700'
-                    }`}
-                  >
-                    {wisdomPack === pack.id ? '● ' : '○ '}
-                    {pack.label}
-                  </button>
-                ))}
+            {/* FAVOURITE MOTIVATIONAL QUOTE CATEGORY & AUTO-ROTATION ENGINE */}
+            <div className="pt-3 border-t border-zinc-800 space-y-3">
+              <div>
+                <div className="text-[10px] font-mono-tech uppercase tracking-widest text-zinc-400">
+                  {tx(
+                    lang,
+                    'RANDOM & TIME-TO-TIME MOTIVATIONAL QUOTES // FAVOURITE CATEGORY',
+                    'র‍্যান্ডম ও সময়ান্তরে পরিবর্তনশীল অনুপ্রেরণামূলক বাণী // পছন্দের ক্যাটাগরি',
+                    'اقتباسات تحفيزية عشوائية ومتجددة تلقائياً // الفئة المفضلة',
+                    'بے ترتیب اور وقتاً فوقتاً بدلنے والے اقوال // پسندیدہ کیٹیگری',
+                    'KUTIPAN MOTIVASI ACAK & BERGANTI BERKALA // KATEGORI FAVORIT'
+                  )}
+                </div>
+                <h4 className="text-xs sm:text-sm font-mono-tech font-semibold text-zinc-100 mt-0.5">
+                  {tx(
+                    lang,
+                    'Select Your Favourite Category of Motivational Quotes:',
+                    'আপনার পছন্দের অনুপ্রেরণামূলক বাণীর ক্যাটাগরি নির্বাচন করুন:',
+                    'اختر فئة الاقتباسات التحفيزية المفضلة لديك:',
+                    'اپنے پسندیدہ متاثر کن اقوال کی کیٹیگری منتخب کریں:',
+                    'Pilih Kategori Kutipan Motivasi Favorit Anda:'
+                  )}
+                </h4>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  {tx(
+                    lang,
+                    'Different quotes from your favourite category will display randomly and automatically change from time to time on your Home Screen, Focus Mode, and Intercept Gates.',
+                    'আপনার নির্বাচিত ক্যাটাগরি থেকে ভিন্ন ভিন্ন অনুপ্রেরণামূলক বাণী র‍্যান্ডমলি প্রদর্শিত হবে এবং নির্দিষ্ট সময় পর পর স্বয়ংক্রিয়ভাবে পরিবর্তিত হবে।',
+                    'ستظهر اقتباسات مختلفة من فئتك المفضلة بشكل عشوائي وتتغير تلقائياً من وقت لآخر على الشاشة الرئيسية.',
+                    'آپ کی منتخب کردہ کیٹیگری سے مختلف اقوال بے ترتیب دکھائے جائیں گے اور وقتاً فوقتاً خودکار طور پر بدلتے رہیں گے۔',
+                    'Kutipan motivasi dari kategori favorit Anda akan tampil secara acak dan berganti otomatis dari waktu ke waktu.'
+                  )}
+                </p>
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {QUOTE_CATEGORY_OPTIONS.map((cat) => {
+                  const isSelected = favoriteQuoteCategory === cat.id;
+                  const matchingCount = filterMotivationalQuotes(
+                    inspirationMode,
+                    wisdomPack,
+                    cat.id
+                  ).length;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        if (onChangeFavoriteQuoteCategory) {
+                          onChangeFavoriteQuoteCategory(cat.id);
+                        } else if (
+                          cat.id === 'quran' ||
+                          cat.id === 'hadith' ||
+                          cat.id === 'proverbs'
+                        ) {
+                          onChangeWisdomPack(cat.id);
+                        } else {
+                          onChangeWisdomPack('blended');
+                        }
+                      }}
+                      className={`p-3 border text-left transition cursor-pointer ${
+                        isSelected
+                          ? 'border-zinc-100 bg-zinc-900 text-white'
+                          : 'border-zinc-800 bg-black text-zinc-400 hover:border-zinc-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-mono-tech font-semibold text-zinc-100 truncate">
+                          {isSelected ? '● ' : '○ '}
+                          {cat.icon} {cat.label[lang] || cat.label.en}
+                        </span>
+                        <span className="text-[10px] font-mono-tech px-1.5 py-0.5 border border-zinc-700 text-zinc-300 shrink-0">
+                          {matchingCount}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-zinc-400 mt-1 leading-snug">
+                        {cat.desc[lang] || cat.desc.en}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Auto-Change Interval ("Change Time to Time") Selector */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-900">
+                <div>
+                  <div className="text-xs font-mono-tech text-zinc-200">
+                    ⏱{' '}
+                    {tx(
+                      lang,
+                      'Auto-Change Quote Interval (Change Time to Time):',
+                      'বাণী স্বয়ংক্রিয় পরিবর্তনের সময়কাল (সময়ান্তরে পরিবর্তন):',
+                      'فترة التغيير التلقائي للاقتباسات (من وقت لآخر):',
+                      'اقوال خودکار بدلنے کا وقفہ (وقتاً فوقتاً تبدیلی):',
+                      'Interval Ganti Kutipan Otomatis (Dari Waktu ke Waktu):'
+                    )}
+                  </div>
+                  <div className="text-[10px] font-mono-tech text-zinc-500">
+                    {tx(
+                      lang,
+                      'How often a new random quote appears automatically',
+                      'কতক্ষণ পর পর নতুন র‍্যান্ডম বাণী স্বয়ংক্রিয়ভাবে ভেসে উঠবে',
+                      'كم مرة يظهر اقتباس عشوائي جديد تلقائياً',
+                      'کتنی دیر بعد نیا قول خودکار طور پر سامنے آئے گا',
+                      'Seberapa sering kutipan acak baru muncul secara otomatis'
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { sec: 15, label: '15s' },
+                    { sec: 30, label: '30s' },
+                    { sec: 60, label: '1m' },
+                    { sec: 120, label: '2m' },
+                    { sec: 300, label: '5m' },
+                  ].map((item) => (
+                    <button
+                      key={item.sec}
+                      type="button"
+                      onClick={() => onChangeQuoteRotationSeconds?.(item.sec)}
+                      className={`px-2.5 py-1 border text-xs font-mono-tech cursor-pointer ${
+                        quoteRotationSeconds === item.sec
+                          ? 'border-zinc-100 bg-zinc-100 text-black font-bold'
+                          : 'border-zinc-800 text-zinc-400 hover:border-zinc-600'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Live Random Quote Preview Box in Settings */}
+              {activeCalmTrigger && (
+                <div className="border border-zinc-700 bg-black p-3.5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono-tech text-zinc-400">
+                    <span>
+                      ✨{' '}
+                      {tx(
+                        lang,
+                        'LIVE QUOTE PREVIEW',
+                        'বর্তমান বাণীর প্রিভিউ',
+                        'معاينة الاقتباس الحالي',
+                        'موجودہ قول کا نمونہ',
+                        'PRATINJAU KUTIPAN AKTIF'
+                      )}{' '}
+                      ·{' '}
+                      <strong className="text-zinc-200">
+                        {getQuoteCategoryLabel(
+                          favoriteQuoteCategory === 'all'
+                            ? getTriggerQuoteCategory(activeCalmTrigger)
+                            : favoriteQuoteCategory,
+                          lang
+                        )}
+                      </strong>
+                    </span>
+                    {onRotateRandomQuote && (
+                      <button
+                        type="button"
+                        onClick={onRotateRandomQuote}
+                        className="px-2.5 py-1 bg-zinc-100 text-black font-bold uppercase tracking-wider cursor-pointer"
+                      >
+                        🎲{' '}
+                        {tx(
+                          lang,
+                          'Random Quote ↻',
+                          'নতুন র‍্যান্ডম বাণী ↻',
+                          'اقتباس عشوائي ↻',
+                          'نیا بے ترتیب قول ↻',
+                          'Kutipan Acak ↻'
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  {showArabicScript &&
+                    activeCalmTrigger.arabic &&
+                    lang !== 'ar' &&
+                    inspirationMode !== 'universal' && (
+                      <p
+                        dir="rtl"
+                        className="font-arabic text-base text-zinc-200 text-right leading-relaxed"
+                      >
+                        {activeCalmTrigger.arabic}
+                      </p>
+                    )}
+                  <p className="text-xs sm:text-sm text-zinc-100 leading-snug">
+                    “{getTriggerText(activeCalmTrigger, lang)}”
+                  </p>
+                  <div className="text-[10px] font-mono-tech text-zinc-500">
+                    — {getTriggerSource(activeCalmTrigger, lang)}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between pt-2 border-t border-zinc-900">

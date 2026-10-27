@@ -262,8 +262,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     _loadQrMatrix();
     _clockTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
+        final DateTime current = DateTime.now();
+        final bool nightNow = current.hour >= 22 || current.hour < 6;
         setState(() {
-          _now = DateTime.now();
+          _now = current;
+          if (nightNow && _nightAutoDnsEnabled && !_phoneSettingsLocked) {
+            _phoneSettingsLocked = true;
+          }
         });
         _refreshNativeStatus();
       }
@@ -283,9 +288,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      if (mounted && _settingsUnlockedSession) {
+        setState(() => _settingsUnlockedSession = false);
+      }
+    } else if (state == AppLifecycleState.resumed) {
       // Immediately refresh Usage Access, Overlay, and OS Private DNS when user returns from Android Settings!
       _refreshNativeStatus();
+      _syncFortressToNative();
     }
   }
 
@@ -459,6 +470,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           _phoneSettingsLocked = data['phoneSettingsLocked'] ?? true;
           _nightAutoDnsEnabled = data['nightAutoDnsEnabled'] ?? true;
           _strictQrSettingsLock = data['strictQr247'] == true;
+          _sleepScheduleEnabled = data['sleepScheduleEnabled'] ?? true;
+          _monkModeUntil = (data['monkModeUntil'] as int?) ?? 0;
+          _emergencyLockdownUntil =
+              (data['emergencyLockdownUntil'] as int?) ?? 0;
+          _digestMorning = data['digestMorning'] ?? true;
+          _digestMidday = data['digestMidday'] ?? true;
+          _digestEvening = data['digestEvening'] ?? true;
           _qrSetupVerified = data['qrSetupVerified'] == true;
           _qrSecret = data['qrSecret'] ?? 'KASB-BRICK-77';
           _cleanStreakDays = data['cleanStreakDays'] ?? 7;
@@ -526,6 +544,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'phoneSettingsLocked': _phoneSettingsLocked,
         'nightAutoDnsEnabled': _nightAutoDnsEnabled,
         'strictQr247': _strictQrSettingsLock,
+        'sleepScheduleEnabled': _sleepScheduleEnabled,
+        'monkModeUntil': _monkModeUntil,
+        'emergencyLockdownUntil': _emergencyLockdownUntil,
+        'digestMorning': _digestMorning,
+        'digestMidday': _digestMidday,
+        'digestEvening': _digestEvening,
         'qrSetupVerified': _qrSetupVerified,
         'qrSecret': _qrSecret,
         'cleanStreakDays': _cleanStreakDays,
@@ -539,17 +563,27 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       };
       await _channel
           .invokeMethod('saveAppStateJson', {'json': jsonEncode(data)});
+      await _syncFortressToNative();
     } catch (_) {}
   }
 
   Future<void> _syncFortressToNative() async {
     try {
+      final String nightLockedCsv = _apps
+          .where((a) => a.nightQrLocked || a.tier == 'restricted')
+          .map((a) => a.packageName)
+          .where((p) => p.isNotEmpty)
+          .join(',');
       await _channel.invokeMethod('configureFortress', {
         'lang': _lang,
         'phoneSettingsLocked': _phoneSettingsLocked,
         'lockSystemSettings': _phoneSettingsLocked,
         'nightAutoDnsEnabled': _nightAutoDnsEnabled,
         'autoNightDns': _nightAutoDnsEnabled,
+        'sleepScheduleEnabled': _sleepScheduleEnabled,
+        'strictQr247': _strictQrSettingsLock,
+        'monkModeUntil': _monkModeUntil,
+        'nightLockedPackages': nightLockedCsv,
         'dnsShieldActive': true,
         'dnsHost': _dnsHost,
         'expectedHost': _dnsHost,
@@ -785,6 +819,24 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
   Future<void> _activateSafePrivateDnsNow(BuildContext ctx) async {
     try {
+      await _refreshNativeStatus();
+      if (_osDnsIsFamilySafe && _osDnsSpecifier.toLowerCase() == _dnsHost.toLowerCase()) {
+        if (!_phoneSettingsLocked) {
+          setState(() => _phoneSettingsLocked = true);
+          await _saveState();
+          await _syncFortressToNative();
+        }
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(
+              content: Text('${_tr('dnsActivatedToast')} ($_osDnsSpecifier)'),
+              backgroundColor: const Color(0xFF10B981),
+            ),
+          );
+        }
+        return;
+      }
+
       Clipboard.setData(ClipboardData(text: _dnsHost));
       final Map<dynamic, dynamic>? res =
           await _channel.invokeMethod<Map<dynamic, dynamic>>(
@@ -792,7 +844,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         {
           'host': _dnsHost,
           'hostname': _dnsHost,
-          'openSettingsIfNeeded': true,
+          'openSettingsIfNeeded': !_osDnsIsFamilySafe,
         },
       );
       setState(() {
@@ -896,7 +948,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                         style: const TextStyle(fontSize: 12),
                       ),
                       onPressed: () {
-                        _openSafeSubSetting('private_dns');
+                        _openSafeSubSetting(
+                          ctx,
+                          'private_dns',
+                          unlockedByGate: true,
+                        );
                       },
                     ),
                   ),
@@ -934,16 +990,71 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     );
   }
 
-  Future<void> _openSafeSubSetting(String type) async {
+  Future<void> _openSafeSubSetting(
+    BuildContext ctx,
+    String type, {
+    bool unlockedByGate = false,
+  }) async {
     if (type == 'torch') {
       await _toggleTorch();
       return;
     }
+
+    // Safe floating panels (Android 10+ Settings.Panel) and standalone utility apps
+    // never open com.android.settings or expose Private DNS.
+    const Set<String> safePanelOrUtilityTypes = {
+      'wifi',
+      'mobile_data',
+      'sound',
+      'alarm',
+      'calculator',
+    };
+
+    if (type == 'private_dns') {
+      await _refreshNativeStatus();
+      if (_osDnsIsFamilySafe) {
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(
+              content: Text('${_tr('dnsActivatedToast')} ($_osDnsSpecifier)'),
+              backgroundColor: const Color(0xFF10B981),
+            ),
+          );
+        }
+        return;
+      }
+    } else if (!safePanelOrUtilityTypes.contains(type)) {
+      // Sub-settings that open com.android.settings (hotspot, bluetooth, display, battery, location, airplane):
+      // Strictly blocked during Night Fortress (22:00-06:00) so DNS cannot be modified!
+      if (_isNightWindow) {
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(
+              content: Text(_tr('nightOnlyQrNote')),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+        return;
+      }
+      if (_phoneSettingsLocked && !unlockedByGate) {
+        _requireProtectionUnlock(
+          ctx,
+          targetTitle: type.toUpperCase(),
+          onUnlocked: () {
+            _openSafeSubSetting(ctx, type, unlockedByGate: true);
+          },
+        );
+        return;
+      }
+    }
+
     try {
       await _channel.invokeMethod('openSafePhoneSetting', {
         'settingType': type,
         'target': type,
         'dnsHost': _dnsHost,
+        'unlockedByGate': true,
       });
     } catch (_) {}
   }
@@ -967,6 +1078,43 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   void _handleAppTap(BuildContext ctx, AppItem app) {
+    final String pkgLower = app.packageName.toLowerCase();
+    final bool isSystemSettingsApp =
+        pkgLower == 'com.android.settings' || app.id == 'settings';
+
+    // Strictly block opening Android System Settings at Night (22:00-06:00)
+    if (isSystemSettingsApp && _isNightWindow) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text(_tr('nightOnlyQrNote')),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      setState(() => _blockedOpens++);
+      _saveState();
+      return;
+    }
+
+    // Require Safe Private DNS + Usage Access + Overlay Permission before opening any Browser
+    final bool isBrowserApp = app.category.toLowerCase() == 'browser' ||
+        pkgLower.contains('chrome') ||
+        pkgLower.contains('browser') ||
+        pkgLower.contains('firefox') ||
+        pkgLower.contains('opera') ||
+        pkgLower.contains('brave') ||
+        pkgLower.contains('edgemobile');
+    if (isBrowserApp &&
+        (!_osDnsIsFamilySafe || !_hasUsageAccess || !_hasOverlayPermission)) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text(_tr('safeDnsSubtitle')),
+          backgroundColor: Colors.amber.shade800,
+        ),
+      );
+      _showSetupWizardModal(ctx);
+      return;
+    }
+
     if (_isMonkActive && app.tier != 'essential') {
       final int minsLeft =
           ((_monkModeUntil - DateTime.now().millisecondsSinceEpoch) / 60000)
@@ -986,6 +1134,17 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
     if (_isNightWindow && _sleepScheduleEnabled && app.nightQrLocked) {
       _showQrUnlockDialog(
+        ctx,
+        targetTitle: app.name,
+        onUnlocked: () {
+          _launchNativePackage(app.packageName, app.id);
+        },
+      );
+      return;
+    }
+
+    if (isSystemSettingsApp && _phoneSettingsLocked) {
+      _requireProtectionUnlock(
         ctx,
         targetTitle: app.name,
         onUnlocked: () {
@@ -1078,6 +1237,17 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   Future<void> _printPhysicalQrSheet() async {
+    if (_isNightWindow) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_tr('qrHiddenNightMsg')),
+            backgroundColor: Colors.amber.shade900,
+          ),
+        );
+      }
+      return;
+    }
     try {
       await _channel.invokeMethod('printQrCodeSheet', {'qrSecret': _qrSecret});
     } catch (_) {}
@@ -1120,6 +1290,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }) {
     final TextEditingController qrCtrl = TextEditingController();
     final bool isNight = _isNightWindow;
+    final bool strictPhysicalScanOnly = isNight || _strictQrSettingsLock;
     showDialog(
       context: ctx,
       builder: (dCtx) => AlertDialog(
@@ -1165,7 +1336,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 },
               ),
             ),
-            if (!isNight) ...[
+            if (!strictPhysicalScanOnly) ...[
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
@@ -1191,6 +1362,22 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   },
                 ),
               ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: qrCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: _tr('qrInputHint'),
+                  hintStyle:
+                      const TextStyle(color: Colors.white38, fontSize: 12),
+                  filled: true,
+                  fillColor: Colors.black38,
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
             ] else ...[
               const SizedBox(height: 10),
               Container(
@@ -1199,7 +1386,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 decoration: BoxDecoration(
                   color: Colors.amber.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.amber.withValues(alpha: 0.5)),
+                  border:
+                      Border.all(color: Colors.amber.withValues(alpha: 0.5)),
                 ),
                 child: Text(
                   _tr('nightOnlyQrNote'),
@@ -1211,21 +1399,6 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 ),
               ),
             ],
-            const SizedBox(height: 12),
-            TextField(
-              controller: qrCtrl,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              decoration: InputDecoration(
-                hintText: _tr('qrInputHint'),
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
-                filled: true,
-                fillColor: Colors.black38,
-                isDense: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
           ],
         ),
         actions: [
@@ -1240,27 +1413,28 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             },
             child: Text(_tr('stayFocusedBtn')),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white12,
-              foregroundColor: Colors.white,
+          if (!strictPhysicalScanOnly)
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white12,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                if (qrCtrl.text.trim().toUpperCase() ==
+                    _qrSecret.trim().toUpperCase()) {
+                  Navigator.pop(dCtx);
+                  onUnlocked();
+                } else {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text(_tr('invalidQrMsg')),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                }
+              },
+              child: Text(_tr('unlockBtn')),
             ),
-            onPressed: () {
-              if (qrCtrl.text.trim().toUpperCase() ==
-                  _qrSecret.trim().toUpperCase()) {
-                Navigator.pop(dCtx);
-                onUnlocked();
-              } else {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  SnackBar(
-                    content: Text(_tr('invalidQrMsg')),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-              }
-            },
-            child: Text(_tr('unlockBtn')),
-          ),
         ],
       ),
     );
@@ -1720,13 +1894,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       isDone: _hasUsageAccess,
                       buttonLabel:
                           _hasUsageAccess ? _tr('grantedBtn') : _tr('grantBtn'),
-                      onTap: () async {
-                        await _channel
-                            .invokeMethod('requestUsageStatsPermission');
-                        await Future.delayed(const Duration(seconds: 1));
-                        await _refreshNativeStatus();
-                        if (sCtx.mounted) setWizardState(() {});
-                      },
+                      onTap: _hasUsageAccess
+                          ? null
+                          : () async {
+                              await _channel
+                                  .invokeMethod('requestUsageStatsPermission');
+                              await Future.delayed(const Duration(seconds: 1));
+                              await _refreshNativeStatus();
+                              if (sCtx.mounted) setWizardState(() {});
+                            },
                     ),
                     const SizedBox(height: 10),
                     _buildWizardStepTile(
@@ -1739,12 +1915,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       buttonLabel: _hasOverlayPermission
                           ? _tr('grantedBtn')
                           : _tr('grantBtn'),
-                      onTap: () async {
-                        await _channel.invokeMethod('requestOverlayPermission');
-                        await Future.delayed(const Duration(seconds: 1));
-                        await _refreshNativeStatus();
-                        if (sCtx.mounted) setWizardState(() {});
-                      },
+                      onTap: _hasOverlayPermission
+                          ? null
+                          : () async {
+                              await _channel
+                                  .invokeMethod('requestOverlayPermission');
+                              await Future.delayed(const Duration(seconds: 1));
+                              await _refreshNativeStatus();
+                              if (sCtx.mounted) setWizardState(() {});
+                            },
                     ),
                     const SizedBox(height: 10),
                     _buildWizardStepTile(
@@ -1756,10 +1935,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       isDone: _osDnsIsFamilySafe,
                       buttonLabel:
                           _osDnsIsFamilySafe ? _tr('grantedBtn') : '1-Tap',
-                      onTap: () {
-                        Navigator.pop(mCtx);
-                        _activateSafePrivateDnsNow(ctx);
-                      },
+                      onTap: _osDnsIsFamilySafe
+                          ? null
+                          : () {
+                              Navigator.pop(mCtx);
+                              _activateSafePrivateDnsNow(ctx);
+                            },
                     ),
                     if (!_osDnsIsFamilySafe) ...[
                       const SizedBox(height: 6),
@@ -1794,37 +1975,43 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       ),
                     ],
                     const SizedBox(height: 10),
-                    // STEP 4: PRINT PHYSICAL QR CODE & KEEP IN ANOTHER ROOM
+                    // STEP 4: PRINT PHYSICAL QR CODE & KEEP IN ANOTHER ROOM (Hidden at Night!)
                     _buildWizardStepTile(
                       step: '4',
                       title: _tr('wizStep4Title'),
-                      subtitle: _qrSetupVerified
-                          ? _tr('wizStep4SubDone')
-                          : _tr('wizStep4SubTodo'),
+                      subtitle: _isNightWindow
+                          ? _tr('qrHiddenNightMsg')
+                          : (_qrSetupVerified
+                              ? _tr('wizStep4SubDone')
+                              : _tr('wizStep4SubTodo')),
                       isDone: _qrSetupVerified,
-                      buttonLabel: '🖨️ Print',
-                      onTap: () async {
-                        await _printPhysicalQrSheet();
-                      },
+                      buttonLabel: _isNightWindow ? '🌙 Night' : '🖨️ Print',
+                      onTap: _isNightWindow
+                          ? null
+                          : () async {
+                              await _printPhysicalQrSheet();
+                            },
                     ),
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: const BorderSide(color: Colors.white24),
+                        if (!_isNightWindow) ...[
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(color: Colors.white24),
+                              ),
+                              icon: const Icon(Icons.print_rounded, size: 16),
+                              label: Text(
+                                _tr('printQrBtn'),
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              onPressed: _printPhysicalQrSheet,
                             ),
-                            icon: const Icon(Icons.print_rounded, size: 16),
-                            label: Text(
-                              _tr('printQrBtn'),
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                            onPressed: _printPhysicalQrSheet,
                           ),
-                        ),
-                        const SizedBox(width: 8),
+                          const SizedBox(width: 8),
+                        ],
                         Expanded(
                           child: OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
@@ -1857,12 +2044,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       buttonLabel: _isDefaultLauncher
                           ? _tr('grantedBtn')
                           : _tr('setDefaultBtn'),
-                      onTap: () async {
-                        await _channel.invokeMethod('requestDefaultLauncher');
-                        await Future.delayed(const Duration(seconds: 1));
-                        await _refreshNativeStatus();
-                        if (sCtx.mounted) setWizardState(() {});
-                      },
+                      onTap: (_isDefaultLauncher || _isNightWindow)
+                          ? null
+                          : () async {
+                              await _channel
+                                  .invokeMethod('requestDefaultLauncher');
+                              await Future.delayed(const Duration(seconds: 1));
+                              await _refreshNativeStatus();
+                              if (sCtx.mounted) setWizardState(() {});
+                            },
                     ),
                     const SizedBox(height: 16),
                     SizedBox(
@@ -1899,7 +2089,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     required String subtitle,
     required bool isDone,
     required String buttonLabel,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
   }) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -1952,6 +2142,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               backgroundColor:
                   isDone ? Colors.white12 : const Color(0xFF10B981),
               foregroundColor: isDone ? Colors.white70 : Colors.black,
+              disabledBackgroundColor: Colors.white12,
+              disabledForegroundColor: const Color(0xFF10B981),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             ),
             onPressed: onTap,
@@ -2415,9 +2607,19 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     value: _phoneSettingsLocked,
                     onChanged: (val) {
                       if (!val) {
+                        if (_isNightWindow) {
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(_tr('nightOnlyQrNote')),
+                              backgroundColor: Colors.redAccent,
+                            ),
+                          );
+                          return;
+                        }
                         Navigator.pop(ctx);
                         _requireProtectionUnlock(
-                          ctx,
+                          context,
                           targetTitle: _tr('lockPhoneSettings'),
                           onUnlocked: () {
                             setState(() => _phoneSettingsLocked = false);
@@ -2566,7 +2768,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         if (closeDrawerOnTap) {
           Navigator.pop(ctx);
         }
-        _openSafeSubSetting(type);
+        _openSafeSubSetting(context, type);
       },
       borderRadius: BorderRadius.circular(10),
       child: Container(
@@ -4087,11 +4289,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                                 onUnlocked: () {
                                   setState(() => app.nightQrLocked = false);
                                   _saveState();
+                                  _syncFortressToNative();
                                 },
                               );
                             } else {
                               setState(() => app.nightQrLocked = true);
                               _saveState();
+                              _syncFortressToNative();
                             }
                           },
                           child: Container(
@@ -4209,11 +4413,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             onUnlocked: () {
               setState(() => app.tier = tierVal);
               _saveState();
+              _syncFortressToNative();
             },
           );
         } else {
           setState(() => app.tier = tierVal);
           _saveState();
+          _syncFortressToNative();
         }
       },
       child: Container(
@@ -4337,18 +4543,21 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
           // DNS Provider Selector
           _buildDnsProviderOption(
+            ctx,
             id: 'cloudflare',
             title: _tr('dnsCloudflareTitle'),
             host: 'family.cloudflare-dns.com',
           ),
           const SizedBox(height: 8),
           _buildDnsProviderOption(
+            ctx,
             id: 'cleanbrowsing',
             title: _tr('dnsCleanbrowsingTitle'),
             host: 'adult-filter-dns.cleanbrowsing.org',
           ),
           const SizedBox(height: 8),
           _buildDnsProviderOption(
+            ctx,
             id: 'adguard',
             title: _tr('dnsAdguardTitle'),
             host: 'family.adguard-dns.com',
@@ -4363,9 +4572,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 foregroundColor: Colors.black,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              icon: const Icon(Icons.security_rounded),
+              icon: Icon(
+                _osDnsIsFamilySafe
+                    ? Icons.verified_user_rounded
+                    : Icons.security_rounded,
+              ),
               label: Text(
-                '${_tr('activateDnsBtn')} ($_dnsHost)',
+                _osDnsIsFamilySafe
+                    ? '✅ ${_tr('dnsVerified')} ($_osDnsSpecifier)'
+                    : '${_tr('activateDnsBtn')} ($_dnsHost)',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               onPressed: () => _activateSafePrivateDnsNow(ctx),
@@ -4446,6 +4661,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             value: _phoneSettingsLocked,
             onChanged: (val) {
               if (!val) {
+                if (_isNightWindow) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text(_tr('nightOnlyQrNote')),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                  return;
+                }
                 _requireProtectionUnlock(
                   ctx,
                   targetTitle: _tr('lockPhoneSettings'),
@@ -4482,6 +4706,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             value: _nightAutoDnsEnabled,
             onChanged: (val) {
               if (!val) {
+                if (_isNightWindow) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text(_tr('nightOnlyQrNote')),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                  return;
+                }
                 _requireProtectionUnlock(
                   ctx,
                   targetTitle: _tr('nightAutoDns'),
@@ -4524,11 +4757,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   onUnlocked: () {
                     setState(() => _strictQrSettingsLock = false);
                     _saveState();
+                    _syncFortressToNative();
                   },
                 );
               } else {
                 setState(() => _strictQrSettingsLock = true);
                 _saveState();
+                _syncFortressToNative();
               }
             },
           ),
@@ -4549,7 +4784,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     );
   }
 
-  Widget _buildDnsProviderOption({
+  Widget _buildDnsProviderOption(
+    BuildContext ctx, {
     required String id,
     required String title,
     required String host,
@@ -4557,6 +4793,31 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     final bool selected = _dnsProvider == id;
     return InkWell(
       onTap: () {
+        if (selected) return;
+        if (_isNightWindow) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(
+              content: Text(_tr('nightOnlyQrNote')),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+          return;
+        }
+        if (_phoneSettingsLocked || _osDnsIsFamilySafe) {
+          _requireProtectionUnlock(
+            ctx,
+            targetTitle: title,
+            onUnlocked: () {
+              setState(() {
+                _dnsProvider = id;
+                _dnsHost = host;
+              });
+              _saveState();
+              _syncFortressToNative();
+            },
+          );
+          return;
+        }
         setState(() {
           _dnsProvider = id;
           _dnsHost = host;
@@ -4864,7 +5125,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               ),
               const Spacer(),
               TextButton(
-                onPressed: () => setState(() => _digestItems.clear()),
+                onPressed: () {
+                  setState(() => _digestItems.clear());
+                  _saveState();
+                },
                 child: Text(_tr('clearAllBtn')),
               ),
             ],
@@ -4875,17 +5139,26 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               FilterChip(
                 label: Text(_tr('digestMorningChip')),
                 selected: _digestMorning,
-                onSelected: (v) => setState(() => _digestMorning = v),
+                onSelected: (v) {
+                  setState(() => _digestMorning = v);
+                  _saveState();
+                },
               ),
               FilterChip(
                 label: Text(_tr('digestMiddayChip')),
                 selected: _digestMidday,
-                onSelected: (v) => setState(() => _digestMidday = v),
+                onSelected: (v) {
+                  setState(() => _digestMidday = v);
+                  _saveState();
+                },
               ),
               FilterChip(
                 label: Text(_tr('digestEveningChip')),
                 selected: _digestEvening,
-                onSelected: (v) => setState(() => _digestEvening = v),
+                onSelected: (v) {
+                  setState(() => _digestEvening = v);
+                  _saveState();
+                },
               ),
             ],
           ),
@@ -4956,6 +5229,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     _monkModeUntil = DateTime.now().millisecondsSinceEpoch +
                         (mins * 60 * 1000);
                   });
+                  _saveState();
+                  _syncFortressToNative();
                 },
                 child: Text('$mins${_tr('monkLockSuffix')}'),
               );
@@ -4968,7 +5243,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 _requireProtectionUnlock(
                   ctx,
                   targetTitle: _tr('endMonkEarly'),
-                  onUnlocked: () => setState(() => _monkModeUntil = 0),
+                  onUnlocked: () {
+                    setState(() => _monkModeUntil = 0);
+                    _saveState();
+                    _syncFortressToNative();
+                  },
                 );
               },
               child: Text(_tr('endMonkEarly')),
@@ -4993,13 +5272,28 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             value: _sleepScheduleEnabled,
             onChanged: (v) {
               if (!v) {
+                if (_isNightWindow) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text(_tr('nightOnlyQrNote')),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                  return;
+                }
                 _requireProtectionUnlock(
                   ctx,
                   targetTitle: _tr('sleepScheduleTitle'),
-                  onUnlocked: () => setState(() => _sleepScheduleEnabled = false),
+                  onUnlocked: () {
+                    setState(() => _sleepScheduleEnabled = false);
+                    _saveState();
+                    _syncFortressToNative();
+                  },
                 );
               } else {
                 setState(() => _sleepScheduleEnabled = true);
+                _saveState();
+                _syncFortressToNative();
               }
             },
           ),
@@ -5009,7 +5303,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   Widget _buildQrAndRamCleanerCard(BuildContext ctx) {
-    final bool hideQrAtNight = _isNightWindow && _qrSetupVerified;
+    // Strictly hide QR Code, Secret Text, and Print Button during Night Hours (22:00-06:00)!
+    final bool hideQrAtNight = _isNightWindow;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -5091,23 +5386,25 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+              if (!hideQrAtNight) ...[
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    icon: const Icon(Icons.print_rounded, size: 18),
+                    label: Text(
+                      _tr('printQrBtn'),
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: _printPhysicalQrSheet,
                   ),
-                  icon: const Icon(Icons.print_rounded, size: 18),
-                  label: Text(
-                    _tr('printQrBtn'),
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                  onPressed: _printPhysicalQrSheet,
                 ),
-              ),
-              const SizedBox(width: 8),
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
@@ -5152,6 +5449,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           'cleanBackgroundApps');
                   final int freed = (res?['freedMb'] as int?) ?? 48;
                   setState(() => _ramFreedMb += freed);
+                  _saveState();
                   if (ctx.mounted) {
                     ScaffoldMessenger.of(ctx).showSnackBar(
                       SnackBar(
@@ -5291,10 +5589,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     _hasUsageAccess ? Colors.white12 : const Color(0xFF10B981),
                 foregroundColor:
                     _hasUsageAccess ? Colors.white70 : Colors.black,
+                disabledBackgroundColor: Colors.white12,
+                disabledForegroundColor: const Color(0xFF10B981),
               ),
-              onPressed: () async {
-                await _channel.invokeMethod('requestUsageStatsPermission');
-              },
+              // When already granted, disable button so it NEVER opens com.android.settings!
+              onPressed: _hasUsageAccess
+                  ? null
+                  : () async {
+                      await _channel.invokeMethod('requestUsageStatsPermission');
+                    },
               child:
                   Text(_hasUsageAccess ? _tr('grantedBtn') : _tr('grantBtn')),
             ),
@@ -5331,10 +5634,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     : const Color(0xFF10B981),
                 foregroundColor:
                     _hasOverlayPermission ? Colors.white70 : Colors.black,
+                disabledBackgroundColor: Colors.white12,
+                disabledForegroundColor: const Color(0xFF10B981),
               ),
-              onPressed: () async {
-                await _channel.invokeMethod('requestOverlayPermission');
-              },
+              // When already granted, disable button so it NEVER opens com.android.settings!
+              onPressed: _hasOverlayPermission
+                  ? null
+                  : () async {
+                      await _channel.invokeMethod('requestOverlayPermission');
+                    },
               child: Text(
                   _hasOverlayPermission ? _tr('grantedBtn') : _tr('grantBtn')),
             ),
@@ -5365,12 +5673,35 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               style: TextStyle(color: _subTextColor, fontSize: 12),
             ),
             trailing: ElevatedButton(
-              onPressed: () async {
-                await _channel.invokeMethod('requestDefaultLauncher');
-              },
-              child: Text(_isDefaultLauncher
-                  ? _tr('changeBtn')
-                  : _tr('setDefaultBtn')),
+              style: ElevatedButton.styleFrom(
+                disabledBackgroundColor: Colors.white12,
+                disabledForegroundColor: Colors.white54,
+              ),
+              // Block changing Default Launcher at Night (22:00-06:00), and require unlock during Daytime!
+              onPressed: (_isDefaultLauncher && _isNightWindow)
+                  ? null
+                  : () async {
+                      if (_isDefaultLauncher && !_settingsUnlockedSession) {
+                        _requireProtectionUnlock(
+                          ctx,
+                          targetTitle: _tr('defaultLauncherCard'),
+                          onUnlocked: () async {
+                            setState(() => _settingsUnlockedSession = true);
+                            await _channel
+                                .invokeMethod('requestDefaultLauncher');
+                          },
+                        );
+                        return;
+                      }
+                      await _channel.invokeMethod('requestDefaultLauncher');
+                    },
+              child: Text(
+                _isDefaultLauncher
+                    ? (_isNightWindow
+                        ? '🌙 ${_tr('changeBtn')}'
+                        : _tr('changeBtn'))
+                    : _tr('setDefaultBtn'),
+              ),
             ),
           ),
           const Divider(color: Colors.white12),
@@ -5394,6 +5725,18 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             ),
             trailing: ElevatedButton(
               onPressed: () async {
+                if (_isKioskPinned && !_settingsUnlockedSession) {
+                  _requireProtectionUnlock(
+                    ctx,
+                    targetTitle: _tr('kioskPinCard'),
+                    onUnlocked: () async {
+                      setState(() => _settingsUnlockedSession = true);
+                      await _channel.invokeMethod('toggleKioskPin');
+                      _refreshNativeStatus();
+                    },
+                  );
+                  return;
+                }
                 await _channel.invokeMethod('toggleKioskPin');
                 _refreshNativeStatus();
               },
@@ -5606,15 +5949,17 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           icon: Icons.qr_code_scanner_rounded,
           title: _tr('ugSec2Title'),
           body: _tr('ugSec2Body'),
-          actionButton: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.black,
-            ),
-            icon: const Icon(Icons.print_rounded, size: 18),
-            label: Text(_tr('printQrBtn')),
-            onPressed: _printPhysicalQrSheet,
-          ),
+          actionButton: _isNightWindow
+              ? null
+              : ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.black,
+                  ),
+                  icon: const Icon(Icons.print_rounded, size: 18),
+                  label: Text(_tr('printQrBtn')),
+                  onPressed: _printPhysicalQrSheet,
+                ),
         ),
         const SizedBox(height: 14),
         _buildGuideSectionCard(
