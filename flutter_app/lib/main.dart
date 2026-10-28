@@ -1817,6 +1817,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,
+      enableDrag: true,
+      isDismissible: true,
       backgroundColor: const Color(0xFF11131A),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -1829,251 +1831,526 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 (_osDnsIsFamilySafe ? 1 : 0) +
                 (_qrSetupVerified ? 1 : 0) +
                 (_isDefaultLauncher ? 1 : 0);
+            final bool isCoreProtected =
+                _hasUsageAccess && _hasOverlayPermission && _osDnsIsFamilySafe;
+            final bool isNightLocked =
+                _isNightWindow && isCoreProtected && !_settingsUnlockedSession;
 
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _tr('wizardTitle'),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(sCtx).size.height * 0.90,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Sticky Top Header with Back (←) and Close (✕) buttons
+                      Row(
+                        children: [
+                          InkWell(
+                            onTap: () => Navigator.pop(mCtx),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF191C26),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.arrow_back_rounded,
+                                    color: Color(0xFF10B981),
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _tr('navHome'),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                            foregroundColor: const Color(0xFF10B981),
-                          ),
-                          icon: const Icon(Icons.refresh_rounded, size: 16),
-                          label: Text(
-                            _tr('refreshBtn'),
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          onPressed: () async {
-                            await _refreshNativeStatus();
-                            if (sCtx.mounted) setWizardState(() {});
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '($completedSteps / 5) • ${_tr('wizardSubtitle')}',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: completedSteps / 5.0,
-                      minHeight: 6,
-                      backgroundColor: Colors.white12,
-                      color: const Color(0xFF10B981),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    const SizedBox(height: 14),
-                    _buildWizardStepTile(
-                      step: '1',
-                      title: _tr('wizStep1Title'),
-                      subtitle: _hasUsageAccess
-                          ? _tr('wizStep1SubDone')
-                          : _tr('wizStep1SubTodo'),
-                      isDone: _hasUsageAccess,
-                      buttonLabel:
-                          _hasUsageAccess ? _tr('grantedBtn') : _tr('grantBtn'),
-                      onTap: _hasUsageAccess
-                          ? null
-                          : () async {
-                              await _channel
-                                  .invokeMethod('requestUsageStatsPermission');
-                              await Future.delayed(const Duration(seconds: 1));
-                              await _refreshNativeStatus();
-                              if (sCtx.mounted) setWizardState(() {});
-                            },
-                    ),
-                    const SizedBox(height: 10),
-                    _buildWizardStepTile(
-                      step: '2',
-                      title: _tr('wizStep2Title'),
-                      subtitle: _hasOverlayPermission
-                          ? _tr('wizStep2SubDone')
-                          : _tr('wizStep2SubTodo'),
-                      isDone: _hasOverlayPermission,
-                      buttonLabel: _hasOverlayPermission
-                          ? _tr('grantedBtn')
-                          : _tr('grantBtn'),
-                      onTap: _hasOverlayPermission
-                          ? null
-                          : () async {
-                              await _channel
-                                  .invokeMethod('requestOverlayPermission');
-                              await Future.delayed(const Duration(seconds: 1));
-                              await _refreshNativeStatus();
-                              if (sCtx.mounted) setWizardState(() {});
-                            },
-                    ),
-                    const SizedBox(height: 10),
-                    _buildWizardStepTile(
-                      step: '3',
-                      title: '${_tr('wizStep3Title')} ($_dnsHost)',
-                      subtitle: _osDnsIsFamilySafe
-                          ? _tr('wizStep3SubDone')
-                          : _tr('wizStep3SubTodo'),
-                      isDone: _osDnsIsFamilySafe,
-                      buttonLabel:
-                          _osDnsIsFamilySafe ? _tr('grantedBtn') : '1-Tap',
-                      onTap: _osDnsIsFamilySafe
-                          ? null
-                          : () {
-                              Navigator.pop(mCtx);
-                              _activateSafePrivateDnsNow(ctx);
-                            },
-                    ),
-                    if (!_osDnsIsFamilySafe) ...[
-                      const SizedBox(height: 6),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF10B981),
-                            side: const BorderSide(color: Color(0xFF10B981)),
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                          ),
-                          icon: const Icon(
-                            Icons.verified_user_rounded,
-                            size: 16,
-                          ),
-                          label: Text(
-                            _tr('wizStep3VerifyBtn'),
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          onPressed: () async {
-                            await _channel.invokeMethod(
-                              'confirmManualDnsSetup',
-                              {'host': _dnsHost},
-                            );
-                            await _refreshNativeStatus();
-                            if (sCtx.mounted) setWizardState(() {});
-                          },
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 10),
-                    // STEP 4: PRINT PHYSICAL QR CODE & KEEP IN ANOTHER ROOM (Hidden at Night!)
-                    _buildWizardStepTile(
-                      step: '4',
-                      title: _tr('wizStep4Title'),
-                      subtitle: _isNightWindow
-                          ? _tr('qrHiddenNightMsg')
-                          : (_qrSetupVerified
-                              ? _tr('wizStep4SubDone')
-                              : _tr('wizStep4SubTodo')),
-                      isDone: _qrSetupVerified,
-                      buttonLabel: _isNightWindow ? '🌙 Night' : '🖨️ Print',
-                      onTap: _isNightWindow
-                          ? null
-                          : () async {
-                              await _printPhysicalQrSheet();
-                            },
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        if (!_isNightWindow) ...[
+                          const SizedBox(width: 10),
                           Expanded(
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.white,
-                                side: const BorderSide(color: Colors.white24),
+                            child: Text(
+                              _tr('wizardTitle'),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.bold,
                               ),
-                              icon: const Icon(Icons.print_rounded, size: 16),
-                              label: Text(
-                                _tr('printQrBtn'),
-                                style: const TextStyle(fontSize: 11),
-                              ),
-                              onPressed: _printPhysicalQrSheet,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                        ],
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF10B981),
-                              side: const BorderSide(color: Color(0xFF10B981)),
-                            ),
+                          IconButton(
+                            tooltip: _tr('refreshBtn'),
                             icon: const Icon(
-                                Icons.qr_code_scanner_rounded, size: 16),
-                            label: Text(
-                              _tr('testQrScanBtn'),
-                              style: const TextStyle(
-                                  fontSize: 11, fontWeight: FontWeight.bold),
+                              Icons.refresh_rounded,
+                              color: Color(0xFF10B981),
+                              size: 20,
                             ),
                             onPressed: () async {
-                              await _scanPhysicalQrWithCamera(ctx);
-                              if (sCtx.mounted) setWizardState(() {});
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    _buildWizardStepTile(
-                      step: '5',
-                      title: _tr('wizStep5Title'),
-                      subtitle: _isDefaultLauncher
-                          ? _tr('wizStep5SubDone')
-                          : _tr('wizStep5SubTodo'),
-                      isDone: _isDefaultLauncher,
-                      buttonLabel: _isDefaultLauncher
-                          ? _tr('grantedBtn')
-                          : _tr('setDefaultBtn'),
-                      onTap: (_isDefaultLauncher || _isNightWindow)
-                          ? null
-                          : () async {
-                              await _channel
-                                  .invokeMethod('requestDefaultLauncher');
-                              await Future.delayed(const Duration(seconds: 1));
                               await _refreshNativeStatus();
                               if (sCtx.mounted) setWizardState(() {});
                             },
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF10B981),
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        onPressed: () {
-                          _refreshNativeStatus();
-                          Navigator.pop(mCtx);
-                        },
-                        child: Text(
-                          _tr('doneVerifyBtn'),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white70,
+                              size: 22,
+                            ),
+                            onPressed: () => Navigator.pop(mCtx),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '($completedSteps / 5) • ${_tr('wizardSubtitle')}',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: completedSteps / 5.0,
+                        minHeight: 6,
+                        backgroundColor: Colors.white12,
+                        color: const Color(0xFF10B981),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      const SizedBox(height: 12),
+
+                      if (isNightLocked)
+                        Flexible(
+                          child: SingleChildScrollView(
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(18),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF181524),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: Colors.purpleAccent,
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.lock_clock_rounded,
+                                        color: Colors.purpleAccent,
+                                        size: 28,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          '🌙🔒 ${_tr('nightModeBadge')} (22:00 – 06:00)',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    _tr('nightOnlyQrNote'),
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 13,
+                                      height: 1.45,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black26,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: const Color(0xFF10B981)
+                                            .withValues(alpha: 0.5),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '🔒 1. ${_tr('wizStep1Title')} — ${_tr('grantedBtn')}',
+                                          style: const TextStyle(
+                                            color: Color(0xFF10B981),
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '🔒 2. ${_tr('wizStep2Title')} — ${_tr('grantedBtn')}',
+                                          style: const TextStyle(
+                                            color: Color(0xFF10B981),
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '🔒 3. ${_tr('safeDnsTitle')} ($_osDnsSpecifier) — ${_tr('grantedBtn')}',
+                                          style: const TextStyle(
+                                            color: Color(0xFF10B981),
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '🔒 4. ${_tr('wizStep4Title')} — ${_tr('qrLockedBadge')}',
+                                          style: const TextStyle(
+                                            color: Colors.amber,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '🔒 5. ${_tr('wizStep5Title')} — ${_isDefaultLauncher ? _tr('grantedBtn') : _tr('qrLockedBadge')}',
+                                          style: const TextStyle(
+                                            color: Color(0xFF10B981),
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.purpleAccent,
+                                        side: const BorderSide(
+                                          color: Colors.purpleAccent,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                        ),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.qr_code_scanner_rounded,
+                                        size: 18,
+                                      ),
+                                      label: Text(
+                                        _tr('qrScanPrimaryBtn'),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                      onPressed: () async {
+                                        final bool ok =
+                                            await _scanPhysicalQrWithCamera(
+                                                ctx);
+                                        if (ok) {
+                                          setState(() =>
+                                              _settingsUnlockedSession = true);
+                                          if (sCtx.mounted) {
+                                            setWizardState(() {});
+                                          }
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor:
+                                            const Color(0xFF10B981),
+                                        foregroundColor: Colors.black,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 13,
+                                        ),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.arrow_back_rounded,
+                                        size: 18,
+                                      ),
+                                      label: Text(
+                                        _tr('navHome'),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      onPressed: () => Navigator.pop(mCtx),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        Flexible(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildWizardStepTile(
+                                  step: '1',
+                                  title: _tr('wizStep1Title'),
+                                  subtitle: _hasUsageAccess
+                                      ? _tr('wizStep1SubDone')
+                                      : _tr('wizStep1SubTodo'),
+                                  isDone: _hasUsageAccess,
+                                  buttonLabel: _hasUsageAccess
+                                      ? '🔒 ${_tr('grantedBtn')}'
+                                      : _tr('grantBtn'),
+                                  onTap: _hasUsageAccess
+                                      ? null
+                                      : () async {
+                                          await _channel.invokeMethod(
+                                              'requestUsageStatsPermission');
+                                          await Future.delayed(
+                                              const Duration(seconds: 1));
+                                          await _refreshNativeStatus();
+                                          if (sCtx.mounted) {
+                                            setWizardState(() {});
+                                          }
+                                        },
+                                ),
+                                const SizedBox(height: 10),
+                                _buildWizardStepTile(
+                                  step: '2',
+                                  title: _tr('wizStep2Title'),
+                                  subtitle: _hasOverlayPermission
+                                      ? _tr('wizStep2SubDone')
+                                      : _tr('wizStep2SubTodo'),
+                                  isDone: _hasOverlayPermission,
+                                  buttonLabel: _hasOverlayPermission
+                                      ? '🔒 ${_tr('grantedBtn')}'
+                                      : _tr('grantBtn'),
+                                  onTap: _hasOverlayPermission
+                                      ? null
+                                      : () async {
+                                          await _channel.invokeMethod(
+                                              'requestOverlayPermission');
+                                          await Future.delayed(
+                                              const Duration(seconds: 1));
+                                          await _refreshNativeStatus();
+                                          if (sCtx.mounted) {
+                                            setWizardState(() {});
+                                          }
+                                        },
+                                ),
+                                const SizedBox(height: 10),
+                                _buildWizardStepTile(
+                                  step: '3',
+                                  title: '${_tr('wizStep3Title')} ($_dnsHost)',
+                                  subtitle: _osDnsIsFamilySafe
+                                      ? _tr('wizStep3SubDone')
+                                      : _tr('wizStep3SubTodo'),
+                                  isDone: _osDnsIsFamilySafe,
+                                  buttonLabel: _osDnsIsFamilySafe
+                                      ? '🔒 ${_tr('grantedBtn')}'
+                                      : '1-Tap',
+                                  onTap: _osDnsIsFamilySafe
+                                      ? null
+                                      : () {
+                                          Navigator.pop(mCtx);
+                                          _activateSafePrivateDnsNow(ctx);
+                                        },
+                                ),
+                                if (!_osDnsIsFamilySafe) ...[
+                                  const SizedBox(height: 6),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor:
+                                            const Color(0xFF10B981),
+                                        side: const BorderSide(
+                                            color: Color(0xFF10B981)),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 10),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.verified_user_rounded,
+                                        size: 16,
+                                      ),
+                                      label: Text(
+                                        _tr('wizStep3VerifyBtn'),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      onPressed: () async {
+                                        await _channel.invokeMethod(
+                                          'confirmManualDnsSetup',
+                                          {'host': _dnsHost},
+                                        );
+                                        await _refreshNativeStatus();
+                                        if (sCtx.mounted) {
+                                          setWizardState(() {});
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 10),
+                                // STEP 4: PRINT PHYSICAL QR CODE & KEEP IN ANOTHER ROOM (Strictly Locked at Night!)
+                                _buildWizardStepTile(
+                                  step: '4',
+                                  title: _tr('wizStep4Title'),
+                                  subtitle: _isNightWindow
+                                      ? _tr('qrHiddenNightMsg')
+                                      : (_qrSetupVerified
+                                          ? _tr('wizStep4SubDone')
+                                          : _tr('wizStep4SubTodo')),
+                                  isDone: _qrSetupVerified,
+                                  buttonLabel: _isNightWindow
+                                      ? '🔒 Night'
+                                      : '🖨️ Print',
+                                  onTap: _isNightWindow
+                                      ? null
+                                      : () async {
+                                          await _printPhysicalQrSheet();
+                                        },
+                                ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    if (!_isNightWindow) ...[
+                                      Expanded(
+                                        child: OutlinedButton.icon(
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.white,
+                                            side: const BorderSide(
+                                                color: Colors.white24),
+                                          ),
+                                          icon: const Icon(Icons.print_rounded,
+                                              size: 16),
+                                          label: Text(
+                                            _tr('printQrBtn'),
+                                            style:
+                                                const TextStyle(fontSize: 11),
+                                          ),
+                                          onPressed: _printPhysicalQrSheet,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                    ],
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor:
+                                              const Color(0xFF10B981),
+                                          side: const BorderSide(
+                                              color: Color(0xFF10B981)),
+                                        ),
+                                        icon: const Icon(
+                                            Icons.qr_code_scanner_rounded,
+                                            size: 16),
+                                        label: Text(
+                                          _tr('testQrScanBtn'),
+                                          style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                        onPressed: () async {
+                                          await _scanPhysicalQrWithCamera(ctx);
+                                          if (sCtx.mounted) {
+                                            setWizardState(() {});
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                _buildWizardStepTile(
+                                  step: '5',
+                                  title: _tr('wizStep5Title'),
+                                  subtitle: _isDefaultLauncher
+                                      ? _tr('wizStep5SubDone')
+                                      : _tr('wizStep5SubTodo'),
+                                  isDone: _isDefaultLauncher,
+                                  buttonLabel: _isDefaultLauncher
+                                      ? '🔒 ${_tr('grantedBtn')}'
+                                      : (_isNightWindow
+                                          ? '🔒 Night'
+                                          : _tr('setDefaultBtn')),
+                                  onTap:
+                                      (_isDefaultLauncher || _isNightWindow)
+                                          ? null
+                                          : () async {
+                                              await _channel.invokeMethod(
+                                                  'requestDefaultLauncher');
+                                              await Future.delayed(
+                                                  const Duration(seconds: 1));
+                                              await _refreshNativeStatus();
+                                              if (sCtx.mounted) {
+                                                setWizardState(() {});
+                                              }
+                                            },
+                                ),
+                                const SizedBox(height: 16),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor:
+                                          const Color(0xFF10B981),
+                                      foregroundColor: Colors.black,
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 14),
+                                    ),
+                                    icon: const Icon(
+                                        Icons.check_circle_outline_rounded,
+                                        size: 18),
+                                    onPressed: () {
+                                      _refreshNativeStatus();
+                                      Navigator.pop(mCtx);
+                                    },
+                                    label: Text(
+                                      _tr('doneVerifyBtn'),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -2172,26 +2449,42 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       home: Directionality(
         textDirection: _isRtl ? TextDirection.rtl : TextDirection.ltr,
         child: Builder(
-          builder: (innerCtx) => Scaffold(
-            key: _scaffoldKey,
-            backgroundColor: _bgColor,
-            appBar: _buildTopAppBar(innerCtx),
-            drawer: _buildGlobalDrawer(innerCtx),
-            body: SafeArea(
-              child: IndexedStack(
-                index: _currentTab,
-                children: [
-                  _buildHomePage(innerCtx),
-                  _buildAppsPage(innerCtx),
-                  _buildPurityDnsPage(innerCtx),
-                  _buildFocusPage(innerCtx),
-                  _buildSettingsPage(innerCtx),
-                  _buildKeepNotesPage(innerCtx),
-                  _buildUserGuidePage(innerCtx),
-                ],
+          builder: (innerCtx) => PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (bool didPop, Object? result) {
+              if (didPop) return;
+              if (_scaffoldKey.currentState?.isDrawerOpen == true) {
+                Navigator.of(innerCtx).pop();
+                return;
+              }
+              if (_currentTab != 0) {
+                setState(() {
+                  _currentTab = 0;
+                  _settingsUnlockedSession = false;
+                });
+              }
+            },
+            child: Scaffold(
+              key: _scaffoldKey,
+              backgroundColor: _bgColor,
+              appBar: _buildTopAppBar(innerCtx),
+              drawer: _buildGlobalDrawer(innerCtx),
+              body: SafeArea(
+                child: IndexedStack(
+                  index: _currentTab,
+                  children: [
+                    _buildHomePage(innerCtx),
+                    _buildAppsPage(innerCtx),
+                    _buildPurityDnsPage(innerCtx),
+                    _buildFocusPage(innerCtx),
+                    _buildSettingsPage(innerCtx),
+                    _buildKeepNotesPage(innerCtx),
+                    _buildUserGuidePage(innerCtx),
+                  ],
+                ),
               ),
+              // NO BOTTOM BAR — 100% Minimalist & Sidebar Driven!
             ),
-            // NO BOTTOM BAR — 100% Minimalist & Sidebar Driven!
           ),
         ),
       ),
@@ -2226,7 +2519,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: InkWell(
-                onTap: () => setState(() => _currentTab = 0),
+                onTap: () => setState(() {
+                  _currentTab = 0;
+                  _settingsUnlockedSession = false;
+                }),
                 borderRadius: BorderRadius.circular(16),
                 child: Container(
                   padding:
@@ -2575,20 +2871,31 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF10B981),
                         foregroundColor: Colors.black,
+                        disabledBackgroundColor: Colors.white12,
+                        disabledForegroundColor: const Color(0xFF10B981),
                         padding: const EdgeInsets.symmetric(vertical: 10),
                       ),
-                      icon: const Icon(Icons.bolt_rounded, size: 18),
+                      icon: Icon(
+                        _osDnsIsFamilySafe
+                            ? Icons.lock_rounded
+                            : Icons.bolt_rounded,
+                        size: 18,
+                      ),
                       label: Text(
-                        _tr('activateDnsBtn'),
+                        _osDnsIsFamilySafe
+                            ? '🔒 ${_tr('dnsVerified')}'
+                            : _tr('activateDnsBtn'),
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _activateSafePrivateDnsNow(ctx);
-                      },
+                      onPressed: (_osDnsIsFamilySafe && _isNightWindow)
+                          ? null
+                          : () {
+                              Navigator.pop(ctx);
+                              _activateSafePrivateDnsNow(context);
+                            },
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -4478,7 +4785,160 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     );
   }
 
+  Widget _buildNightSettingsGateCard(
+    BuildContext ctx, {
+    required String targetTitle,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: _isNightWindow ? Colors.redAccent : Colors.amber,
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: (_isNightWindow ? Colors.redAccent : Colors.amber)
+                  .withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              _isNightWindow
+                  ? Icons.nights_stay_rounded
+                  : Icons.lock_clock_rounded,
+              color: _isNightWindow ? Colors.redAccent : Colors.amber,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _isNightWindow
+                ? '🌙🔒 ${_tr('nightModeActive')}'
+                : '🔒 $targetTitle',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _textColor,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _isNightWindow
+                ? _tr('nightOnlyQrNote')
+                : _tr('settingsLockedBanner'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _subTextColor,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF10B981)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.verified_user_rounded,
+                  color: Color(0xFF10B981),
+                  size: 16,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    '✅ ${_tr('dnsVerified')} ($_osDnsSpecifier)',
+                    style: const TextStyle(
+                      color: Color(0xFF10B981),
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF10B981),
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              icon: Icon(
+                _isNightWindow
+                    ? Icons.qr_code_scanner_rounded
+                    : Icons.lock_open_rounded,
+              ),
+              label: Text(
+                _isNightWindow ? _tr('scanCameraQrBtn') : _tr('unlockBtn'),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              onPressed: () async {
+                if (_isNightWindow) {
+                  final bool ok = await _scanPhysicalQrWithCamera(ctx);
+                  if (ok) {
+                    setState(() => _settingsUnlockedSession = true);
+                  }
+                } else {
+                  _requireProtectionUnlock(
+                    ctx,
+                    targetTitle: targetTitle,
+                    onUnlocked: () {
+                      setState(() => _settingsUnlockedSession = true);
+                    },
+                  );
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _textColor,
+                side: const BorderSide(color: Colors.white24),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: const Icon(Icons.arrow_back_rounded, size: 18),
+              label: Text(
+                _tr('navHome'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onPressed: () => setState(() => _currentTab = 0),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSafePrivateDnsCard(BuildContext ctx) {
+    // Strictly lock DNS settings at night (22:00 - 06:00) once Safe DNS is active!
+    if (_isNightWindow && _osDnsIsFamilySafe && !_settingsUnlockedSession) {
+      return _buildNightSettingsGateCard(
+        ctx,
+        targetTitle: _tr('safeDnsTitle'),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -4570,20 +5030,26 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF10B981),
                 foregroundColor: Colors.black,
+                disabledBackgroundColor:
+                    const Color(0xFF10B981).withValues(alpha: 0.16),
+                disabledForegroundColor: const Color(0xFF10B981),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               icon: Icon(
                 _osDnsIsFamilySafe
-                    ? Icons.verified_user_rounded
+                    ? Icons.lock_rounded
                     : Icons.security_rounded,
               ),
               label: Text(
                 _osDnsIsFamilySafe
-                    ? '✅ ${_tr('dnsVerified')} ($_osDnsSpecifier)'
+                    ? '🔒 ${_tr('dnsVerified')} ($_osDnsSpecifier)'
                     : '${_tr('activateDnsBtn')} ($_dnsHost)',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              onPressed: () => _activateSafePrivateDnsNow(ctx),
+              // When Safe DNS is already verified, NEVER open OS Wireless/DNS Settings!
+              onPressed: _osDnsIsFamilySafe
+                  ? null
+                  : () => _activateSafePrivateDnsNow(ctx),
             ),
           ),
           const SizedBox(height: 8),
@@ -5470,6 +5936,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   // PAGE 5: SETTINGS & IMPACT (WITH STICKY SUB-TAB BAR)
   // =========================================================================
   Widget _buildSettingsPage(BuildContext ctx) {
+    final bool isCoreProtected =
+        _hasUsageAccess && _hasOverlayPermission && _osDnsIsFamilySafe;
+    final bool isSystemLocked =
+        (_isNightWindow || _phoneSettingsLocked) &&
+            isCoreProtected &&
+            !_settingsUnlockedSession;
     return Column(
       children: [
         _buildStickySubTabBar(
@@ -5486,45 +5958,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              if (!_settingsUnlockedSession)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 14),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.amber),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.lock_outline_rounded,
-                          color: Colors.amber),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _tr('settingsLockedBanner'),
-                          style: TextStyle(color: _textColor, fontSize: 12),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.amber,
-                          foregroundColor: Colors.black,
-                        ),
-                        onPressed: () => _requireProtectionUnlock(
-                          ctx,
-                          targetTitle: _tr('navSettings'),
-                          onUnlocked: () =>
-                              setState(() => _settingsUnlockedSession = true),
-                        ),
-                        child: Text(_tr('unlockBtn')),
-                      ),
-                    ],
-                  ),
-                ),
               if (_settingsSubTab == 0 || _settingsSubTab == 3)
-                _buildSystemPermissionsCard(ctx),
+                isSystemLocked
+                    ? _buildNightSettingsGateCard(
+                        ctx,
+                        targetTitle: _tr('navSettings'),
+                      )
+                    : _buildSystemPermissionsCard(ctx),
               if (_settingsSubTab == 1 || _settingsSubTab == 3) ...[
                 const SizedBox(height: 14),
                 _buildImpactReportCard(),
@@ -5598,8 +6038,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   : () async {
                       await _channel.invokeMethod('requestUsageStatsPermission');
                     },
-              child:
-                  Text(_hasUsageAccess ? _tr('grantedBtn') : _tr('grantBtn')),
+              child: Text(
+                  _hasUsageAccess ? '🔒 ${_tr('grantedBtn')}' : _tr('grantBtn')),
             ),
           ),
           const Divider(color: Colors.white12),
@@ -5643,8 +6083,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   : () async {
                       await _channel.invokeMethod('requestOverlayPermission');
                     },
-              child: Text(
-                  _hasOverlayPermission ? _tr('grantedBtn') : _tr('grantBtn')),
+              child: Text(_hasOverlayPermission
+                  ? '🔒 ${_tr('grantedBtn')}'
+                  : _tr('grantBtn')),
             ),
           ),
           const Divider(color: Colors.white12),

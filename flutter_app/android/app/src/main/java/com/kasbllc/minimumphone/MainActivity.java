@@ -936,7 +936,11 @@ public class MainActivity extends FlutterActivity {
 
     @Override
     public void onBackPressed() {
-        // Stay inside Minimum Phone when Back is pressed on Home
+        // Forward Back press to Flutter so modals (5-Step Setup Guide, dialogs, drawers) and sub-pages pop cleanly,
+        // while PopScope on the root Home tab prevents closing the Home Launcher activity!
+        if (getFlutterEngine() != null) {
+            getFlutterEngine().getNavigationChannel().popRoute();
+        }
     }
 
     private void startQrScanFromFlutter(String prompt, MethodChannel.Result result) {

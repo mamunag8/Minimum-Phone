@@ -22,11 +22,13 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:enableOnBackInvokedCallback="false"
         android:supportsRtl="true">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:enableOnBackInvokedCallback="false"
             android:launchMode="singleTask"
             android:clearTaskOnLaunch="true"
             android:stateNotNeeded="true"
