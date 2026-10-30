@@ -109,7 +109,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 Please unlock via the Protection Gate first.";
             case "toastCameraPerm": return "📷 Camera permission is required to scan your Physical QR Card.";
             case "scannerPrompt": return "Scan your Physical Minimum Phone QR Card";
-            default: return key;
+                        case "remBadge": return "⏳ MINDFUL TIME REMINDER";
+            case "remTitle": return "10+ Minutes Spent Here";
+            case "remSub": return "You opened this browser or social app intentionally, and 10+ minutes have passed. If it is no longer necessary, close it now and protect your focus.";
+            case "remStopBtn": return "🏠 Stop Usage & Go Home";
+            case "remMore10Btn": return "👍 +10m";
+            case "remWork30Btn": return "💼 Working (+30m)";
+default: return key;
         }
     }
 
@@ -161,7 +167,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 অনুগ্রহ করে প্রথমে প্রোটেকশন গেট আনলক করুন।";
             case "toastCameraPerm": return "📷 QR কোড স্ক্যান করার জন্য ক্যামেরা পারমিশন প্রয়োজন।";
             case "scannerPrompt": return "আপনার প্রিন্ট করা ফিজিক্যাল QR কার্ড স্ক্যান করুন";
-            default: return en(key);
+                        case "remBadge": return "⏳ সচেতন সময় রিমাইন্ডার";
+            case "remTitle": return "১০+ মিনিট অতিবাহিত হয়েছে";
+            case "remSub": return "আপনি প্রয়োজনে এই ব্রাউজার বা সোশ্যাল অ্যাপটি খুলেছিলেন এবং ১০ মিনিটের বেশি সময় পার হয়েছে। যদি কাজ শেষ হয়ে থাকে, তবে এখনই বন্ধ করে আপনার মনোযোগ রক্ষা করুন।";
+            case "remStopBtn": return "🏠 ব্যবহার থামান ও হোমে ফিরুন";
+            case "remMore10Btn": return "👍 +১০ মিনিট";
+            case "remWork30Btn": return "💼 কাজ চলছে (+৩০ মি.)";
+default: return en(key);
         }
     }
 
@@ -213,7 +225,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 يرجى فتح بوابة الحماية أولاً.";
             case "toastCameraPerm": return "📷 إذن الكاميرا مطلوب لمسح بطاقة QR الورقية.";
             case "scannerPrompt": return "امسح بطاقة رمز QR الورقية الخاصة بك";
-            default: return en(key);
+                        case "remBadge": return "⏳ تذكير الوعي بالوقت";
+            case "remTitle": return "مرت أكثر من 10 دقائق هنا";
+            case "remSub": return "لقد فتحت هذا المتصفح أو التطبيق الاجتماعي لغرض معين ومرت أكثر من 10 دقائق. إذا لم يعد الأمر ضرورياً الآن، أغلقه واحفظ وقتك وتركيزك.";
+            case "remStopBtn": return "🏠 إيقاف الاستخدام والعودة للرئيسية";
+            case "remMore10Btn": return "👍 +10 دقائق";
+            case "remWork30Btn": return "💼 عمل ضروري (+30 د)";
+default: return en(key);
         }
     }
 
@@ -265,7 +283,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 براہ کرم پہلے پروٹیکشن گیٹ سے ان لاک کریں۔";
             case "toastCameraPerm": return "📷 QR کوڈ اسکین کرنے کے لیے کیمرے کی اجازت ضروری ہے۔";
             case "scannerPrompt": return "اپنا پرنٹ شدہ فزیکل QR کارڈ اسکین کریں";
-            default: return en(key);
+                        case "remBadge": return "⏳ وقت کی یاد دہانی";
+            case "remTitle": return "یہاں 10+ منٹ گزر چکے ہیں";
+            case "remSub": return "آپ نے یہ براؤزر یا سوشل ایپ کسی ضرورت سے کھولی تھی اور 10 منٹ سے زیادہ گزر چکے ہیں۔ اگر اب ضرورت نہیں تو اسے بند کریں اور اپنا وقت بچائیں۔";
+            case "remStopBtn": return "🏠 استعمال روکیں اور ہوم پر جائیں";
+            case "remMore10Btn": return "👍 +10 منٹ";
+            case "remWork30Btn": return "💼 ضروری کام (+30 منٹ)";
+default: return en(key);
         }
     }
 
@@ -317,7 +341,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 Harap buka kunci melalui Gerbang Proteksi terlebih dahulu.";
             case "toastCameraPerm": return "📷 Izin kamera diperlukan untuk memindai Kartu QR Fisik.";
             case "scannerPrompt": return "Pindai Kartu QR Fisik Minimum Phone Anda";
-            default: return en(key);
+                        case "remBadge": return "⏳ PENGINGAT WAKTU SADAR";
+            case "remTitle": return "10+ Menit Berlalu di Aplikasi Ini";
+            case "remSub": return "Anda membuka peramban atau aplikasi sosial ini dengan sengaja, dan 10+ menit telah berlalu. Jika sudah tidak diperlukan, tutup sekarang dan jaga fokus Anda.";
+            case "remStopBtn": return "🏠 Berhenti & Kembali ke Beranda";
+            case "remMore10Btn": return "👍 +10 mnt";
+            case "remWork30Btn": return "💼 Sedang Kerja (+30 mnt)";
+default: return en(key);
         }
     }
 
@@ -369,7 +399,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 Lütfen önce Koruma Kapısından kilidi açın.";
             case "toastCameraPerm": return "📷 Fiziksel QR Kartını okutmak için kamera izni gereklidir.";
             case "scannerPrompt": return "Fiziksel Minimum Phone QR Kartınızı Okutun";
-            default: return en(key);
+                        case "remBadge": return "⏳ BİLİNÇLİ ZAMAN HATIRLATICISI";
+            case "remTitle": return "Burada 10+ Dakika Geçti";
+            case "remSub": return "Bu tarayıcıyı veya sosyal uygulamayı bilerek açtınız ve 10 dakikadan fazla zaman geçti. Artık gerekli değilse şimdi kapatıp odağınızı koruyun.";
+            case "remStopBtn": return "🏠 Kullanımı Durdur ve Ana Ekrana Dön";
+            case "remMore10Btn": return "👍 +10 dk";
+            case "remWork30Btn": return "💼 Çalışıyorum (+30 dk)";
+default: return en(key);
         }
     }
 
@@ -421,7 +457,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 कृपया पहले सुरक्षा गेट से अनलॉक करें।";
             case "toastCameraPerm": return "📷 QR कोड स्कैन करने के लिए कैमरा अनुमति आवश्यक है।";
             case "scannerPrompt": return "अपना प्रिंट किया हुआ फ़िज़िकल QR कार्ड स्कैन करें";
-            default: return en(key);
+                        case "remBadge": return "⏳ सचेत समय अनुस्मारक";
+            case "remTitle": return "यहाँ 10+ मिनट बीत चुके हैं";
+            case "remSub": return "आपने यह ब्राउज़र या सोशल ऐप किसी काम से खोला था और 10 मिनट से अधिक बीत चुके हैं। यदि अब यह आवश्यक नहीं है, तो इसे बंद करें और अपना फ़ोकस बचाएँ।";
+            case "remStopBtn": return "🏠 उपयोग रोकें और होम पर लौटें";
+            case "remMore10Btn": return "👍 +10 मि.";
+            case "remWork30Btn": return "💼 ज़रूरी काम (+30 मि.)";
+default: return en(key);
         }
     }
 
@@ -473,7 +515,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 Sila buka kunci melalui Pintu Perlindungan dahulu.";
             case "toastCameraPerm": return "📷 Kebenaran kamera diperlukan untuk mengimbas Kad QR Fizikal.";
             case "scannerPrompt": return "Imbas Kad QR Fizikal Minimum Phone Anda";
-            default: return en(key);
+                        case "remBadge": return "⏳ PERINGATAN MASA SEDAR";
+            case "remTitle": return "10+ Minit Berlalu di Sini";
+            case "remSub": return "Anda membuka pelayar atau aplikasi sosial ini dengan tujuan tertentu, dan 10+ minit telah berlalu. Jika tidak lagi perlu, tutup sekarang dan lindungi fokus anda.";
+            case "remStopBtn": return "🏠 Berhenti & Kembali ke Utama";
+            case "remMore10Btn": return "👍 +10 min";
+            case "remWork30Btn": return "💼 Bekerja (+30 min)";
+default: return en(key);
         }
     }
 
@@ -525,7 +573,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 Primero desbloquea la Puerta de Protección.";
             case "toastCameraPerm": return "📷 Se requiere permiso de cámara para escanear la Tarjeta QR.";
             case "scannerPrompt": return "Escanea tu Tarjeta QR Física de Minimum Phone";
-            default: return en(key);
+                        case "remBadge": return "⏳ RECORDATORIO DE TIEMPO CONSCIENTE";
+            case "remTitle": return "Más de 10 Minutos en Esta App";
+            case "remSub": return "Abriste este navegador o red social intencionalmente y ya pasaron más de 10 minutos. Si ya no es estrictamente necesario, ciérralo y protege tu enfoque.";
+            case "remStopBtn": return "🏠 Detener Uso y Volver al Inicio";
+            case "remMore10Btn": return "👍 +10 min";
+            case "remWork30Btn": return "💼 Trabajando (+30 min)";
+default: return en(key);
         }
     }
 
@@ -577,7 +631,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 Veuillez d'abord déverrouiller le Portail de Protection.";
             case "toastCameraPerm": return "📷 L'autorisation de la caméra est requise pour scanner la Carte QR.";
             case "scannerPrompt": return "Scannez votre Carte QR Physique Minimum Phone";
-            default: return en(key);
+                        case "remBadge": return "⏳ RAPPEL DE TEMPS CONSCIENT";
+            case "remTitle": return "Plus de 10 Minutes Passées Ici";
+            case "remSub": return "Vous avez ouvert ce navigateur ou réseau social intentionnellement et plus de 10 minutes se sont écoulées. Si ce n'est plus nécessaire, fermez-le et gardez votre concentration.";
+            case "remStopBtn": return "🏠 Arrêter et Retourner à l'Accueil";
+            case "remMore10Btn": return "👍 +10 min";
+            case "remWork30Btn": return "💼 Travail (+30 min)";
+default: return en(key);
         }
     }
 
@@ -629,7 +689,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 Bitte zuerst über das Schutztor entsperren.";
             case "toastCameraPerm": return "📷 Kameraberechtigung ist zum Scannen der QR-Karte erforderlich.";
             case "scannerPrompt": return "Scannen Sie Ihre physische Minimum Phone QR-Karte";
-            default: return en(key);
+                        case "remBadge": return "⏳ ACHTSAME ZEITERINNERUNG";
+            case "remTitle": return "Über 10 Minuten Hier Verbracht";
+            case "remSub": return "Sie haben diesen Browser oder diese soziale App bewusst geöffnet, und über 10 Minuten sind vergangen. Wenn es nicht mehr nötig ist, schließen Sie sie jetzt.";
+            case "remStopBtn": return "🏠 Nutzung Beenden & zum Startbildschirm";
+            case "remMore10Btn": return "👍 +10 Min.";
+            case "remWork30Btn": return "💼 Arbeit (+30 Min.)";
+default: return en(key);
         }
     }
 
@@ -681,7 +747,13 @@ public class NativeI18n {
             case "toastGateRequired": return "🔒 Сначала пройдите Ворота Защиты.";
             case "toastCameraPerm": return "📷 Для сканирования QR-карты требуется разрешение камеры.";
             case "scannerPrompt": return "Отсканируйте вашу физическую QR-карту Minimum Phone";
-            default: return en(key);
+                        case "remBadge": return "⏳ ОСОЗНАННОЕ НАПОМИНАНИЕ О ВРЕМЕНИ";
+            case "remTitle": return "Прошло Более 10 Минут";
+            case "remSub": return "Вы открыли этот браузер или соцсеть осознанно, и прошло уже более 10 минут. Если в этом больше нет необходимости, закройте приложение и сохраните фокус.";
+            case "remStopBtn": return "🏠 Завершить и Вернуться Домой";
+            case "remMore10Btn": return "👍 +10 мин";
+            case "remWork30Btn": return "💼 По работе (+30 мин)";
+default: return en(key);
         }
     }
 }

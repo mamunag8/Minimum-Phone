@@ -181,6 +181,8 @@ public class MainActivity extends FlutterActivity {
                             Integer startH = call.argument("nightStartHour");
                             Integer endH = call.argument("nightEndHour");
                             String lang = call.argument("lang");
+                            Boolean usageRemEnabled = call.argument("usageReminderEnabled");
+                            Integer usageRemMins = call.argument("usageReminderMinutes");
 
                             SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
                             SharedPreferences.Editor ed = prefs.edit();
@@ -198,6 +200,8 @@ public class MainActivity extends FlutterActivity {
                             if (startH != null) ed.putInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, startH);
                             if (endH != null) ed.putInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, endH);
                             if (lang != null && !lang.isEmpty()) ed.putString("app_lang", lang);
+                            if (usageRemEnabled != null) ed.putBoolean(FortressWatchdogService.KEY_USAGE_REMINDER_ENABLED, usageRemEnabled);
+                            if (usageRemMins != null) ed.putInt(FortressWatchdogService.KEY_USAGE_REMINDER_MINUTES, usageRemMins);
                             ed.apply();
 
                             int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);

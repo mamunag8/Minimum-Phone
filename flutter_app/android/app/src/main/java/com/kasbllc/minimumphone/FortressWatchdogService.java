@@ -66,6 +66,8 @@ public class FortressWatchdogService extends Service {
     public static final String KEY_NIGHT_LOCKED_PACKAGES = "night_locked_packages";
     public static final String KEY_QR_VERIFIED_UNLOCK_UNTIL_MS = "qr_verified_unlock_until_ms";
     public static final String KEY_CLOCK_TAMPER_UNTIL_MS = "clock_tamper_until_ms";
+    public static final String KEY_USAGE_REMINDER_ENABLED = "usage_reminder_enabled";
+    public static final String KEY_USAGE_REMINDER_MINUTES = "usage_reminder_minutes";
     public static final String KEY_APP_STATE_JSON = "flutter_app_state_v2";
 
     private static volatile boolean watchdogActive = false;
@@ -80,6 +82,13 @@ public class FortressWatchdogService extends Service {
     private boolean lastKnownOverlayGranted = false;
     private String lastKnownForegroundPackage = "";
     private String lastKnownForegroundClass = "";
+
+    // Continuous Browser / Social Usage Session Tracker (Gentle 10-Minute Reminder)
+    private long activeSessionAccumulatedMs = 0L;
+    private long lastSessionTickElapsedMs = 0L;
+    private long lastDistractingAppSeenElapsedMs = 0L;
+    private long nextReminderThresholdMs = 10L * 60000L;
+    private View activeReminderView = null;
 
     private WindowManager overlayWindowManager = null;
     private View activeOverlayView = null;
@@ -286,6 +295,10 @@ public class FortressWatchdogService extends Service {
         // When inside Minimum Phone (MainActivity, NativeFortressLockActivity, or QR CaptureActivity), remove overlay shield
         if (lowerPkg.contains("minimumphone")) {
             hideOverlayShield();
+            hideGentleUsageReminderCard();
+            if (lastDistractingAppSeenElapsedMs > 0L && (elapsed - lastDistractingAppSeenElapsedMs > 120000L)) {
+                resetUsageSessionTracker(prefs);
+            }
             return;
         }
 
@@ -392,17 +405,47 @@ public class FortressWatchdogService extends Service {
             lowerPkg.contains("ucmobile") ||
             lowerPkg.contains("kiwi") ||
             lowerPkg.contains("vivaldi") ||
-            lowerPkg.contains("browser");
+            lowerPkg.contains("browser") ||
+            lowerClass.contains("incognito") ||
+            lowerClass.contains("customtab");
+
+        boolean isSocialOrVideoApp =
+            lowerPkg.contains("youtube") ||
+            lowerPkg.contains("instagram") ||
+            lowerPkg.contains("facebook") ||
+            lowerPkg.contains("musically") ||
+            lowerPkg.contains("trill") ||
+            lowerPkg.contains("tiktok") ||
+            lowerPkg.contains("twitter") ||
+            lowerPkg.contains("reddit") ||
+            lowerPkg.contains("snapchat") ||
+            lowerPkg.contains("threads") ||
+            lowerPkg.contains("pinterest");
+
+        boolean isPlayStoreOrAppStore =
+            lowerPkg.equals("com.android.vending") ||
+            lowerPkg.equals("com.sec.android.app.samsungapps") ||
+            lowerPkg.equals("com.xiaomi.mipicks") ||
+            lowerPkg.equals("com.huawei.appmarket") ||
+            lowerPkg.equals("com.heytap.market") ||
+            lowerPkg.equals("com.oppo.market") ||
+            lowerPkg.equals("com.bbk.appstore");
 
         boolean isNightLockedApp = false;
         if ((isNightWindow && sleepScheduleEnabled) || isMonkActive) {
-            if (now >= qrVerifiedUnlockUntilMs && nightLockedCsv != null && !nightLockedCsv.isEmpty()) {
-                String[] lockedPkgs = nightLockedCsv.split(",");
-                for (String p : lockedPkgs) {
-                    String trimmed = p.trim().toLowerCase(Locale.ROOT);
-                    if (!trimmed.isEmpty() && lowerPkg.equals(trimmed)) {
-                        isNightLockedApp = true;
-                        break;
+            if (now >= qrVerifiedUnlockUntilMs) {
+                // At night (22:00-06:00), lock Google Play Store / App Stores and night-locked social/video apps
+                // so user cannot search for new apps or launch social apps via Play Store's "Open" button!
+                if (isPlayStoreOrAppStore || isSocialOrVideoApp) {
+                    isNightLockedApp = true;
+                } else if (nightLockedCsv != null && !nightLockedCsv.isEmpty()) {
+                    String[] lockedPkgs = nightLockedCsv.split(",");
+                    for (String p : lockedPkgs) {
+                        String trimmed = p.trim().toLowerCase(Locale.ROOT);
+                        if (!trimmed.isEmpty() && lowerPkg.equals(trimmed)) {
+                            isNightLockedApp = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -412,6 +455,7 @@ public class FortressWatchdogService extends Service {
         boolean shouldInterceptBrowser = isBrowserApp && (isEmergencyLockdown || isMonkActive || ((dnsShieldActive || isNightWindow) && !currentOsDnsValid));
 
         if (shouldInterceptSettings || shouldInterceptBrowser || isNightLockedApp) {
+            hideGentleUsageReminderCard();
             String reason = "settings_locked";
             if (shouldInterceptBrowser) {
                 reason = "dns_removed";
@@ -444,6 +488,219 @@ public class FortressWatchdogService extends Service {
             }
         } else {
             hideOverlayShield();
+
+            // Gentle Continuous Usage Reminder (Default: 10 minutes on Browser / Private Tab / Social / Video apps)
+            boolean reminderEnabled = prefs.getBoolean(KEY_USAGE_REMINDER_ENABLED, true);
+            int reminderMins = prefs.getInt(KEY_USAGE_REMINDER_MINUTES, 10);
+            if (reminderMins < 1) reminderMins = 10;
+
+            boolean isTrackedDistractingApp = isBrowserApp || isSocialOrVideoApp;
+            if (reminderEnabled && isTrackedDistractingApp) {
+                if (lastSessionTickElapsedMs > 0L) {
+                    long delta = elapsed - lastSessionTickElapsedMs;
+                    if (delta > 0L && delta < 5000L) {
+                        activeSessionAccumulatedMs += delta;
+                    }
+                }
+                lastSessionTickElapsedMs = elapsed;
+                lastDistractingAppSeenElapsedMs = elapsed;
+
+                if (nextReminderThresholdMs <= 0L) {
+                    nextReminderThresholdMs = reminderMins * 60000L;
+                }
+                if (activeSessionAccumulatedMs >= nextReminderThresholdMs) {
+                    showGentleUsageReminderCard(ctx, fgPkg);
+                }
+            } else {
+                lastSessionTickElapsedMs = 0L;
+                hideGentleUsageReminderCard();
+                // If user has stayed out of Browser/Social apps for 2+ minutes, reset session timer cleanly
+                if (lastDistractingAppSeenElapsedMs > 0L && (elapsed - lastDistractingAppSeenElapsedMs > 120000L)) {
+                    resetUsageSessionTracker(prefs);
+                }
+            }
+        }
+    }
+
+    private void resetUsageSessionTracker(SharedPreferences prefs) {
+        int reminderMins = prefs != null ? prefs.getInt(KEY_USAGE_REMINDER_MINUTES, 10) : 10;
+        if (reminderMins < 1) reminderMins = 10;
+        activeSessionAccumulatedMs = 0L;
+        lastSessionTickElapsedMs = 0L;
+        lastDistractingAppSeenElapsedMs = 0L;
+        nextReminderThresholdMs = reminderMins * 60000L;
+    }
+
+    /**
+     * Gentle, non-frustrating 10-minute usage reminder card with 1-tap actions:
+     * - Stop Usage & Go Home
+     * - +10m (1 tap, 0-second wait)
+     * - Working (+30m) (1 tap, 0-second wait)
+     */
+    private void showGentleUsageReminderCard(final Context ctx, final String pkg) {
+        if (!isOverlayGrantedStatic(ctx)) return;
+        if (activeReminderView != null) return;
+
+        try {
+            if (overlayWindowManager == null) {
+                overlayWindowManager = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
+            }
+            if (overlayWindowManager == null) return;
+
+            LinearLayout backdrop = new LinearLayout(ctx);
+            backdrop.setOrientation(LinearLayout.VERTICAL);
+            backdrop.setGravity(Gravity.CENTER);
+            backdrop.setBackgroundColor(Color.parseColor("#B3000000"));
+            int outerPad = dp(ctx, 22);
+            backdrop.setPadding(outerPad, outerPad, outerPad, outerPad);
+
+            LinearLayout card = new LinearLayout(ctx);
+            card.setOrientation(LinearLayout.VERTICAL);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                card.setLayoutDirection(NativeI18n.isRtl(ctx) ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+            }
+            int cardPad = dp(ctx, 20);
+            card.setPadding(cardPad, cardPad, cardPad, cardPad);
+            GradientDrawable cardBg = new GradientDrawable();
+            cardBg.setColor(Color.parseColor("#111318"));
+            cardBg.setStroke(dp(ctx, 2), Color.parseColor("#10B981"));
+            cardBg.setCornerRadius(dp(ctx, 18));
+            card.setBackground(cardBg);
+
+            TextView badge = new TextView(ctx);
+            badge.setText(NativeI18n.tr(ctx, "remBadge"));
+            badge.setTextColor(Color.parseColor("#10B981"));
+            badge.setTextSize(11f);
+            badge.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            card.addView(badge);
+
+            TextView title = new TextView(ctx);
+            title.setText(NativeI18n.tr(ctx, "remTitle"));
+            title.setTextColor(Color.WHITE);
+            title.setTextSize(18f);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            title.setPadding(0, dp(ctx, 8), 0, dp(ctx, 6));
+            card.addView(title);
+
+            TextView sub = new TextView(ctx);
+            sub.setText(NativeI18n.tr(ctx, "remSub"));
+            sub.setTextColor(Color.parseColor("#D4D4D8"));
+            sub.setTextSize(13.5f);
+            sub.setPadding(0, 0, 0, dp(ctx, 16));
+            card.addView(sub);
+
+            Button stopBtn = new Button(ctx);
+            stopBtn.setAllCaps(false);
+            stopBtn.setText(NativeI18n.tr(ctx, "remStopBtn"));
+            stopBtn.setTextColor(Color.BLACK);
+            GradientDrawable stopBg = new GradientDrawable();
+            stopBg.setColor(Color.parseColor("#10B981"));
+            stopBg.setCornerRadius(dp(ctx, 10));
+            stopBtn.setBackground(stopBg);
+            stopBtn.setTypeface(Typeface.DEFAULT_BOLD);
+            LinearLayout.LayoutParams stopLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            stopLp.bottomMargin = dp(ctx, 10);
+            stopBtn.setLayoutParams(stopLp);
+            stopBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    hideGentleUsageReminderCard();
+                    SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                    resetUsageSessionTracker(prefs);
+                    Intent home = new Intent(ctx, MainActivity.class);
+                    home.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    ctx.startActivity(home);
+                }
+            });
+            card.addView(stopBtn);
+
+            LinearLayout snoozeRow = new LinearLayout(ctx);
+            snoozeRow.setOrientation(LinearLayout.HORIZONTAL);
+
+            Button more10Btn = new Button(ctx);
+            more10Btn.setAllCaps(false);
+            more10Btn.setText(NativeI18n.tr(ctx, "remMore10Btn"));
+            more10Btn.setTextColor(Color.WHITE);
+            GradientDrawable m10Bg = new GradientDrawable();
+            m10Bg.setColor(Color.parseColor("#27272A"));
+            m10Bg.setStroke(dp(ctx, 1), Color.parseColor("#52525B"));
+            m10Bg.setCornerRadius(dp(ctx, 10));
+            more10Btn.setBackground(m10Bg);
+            LinearLayout.LayoutParams m10Lp = new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            );
+            m10Lp.rightMargin = dp(ctx, 6);
+            more10Btn.setLayoutParams(m10Lp);
+            more10Btn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    nextReminderThresholdMs = activeSessionAccumulatedMs + (10L * 60000L);
+                    hideGentleUsageReminderCard();
+                }
+            });
+            snoozeRow.addView(more10Btn);
+
+            Button work30Btn = new Button(ctx);
+            work30Btn.setAllCaps(false);
+            work30Btn.setText(NativeI18n.tr(ctx, "remWork30Btn"));
+            work30Btn.setTextColor(Color.WHITE);
+            GradientDrawable w30Bg = new GradientDrawable();
+            w30Bg.setColor(Color.parseColor("#27272A"));
+            w30Bg.setStroke(dp(ctx, 1), Color.parseColor("#52525B"));
+            w30Bg.setCornerRadius(dp(ctx, 10));
+            work30Btn.setBackground(w30Bg);
+            LinearLayout.LayoutParams w30Lp = new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1.3f
+            );
+            work30Btn.setLayoutParams(w30Lp);
+            work30Btn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    nextReminderThresholdMs = activeSessionAccumulatedMs + (30L * 60000L);
+                    hideGentleUsageReminderCard();
+                }
+            });
+            snoozeRow.addView(work30Btn);
+
+            card.addView(snoozeRow);
+            backdrop.addView(card);
+
+            int overlayType = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+
+            WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                overlayType,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                PixelFormat.TRANSLUCENT
+            );
+            params.gravity = Gravity.CENTER;
+
+            overlayWindowManager.addView(backdrop, params);
+            activeReminderView = backdrop;
+        } catch (Exception ignored) {}
+    }
+
+    private void hideGentleUsageReminderCard() {
+        if (activeReminderView != null && overlayWindowManager != null) {
+            try {
+                overlayWindowManager.removeViewImmediate(activeReminderView);
+            } catch (Exception e) {
+                try {
+                    overlayWindowManager.removeView(activeReminderView);
+                } catch (Exception ignored) {}
+            }
+            activeReminderView = null;
         }
     }
 
@@ -862,6 +1119,7 @@ public class FortressWatchdogService extends Service {
         watchdogActive = false;
         watchdogHandler.removeCallbacks(checkTask);
         hideOverlayShield();
+        hideGentleUsageReminderCard();
         super.onDestroy();
     }
 

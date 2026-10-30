@@ -201,6 +201,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   bool _digestMidday = true;
   bool _digestEvening = true;
   bool _sleepScheduleEnabled = true;
+  bool _usageReminderEnabled = true;
+  int _usageReminderMinutes = 10;
   bool _settingsUnlockedSession = false;
   int _settingsUnlockedUntilMs = 0;
   int _reclaimedMinutes = 145;
@@ -454,6 +456,16 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         profiles: [],
       ),
       AppItem(
+        id: 'playstore',
+        name: 'Google Play Store',
+        packageName: 'com.android.vending',
+        category: 'Tools',
+        tier: 'utility',
+        pinned: false,
+        nightQrLocked: true,
+        profiles: [],
+      ),
+      AppItem(
         id: 'settings',
         name: 'Settings',
         packageName: 'com.android.settings',
@@ -483,6 +495,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           _nightAutoDnsEnabled = data['nightAutoDnsEnabled'] ?? true;
           _strictQrSettingsLock = data['strictQr247'] == true;
           _sleepScheduleEnabled = data['sleepScheduleEnabled'] ?? true;
+          _usageReminderEnabled = data['usageReminderEnabled'] ?? true;
+          _usageReminderMinutes = (data['usageReminderMinutes'] as int?) ?? 10;
           _monkModeUntil = (data['monkModeUntil'] as int?) ?? 0;
           _emergencyLockdownUntil =
               (data['emergencyLockdownUntil'] as int?) ?? 0;
@@ -557,6 +571,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'nightAutoDnsEnabled': _nightAutoDnsEnabled,
         'strictQr247': _strictQrSettingsLock,
         'sleepScheduleEnabled': _sleepScheduleEnabled,
+        'usageReminderEnabled': _usageReminderEnabled,
+        'usageReminderMinutes': _usageReminderMinutes,
         'monkModeUntil': _monkModeUntil,
         'emergencyLockdownUntil': _emergencyLockdownUntil,
         'digestMorning': _digestMorning,
@@ -593,6 +609,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'nightAutoDnsEnabled': _nightAutoDnsEnabled,
         'autoNightDns': _nightAutoDnsEnabled,
         'sleepScheduleEnabled': _sleepScheduleEnabled,
+        'usageReminderEnabled': _usageReminderEnabled,
+        'usageReminderMinutes': _usageReminderMinutes,
         'strictQr247': _strictQrSettingsLock,
         'monkModeUntil': _monkModeUntil,
         'nightLockedPackages': nightLockedCsv,
@@ -1075,7 +1093,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         return _tr('safeWifi');
       case 'mobile_data':
       case 'data':
-        return _tr('safeData');
+        return _tr('safeMobileData');
       case 'hotspot':
         return _tr('safeHotspot');
       case 'bluetooth':
@@ -5857,6 +5875,53 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               }
             },
           ),
+          const Divider(height: 24, color: Colors.white12),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            activeThumbColor: const Color(0xFF10B981),
+            title: Text(
+              _tr('gentleReminderTitle'),
+              style: TextStyle(
+                color: _textColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            subtitle: Text(
+              _tr('gentleReminderSub'),
+              style: TextStyle(color: _subTextColor, fontSize: 12),
+            ),
+            value: _usageReminderEnabled,
+            onChanged: (v) {
+              setState(() => _usageReminderEnabled = v);
+              _saveState();
+              _syncFortressToNative();
+            },
+          ),
+          if (_usageReminderEnabled) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [10, 15, 30].map((mins) {
+                final bool sel = _usageReminderMinutes == mins;
+                return ChoiceChip(
+                  label: Text('$mins ${_tr('minutesShort')}'),
+                  selected: sel,
+                  selectedColor: const Color(0xFF10B981),
+                  labelStyle: TextStyle(
+                    color: sel ? Colors.black : _textColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                  onSelected: (_) {
+                    setState(() => _usageReminderMinutes = mins);
+                    _saveState();
+                    _syncFortressToNative();
+                  },
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );
