@@ -33,7 +33,7 @@ import java.util.Calendar;
 import java.util.Random;
 
 /**
- * Instant 0ms Pure Native Android OS Fortress Lock Screen.
+ * Instant 0ms Pure Native Android OS Fortress Lock Screen (12-Language Localized).
  * Directly intercepts com.android.settings and unprotected browsers when Safe Private DNS
  * (family.cloudflare-dns.com / adult-filter-dns.cleanbrowsing.org) or Night Fortress is active.
  * At night (22:00 - 06:00), Camera QR Scan of the physical QR card is strictly mandatory.
@@ -67,12 +67,16 @@ public class NativeFortressLockActivity extends Activity {
             if (cooldownSeconds > 0) {
                 cooldownSeconds--;
                 if (timerBadge != null) {
-                    timerBadge.setText("⏳ STEP 1: WAIT COOLDOWN (" + cooldownSeconds + "s REMAINING)");
+                    timerBadge.setText(
+                        NativeI18n.tr(NativeFortressLockActivity.this, "step1Wait")
+                        + cooldownSeconds
+                        + NativeI18n.tr(NativeFortressLockActivity.this, "step1Remaining")
+                    );
                 }
                 handler.postDelayed(this, 1000L);
             } else {
                 if (timerBadge != null) {
-                    timerBadge.setText("✅ STEP 1 COMPLETE: COOLDOWN FINISHED");
+                    timerBadge.setText(NativeI18n.tr(NativeFortressLockActivity.this, "step1Done"));
                     timerBadge.setTextColor(Color.parseColor("#34D399"));
                 }
             }
@@ -85,7 +89,8 @@ public class NativeFortressLockActivity extends Activity {
         getWindow().addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+            WindowManager.LayoutParams.FLAG_SECURE
         );
 
         SharedPreferences prefs = getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
@@ -95,10 +100,12 @@ public class NativeFortressLockActivity extends Activity {
         }
         strictQr247 = prefs.getBoolean(FortressWatchdogService.KEY_STRICT_QR_247, false);
 
+        long clockTamperUntil = prefs.getLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
+        boolean isClockTampered = System.currentTimeMillis() < clockTamperUntil;
         int startH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, 22);
         int endH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        isNightWindow = (startH > endH) ? (hour >= startH || hour < endH) : (hour >= startH && hour < endH);
+        isNightWindow = isClockTampered || ((startH > endH) ? (hour >= startH || hour < endH) : (hour >= startH && hour < endH));
         needsPhysicalQr = isNightWindow || strictQr247;
         cooldownSeconds = isNightWindow ? 30 : 15;
 
@@ -117,12 +124,15 @@ public class NativeFortressLockActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            root.setLayoutDirection(NativeI18n.isRtl(this) ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+        }
         int pad = dp(20);
         root.setPadding(pad, dp(36), pad, pad);
 
         // Top Badge
         TextView topTag = new TextView(this);
-        topTag.setText("🛡️ MINIMUM PHONE • NATIVE OS FORTRESS");
+        topTag.setText(NativeI18n.tr(this, "lockTopBadge"));
         topTag.setTextColor(Color.parseColor("#10B981"));
         topTag.setTextSize(11f);
         topTag.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -131,10 +141,10 @@ public class NativeFortressLockActivity extends Activity {
         // Main Title
         TextView title = new TextView(this);
         title.setText(isDnsTampered
-            ? "SAFE PRIVATE DNS REQUIRED!\nপ্রাইভেট ডিএনএস ছাড়া ফোন ও ব্রাউজার লক করা হয়েছে"
+            ? NativeI18n.tr(this, "lockTitleDnsRemoved")
             : (isNightWindow
-                ? "NIGHT DNS FORTRESS ACTIVE (22:00–06:00)!\nরাতে QR স্ক্যান ছাড়া সেটিংস ও ডিএনএস পরিবর্তন সম্পূর্ণ নিষিদ্ধ"
-                : "SYSTEM SETTINGS & SAFE DNS LOCKED!\nফোন সেটিংস ও প্রাইভেট ডিএনএস সুরক্ষিত"));
+                ? NativeI18n.tr(this, "lockTitleNight")
+                : NativeI18n.tr(this, "lockTitleDay")));
         title.setTextColor(Color.WHITE);
         title.setTextSize(19.5f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -144,10 +154,10 @@ public class NativeFortressLockActivity extends Activity {
         // Subtitle
         TextView sub = new TextView(this);
         sub.setText(isDnsTampered
-            ? "Safe Private DNS was turned off or modified. Activate Safe Private DNS below to continue."
+            ? NativeI18n.tr(this, "lockSubDnsRemoved")
             : (isNightWindow
-                ? "At night (22:00–06:00), Phone Settings & Safe Private DNS cannot be accessed or changed without scanning your Physical QR Card with the Camera."
-                : "Phone Settings & Private DNS are strictly locked behind the Physical QR Fortress."));
+                ? NativeI18n.tr(this, "lockSubNight")
+                : NativeI18n.tr(this, "lockSubDay")));
         sub.setTextColor(Color.parseColor("#A1A1AA"));
         sub.setTextSize(13f);
         sub.setPadding(0, 0, 0, dp(14));
@@ -171,7 +181,7 @@ public class NativeFortressLockActivity extends Activity {
 
         restoreDnsBtn = new Button(this);
         restoreDnsBtn.setAllCaps(false);
-        restoreDnsBtn.setText("🛡️ 1-Tap Activate Safe Private DNS");
+        restoreDnsBtn.setText(NativeI18n.tr(this, "restoreDnsBtn"));
         restoreDnsBtn.setTextColor(Color.BLACK);
         restoreDnsBtn.setBackgroundColor(Color.parseColor("#10B981"));
         restoreDnsBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -199,7 +209,9 @@ public class NativeFortressLockActivity extends Activity {
 
         // Step 1: Cooldown Banner
         timerBadge = new TextView(this);
-        timerBadge.setText("⏳ STEP 1: WAIT COOLDOWN (" + cooldownSeconds + "s REMAINING)");
+        timerBadge.setText(
+            NativeI18n.tr(this, "step1Wait") + cooldownSeconds + NativeI18n.tr(this, "step1Remaining")
+        );
         timerBadge.setTextColor(Color.parseColor("#FBBF24"));
         timerBadge.setTextSize(13f);
         timerBadge.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -213,7 +225,7 @@ public class NativeFortressLockActivity extends Activity {
 
         // Step 2: Math Challenge
         TextView mathLabel = new TextView(this);
-        mathLabel.setText("🧠 STEP 2: SOLVE ANTI-IMPULSE MATH:  (" + mathA + " × " + mathB + ") + " + mathC + " = ?");
+        mathLabel.setText(NativeI18n.tr(this, "step2Math") + "(" + mathA + " × " + mathB + ") + " + mathC + " = ?");
         mathLabel.setTextColor(Color.parseColor("#E4E4E7"));
         mathLabel.setTextSize(12f);
         mathLabel.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -221,7 +233,7 @@ public class NativeFortressLockActivity extends Activity {
         root.addView(mathLabel);
 
         mathInput = new EditText(this);
-        mathInput.setHint("Enter math answer...");
+        mathInput.setHint(NativeI18n.tr(this, "mathHint"));
         mathInput.setHintTextColor(Color.parseColor("#71717A"));
         mathInput.setTextColor(Color.WHITE);
         mathInput.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -236,8 +248,8 @@ public class NativeFortressLockActivity extends Activity {
         // Step 3: Physical QR Code Camera Scanner
         TextView qrLabel = new TextView(this);
         qrLabel.setText(needsPhysicalQr
-            ? "🧱 STEP 3 (CAMERA QR SCAN REQUIRED): SCAN PHYSICAL QR CARD\n(রাতে ফিজিক্যাল QR কোড ক্যামেরা দিয়ে স্ক্যান ছাড়া সেটিংস বা ডিএনএস আনলক করা যাবে না)"
-            : "☀️ STEP 3 (DAYTIME 06:00–22:00): QR SCAN OR DAYTIME WORK BYPASS\n(দিনের বেলা কাজের প্রয়োজনে QR ছাড়াই ধাপ ১ ও ২ পূর্ণ করে আনলক করতে পারবেন)");
+            ? NativeI18n.tr(this, "step3Night")
+            : NativeI18n.tr(this, "step3Day"));
         qrLabel.setTextColor(Color.parseColor("#E4E4E7"));
         qrLabel.setTextSize(12f);
         qrLabel.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -246,7 +258,7 @@ public class NativeFortressLockActivity extends Activity {
 
         Button scanQrBtn = new Button(this);
         scanQrBtn.setAllCaps(false);
-        scanQrBtn.setText("📷 Scan Physical QR Code with Camera (QR স্ক্যান করুন)");
+        scanQrBtn.setText(NativeI18n.tr(this, "scanQrBtn"));
         scanQrBtn.setTextColor(Color.BLACK);
         scanQrBtn.setBackgroundColor(Color.parseColor("#10B981"));
         scanQrBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -266,8 +278,8 @@ public class NativeFortressLockActivity extends Activity {
 
         qrInput = new EditText(this);
         qrInput.setHint(needsPhysicalQr
-            ? "Camera QR Scan Only (Manual typing disabled at night)"
-            : "Scan QR above or enter your physical key...");
+            ? NativeI18n.tr(this, "qrHintNight")
+            : NativeI18n.tr(this, "qrHintDay"));
         qrInput.setHintTextColor(Color.parseColor("#71717A"));
         qrInput.setTextColor(Color.WHITE);
         qrInput.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -294,8 +306,8 @@ public class NativeFortressLockActivity extends Activity {
         unlockButton = new Button(this);
         unlockButton.setAllCaps(false);
         unlockButton.setText(needsPhysicalQr
-            ? "🔓 Verify Camera QR & Unlock (After Step 1, 2 & 3)"
-            : "☀️ Daytime Work Bypass: Unlock for 25s (After Step 1 & 2)");
+            ? NativeI18n.tr(this, "unlockBtnNight")
+            : NativeI18n.tr(this, "unlockBtnDay"));
         unlockButton.setTextColor(Color.BLACK);
         unlockButton.setBackgroundColor(Color.parseColor("#F4F4F5"));
         unlockButton.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -316,7 +328,7 @@ public class NativeFortressLockActivity extends Activity {
         // Return Home Button
         Button homeBtn = new Button(this);
         homeBtn.setAllCaps(false);
-        homeBtn.setText("🏠 Return to Minimum Phone Home (Stay Protected)");
+        homeBtn.setText(NativeI18n.tr(this, "homeBtn"));
         homeBtn.setTextColor(Color.WHITE);
         homeBtn.setBackgroundColor(Color.parseColor("#27272A"));
         homeBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -346,13 +358,15 @@ public class NativeFortressLockActivity extends Activity {
         boolean active = FortressWatchdogService.isOsPrivateDnsConfigured(this);
         String host = FortressWatchdogService.getOsPrivateDnsHost(this);
         if (active) {
-            dnsStatusView.setText("🔒 OS SAFE PRIVATE DNS ACTIVE & LOCKED: " + host + "\nAdult & Gambling Domains Blocked System-Wide");
+            dnsStatusView.setText(
+                NativeI18n.tr(this, "dnsActiveBanner") + host + NativeI18n.tr(this, "dnsActiveBannerSub")
+            );
             dnsStatusView.setTextColor(Color.parseColor("#6EE7B7"));
             if (restoreDnsBtn != null) {
                 restoreDnsBtn.setVisibility(View.GONE);
             }
         } else {
-            dnsStatusView.setText("⚠️ OS SAFE PRIVATE DNS IS OFF / REMOVED!\nTap below to copy & activate Safe Private DNS");
+            dnsStatusView.setText(NativeI18n.tr(this, "dnsOffBanner"));
             dnsStatusView.setTextColor(Color.parseColor("#FCD34D"));
             if (restoreDnsBtn != null) {
                 restoreDnsBtn.setVisibility(View.VISIBLE);
@@ -362,7 +376,7 @@ public class NativeFortressLockActivity extends Activity {
 
     private void activateSafePrivateDnsNow() {
         if (FortressWatchdogService.isOsPrivateDnsConfigured(this)) {
-            Toast.makeText(this, "🛡️ Safe Private DNS is already active & locked!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, NativeI18n.tr(this, "toastDnsActiveLocked"), Toast.LENGTH_SHORT).show();
             refreshDnsStatusBanner();
             goHomeNow();
             return;
@@ -385,7 +399,7 @@ public class NativeFortressLockActivity extends Activity {
         // 2. Attempt direct Settings.Global write
         FortressWatchdogService.ensurePrivateDnsActiveAtNight(this);
         if (FortressWatchdogService.isOsPrivateDnsConfigured(this)) {
-            Toast.makeText(this, "✅ Safe Private DNS (" + targetHost + ") Activated & Locked!", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, NativeI18n.tr(this, "toastDnsActiveLocked"), Toast.LENGTH_LONG).show();
             refreshDnsStatusBanner();
             goHomeNow();
             return;
@@ -393,11 +407,11 @@ public class NativeFortressLockActivity extends Activity {
 
         if (needsPhysicalQr && !qrVerifiedByCamera) {
             if (errorView != null) {
-                errorView.setText("🌙 Night DNS Fortress: Please scan your Physical QR Card with Camera first to open Wireless/DNS Settings!");
+                errorView.setText(NativeI18n.tr(this, "toastNightQrRequired"));
             }
             Toast.makeText(
                 this,
-                "🌙 Scan your Physical QR Card with Camera below to open Wireless/DNS Settings.",
+                NativeI18n.tr(this, "toastNightQrRequired"),
                 Toast.LENGTH_LONG
             ).show();
             return;
@@ -410,7 +424,7 @@ public class NativeFortressLockActivity extends Activity {
             .apply();
         Toast.makeText(
             this,
-            "📋 Copied '" + targetHost + "'! Tap 'Private DNS' -> Paste hostname -> Save.",
+            NativeI18n.tr(this, "toastCopiedDns") + " (" + targetHost + ")",
             Toast.LENGTH_LONG
         ).show();
 
@@ -433,7 +447,7 @@ public class NativeFortressLockActivity extends Activity {
         boolean isNightAppLock = "night_app_locked".equals(reason);
 
         if (cooldownSeconds > 0) {
-            errorView.setText("⚠️ Please wait " + cooldownSeconds + " more seconds for Step 1 cooldown.");
+            errorView.setText(NativeI18n.tr(this, "errWaitCooldown") + cooldownSeconds + "s");
             return;
         }
         String mathStr = mathInput.getText() != null ? mathInput.getText().toString().trim() : "";
@@ -443,14 +457,14 @@ public class NativeFortressLockActivity extends Activity {
         } catch (Exception ignored) {}
 
         if (userMath != expectedMathAnswer) {
-            errorView.setText("⚠️ Step 2 Math answer is incorrect. Solve (" + mathA + " × " + mathB + ") + " + mathC);
+            errorView.setText(NativeI18n.tr(this, "errMathWrong") + "(" + mathA + " × " + mathB + ") + " + mathC);
             return;
         }
 
         String qrStr = qrInput.getText() != null ? qrInput.getText().toString().trim() : "";
         if (needsPhysicalQr) {
             if (!qrVerifiedByCamera || !qrStr.equalsIgnoreCase(expectedQrCode)) {
-                errorView.setText("⚠️ Physical QR Code Camera Scan is strictly required at night! Please tap 'Scan Physical QR Code with Camera'.");
+                errorView.setText(NativeI18n.tr(this, "errQrRequired"));
                 return;
             }
         }
@@ -460,15 +474,17 @@ public class NativeFortressLockActivity extends Activity {
         if (isNightAppLock) {
             prefs.edit()
                 .putLong(FortressWatchdogService.KEY_QR_VERIFIED_UNLOCK_UNTIL_MS, now + 600000L)
+                .putLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L)
                 .apply();
-            Toast.makeText(this, "🔓 App unlocked via Physical QR! (Phone Settings & DNS remain locked)", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, NativeI18n.tr(this, "toastAppUnlocked"), Toast.LENGTH_LONG).show();
         } else {
             prefs.edit()
                 .putLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, now + 45000L)
                 .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, now + 25000L)
                 .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "qr_verified")
+                .putLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L)
                 .apply();
-            Toast.makeText(this, "🔓 Settings unlocked briefly (25s) via QR verification.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, NativeI18n.tr(this, "toastSettingsUnlocked"), Toast.LENGTH_LONG).show();
         }
         finish();
     }
@@ -487,12 +503,12 @@ public class NativeFortressLockActivity extends Activity {
         try {
             IntentIntegrator integrator = new IntentIntegrator(this);
             integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
-            integrator.setPrompt("Scan your Physical Minimum Phone QR Card / আপনার ফিজিক্যাল QR কোড স্ক্যান করুন");
+            integrator.setPrompt(NativeI18n.tr(this, "scannerPrompt"));
             integrator.setBeepEnabled(true);
             integrator.setOrientationLocked(true);
             integrator.initiateScan();
         } catch (Exception e) {
-            Toast.makeText(this, "Camera scanner error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, NativeI18n.tr(this, "toastCameraPerm"), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -502,6 +518,8 @@ public class NativeFortressLockActivity extends Activity {
         if (requestCode == 701 && grantResults != null && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             launchZxingScanner();
+        } else if (requestCode == 701) {
+            Toast.makeText(this, NativeI18n.tr(this, "toastCameraPerm"), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -519,16 +537,17 @@ public class NativeFortressLockActivity extends Activity {
                     SharedPreferences prefs = getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
                     prefs.edit()
                         .putLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, System.currentTimeMillis() + 60000L)
+                        .putLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L)
                         .apply();
                     if (errorView != null) {
-                        errorView.setText("✅ Physical QR Code Scanned & Verified!");
+                        errorView.setText(NativeI18n.tr(this, "msgQrVerified"));
                         errorView.setTextColor(Color.parseColor("#34D399"));
                     }
-                    Toast.makeText(this, "✅ Physical QR Code Verified!", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, NativeI18n.tr(this, "msgQrVerified"), Toast.LENGTH_SHORT).show();
                 } else {
                     qrVerifiedByCamera = false;
                     if (errorView != null) {
-                        errorView.setText("⚠️ Scanned QR code does not match your Minimum Phone QR Card!");
+                        errorView.setText(NativeI18n.tr(this, "errQrMismatch"));
                         errorView.setTextColor(Color.parseColor("#F87171"));
                     }
                 }

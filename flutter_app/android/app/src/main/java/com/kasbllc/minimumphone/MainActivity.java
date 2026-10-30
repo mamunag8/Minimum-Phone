@@ -237,12 +237,12 @@ public class MainActivity extends FlutterActivity {
 
                         case "requestUsageStatsPermission": {
                             if (isUsageStatsGranted(ctx)) {
-                                Toast.makeText(ctx, "✅ Usage Access is already active & locked!", Toast.LENGTH_SHORT).show();
+                                Toast.makeText(ctx, NativeI18n.tr(ctx, "toastUsageActive"), Toast.LENGTH_SHORT).show();
                                 result.success(true);
                                 break;
                             }
                             if (!isNightQrVerifiedNow(ctx)) {
-                                Toast.makeText(ctx, "🌙 Night Lock: Please scan your Physical QR Code with Camera first!", Toast.LENGTH_LONG).show();
+                                Toast.makeText(ctx, NativeI18n.tr(ctx, "toastNightQrRequired"), Toast.LENGTH_LONG).show();
                                 result.success(false);
                                 break;
                             }
@@ -269,12 +269,12 @@ public class MainActivity extends FlutterActivity {
 
                         case "requestOverlayPermission": {
                             if (isOverlayPermissionGranted(ctx)) {
-                                Toast.makeText(ctx, "✅ Appear on Top is already active & locked!", Toast.LENGTH_SHORT).show();
+                                Toast.makeText(ctx, NativeI18n.tr(ctx, "toastOverlayActive"), Toast.LENGTH_SHORT).show();
                                 result.success(true);
                                 break;
                             }
                             if (!isNightQrVerifiedNow(ctx)) {
-                                Toast.makeText(ctx, "🌙 Night Lock: Please scan your Physical QR Code with Camera first!", Toast.LENGTH_LONG).show();
+                                Toast.makeText(ctx, NativeI18n.tr(ctx, "toastNightQrRequired"), Toast.LENGTH_LONG).show();
                                 result.success(false);
                                 break;
                             }
@@ -405,8 +405,13 @@ public class MainActivity extends FlutterActivity {
         String dnsMode = FortressWatchdogService.getOsPrivateDnsMode(ctx);
         boolean watchdogActive = FortressWatchdogService.isWatchdogActive();
 
+        SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+        int startH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, 22);
+        int endH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        boolean isNightNow = (hour >= 22 || hour < 6);
+        long clockTamperUntil = prefs.getLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
+        boolean isNightNow = (System.currentTimeMillis() < clockTamperUntil)
+            || ((startH > endH) ? (hour >= startH || hour < endH) : (hour >= startH && hour < endH));
 
         // Unified keys for 100% compatibility
         map.put("isDefaultLauncher", isDefault);
@@ -496,12 +501,12 @@ public class MainActivity extends FlutterActivity {
                 .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, 0L)
                 .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "")
                 .apply();
-            Toast.makeText(ctx, "🛡️ Safe Private DNS (" + targetHost + ") Active & Locked!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, NativeI18n.tr(ctx, "toastDnsActiveLocked"), Toast.LENGTH_SHORT).show();
         } else if (openSettingsIfNeeded) {
             if (!isNightQrVerifiedNow(ctx)) {
                 Toast.makeText(
                     ctx,
-                    "🌙 Night DNS Fortress (22:00–06:00): Scan your Physical QR Card with Camera first to open Wireless/DNS Settings!",
+                    NativeI18n.tr(ctx, "toastNightQrRequired"),
                     Toast.LENGTH_LONG
                 ).show();
             } else {
@@ -512,7 +517,7 @@ public class MainActivity extends FlutterActivity {
                     .apply();
                 Toast.makeText(
                     ctx,
-                    "📋 Copied '" + targetHost + "'! Tap 'Private DNS' -> Paste hostname -> Save.",
+                    NativeI18n.tr(ctx, "toastCopiedDns") + " (" + targetHost + ")",
                     Toast.LENGTH_LONG
                 ).show();
                 try {
@@ -593,8 +598,12 @@ public class MainActivity extends FlutterActivity {
         }
 
         SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+        int startH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, 22);
+        int endH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        boolean isNightNow = (hour >= 22 || hour < 6);
+        long clockTamperUntil = prefs.getLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
+        boolean isNightNow = (System.currentTimeMillis() < clockTamperUntil)
+            || ((startH > endH) ? (hour >= startH || hour < endH) : (hour >= startH && hour < endH));
         boolean osDnsSafe = FortressWatchdogService.isOsPrivateDnsConfigured(ctx);
         boolean lockSettings = prefs.getBoolean(FortressWatchdogService.KEY_LOCK_SETTINGS, true);
 
@@ -604,7 +613,7 @@ public class MainActivity extends FlutterActivity {
         if (isNightNow && !isNightQrVerifiedNow(ctx)) {
             Toast.makeText(
                 ctx,
-                "🌙 Night DNS Fortress (22:00–06:00): Scan your Physical QR Card with Camera first to access Settings.",
+                NativeI18n.tr(ctx, "toastNightQrRequired"),
                 Toast.LENGTH_LONG
             ).show();
             return;
@@ -612,7 +621,7 @@ public class MainActivity extends FlutterActivity {
 
         if ("private_dns".equalsIgnoreCase(target)) {
             if (osDnsSafe && !isNightQrVerifiedNow(ctx)) {
-                Toast.makeText(ctx, "🛡️ Safe Private DNS is already active & locked!", Toast.LENGTH_LONG).show();
+                Toast.makeText(ctx, NativeI18n.tr(ctx, "toastDnsActiveLocked"), Toast.LENGTH_LONG).show();
                 return;
             }
             String host = prefs.getString(FortressWatchdogService.KEY_EXPECTED_DNS_HOST, "family.cloudflare-dns.com");
@@ -626,7 +635,7 @@ public class MainActivity extends FlutterActivity {
                 .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 18000L)
                 .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "dns_setup")
                 .apply();
-            Toast.makeText(ctx, "📋 Copied '" + host + "'! Tap Private DNS -> Paste -> Save.", Toast.LENGTH_LONG).show();
+            Toast.makeText(ctx, NativeI18n.tr(ctx, "toastCopiedDns") + " (" + host + ")", Toast.LENGTH_LONG).show();
             try {
                 Intent intent = new Intent(Settings.ACTION_WIRELESS_SETTINGS);
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -636,7 +645,7 @@ public class MainActivity extends FlutterActivity {
         }
 
         if (lockSettings && !unlockedByGate && !isNightQrVerifiedNow(ctx)) {
-            Toast.makeText(ctx, "🔒 Please unlock via the Protection Gate first.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, NativeI18n.tr(ctx, "toastGateRequired"), Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -745,21 +754,25 @@ public class MainActivity extends FlutterActivity {
 
     private boolean launchAndroidApp(Context ctx, String pkg, String appId, int sessionMinutes) {
         try {
+            SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+            int startH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, 22);
+            int endH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
             int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-            boolean isNightNow = (hour >= 22 || hour < 6);
+            long clockTamperUntil = prefs.getLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
+            boolean isNightNow = (System.currentTimeMillis() < clockTamperUntil)
+                || ((startH > endH) ? (hour >= startH || hour < endH) : (hour >= startH && hour < endH));
             String lowerPkg = pkg != null ? pkg.toLowerCase(Locale.ROOT) : "";
             boolean isSystemSettings = lowerPkg.equals("com.android.settings")
                 || lowerPkg.equals("com.samsung.android.settings")
                 || "settings".equalsIgnoreCase(appId);
 
-            SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
             boolean lockSettings = prefs.getBoolean(FortressWatchdogService.KEY_LOCK_SETTINGS, true);
             boolean osDnsSafe = FortressWatchdogService.isOsPrivateDnsConfigured(ctx);
 
             if (isSystemSettings && isNightNow && !isNightQrVerifiedNow(ctx)) {
                 Toast.makeText(
                     ctx,
-                    "🌙 Night DNS Fortress (22:00–06:00): Scan your Physical QR Card with Camera first to open Phone Settings.",
+                    NativeI18n.tr(ctx, "toastNightQrRequired"),
                     Toast.LENGTH_LONG
                 ).show();
                 Intent lockIntent = new Intent(ctx, NativeFortressLockActivity.class);
@@ -831,17 +844,21 @@ public class MainActivity extends FlutterActivity {
     }
 
     private void requestDefaultHomeRole(Context ctx) {
+        SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+        int startH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, 22);
+        int endH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        boolean isNightNow = (hour >= 22 || hour < 6);
+        long clockTamperUntil = prefs.getLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
+        boolean isNightNow = (System.currentTimeMillis() < clockTamperUntil)
+            || ((startH > endH) ? (hour >= startH || hour < endH) : (hour >= startH && hour < endH));
         if (isNightNow && !isNightQrVerifiedNow(ctx)) {
             Toast.makeText(
                 ctx,
-                "🌙 Night Fortress Active (22:00–06:00): Scan your Physical QR Card with Camera first!",
+                NativeI18n.tr(ctx, "toastNightQrRequired"),
                 Toast.LENGTH_LONG
             ).show();
             return;
         }
-        SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit()
             .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 20000L)
             .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "default_launcher")
@@ -976,7 +993,7 @@ public class MainActivity extends FlutterActivity {
         pendingQrScanResult = result;
         pendingScanPrompt = (prompt != null && !prompt.trim().isEmpty())
             ? prompt.trim()
-            : "Scan your Physical Minimum Phone QR Card / আপনার ফিজিক্যাল QR কোড স্ক্যান করুন";
+            : NativeI18n.tr(this, "scannerPrompt");
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -991,7 +1008,7 @@ public class MainActivity extends FlutterActivity {
         try {
             IntentIntegrator integrator = new IntentIntegrator(this);
             integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
-            integrator.setPrompt(pendingScanPrompt != null ? pendingScanPrompt : "Scan Physical QR Code");
+            integrator.setPrompt(pendingScanPrompt != null ? pendingScanPrompt : NativeI18n.tr(this, "scannerPrompt"));
             integrator.setBeepEnabled(true);
             integrator.setOrientationLocked(true);
             integrator.initiateScan();
@@ -1010,7 +1027,7 @@ public class MainActivity extends FlutterActivity {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 launchZxingScannerForFlutter();
             } else {
-                Toast.makeText(this, "Camera permission is required to scan QR code.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, NativeI18n.tr(this, "toastCameraPerm"), Toast.LENGTH_LONG).show();
                 if (pendingQrScanResult != null) {
                     pendingQrScanResult.success("");
                     pendingQrScanResult = null;
@@ -1025,9 +1042,12 @@ public class MainActivity extends FlutterActivity {
         int endH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         boolean isNight = (startH > endH) ? (hour >= startH || hour < endH) : (hour >= startH && hour < endH);
-        if (!isNight) return true;
+        long clockTamperUntil = prefs.getLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
+        boolean strictQr247 = prefs.getBoolean(FortressWatchdogService.KEY_STRICT_QR_247, false);
+        long now = System.currentTimeMillis();
+        if (!isNight && !strictQr247 && now >= clockTamperUntil) return true;
         long verifiedUntil = prefs.getLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, 0L);
-        return System.currentTimeMillis() < verifiedUntil;
+        return now < verifiedUntil;
     }
 
     @Override
@@ -1046,6 +1066,7 @@ public class MainActivity extends FlutterActivity {
                         trimmed.toUpperCase(Locale.ROOT).contains(expectedQr.trim().toUpperCase(Locale.ROOT))) {
                     prefs.edit()
                         .putLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, System.currentTimeMillis() + 60000L)
+                        .putLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L)
                         .apply();
                 }
             }
@@ -1083,16 +1104,21 @@ public class MainActivity extends FlutterActivity {
 
     private void printPhysicalQrSheet(String qrData, String titleText, String subtitleText) {
         try {
+            SharedPreferences prefs = getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+            int startH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, 22);
+            int endH = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
             int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-            if (hour >= 22 || hour < 6) {
+            long clockTamperUntil = prefs.getLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
+            boolean isNightNow = (System.currentTimeMillis() < clockTamperUntil)
+                || ((startH > endH) ? (hour >= startH || hour < endH) : (hour >= startH && hour < endH));
+            if (isNightNow) {
                 Toast.makeText(
                     this,
-                    "🌙 Night Fortress Active (22:00–06:00): QR printing & preview are locked at night! Use your printed QR card kept in another room.",
+                    NativeI18n.tr(this, "toastNightQrRequired"),
                     Toast.LENGTH_LONG
                 ).show();
                 return;
             }
-            SharedPreferences prefs = getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
             prefs.edit()
                 .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 30000L)
                 .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "print_qr")

@@ -202,6 +202,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   bool _digestEvening = true;
   bool _sleepScheduleEnabled = true;
   bool _settingsUnlockedSession = false;
+  int _settingsUnlockedUntilMs = 0;
   int _reclaimedMinutes = 145;
   int _mindfulPausesCompleted = 18;
   int _urgesResisted = 9;
@@ -264,14 +265,25 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       if (mounted) {
         final DateTime current = DateTime.now();
         final bool nightNow = current.hour >= 22 || current.hour < 6;
+        final int nowMs = current.millisecondsSinceEpoch;
         setState(() {
           _now = current;
           if (nightNow && _nightAutoDnsEnabled && !_phoneSettingsLocked) {
             _phoneSettingsLocked = true;
           }
+          if (_settingsUnlockedSession && nowMs > _settingsUnlockedUntilMs) {
+            _settingsUnlockedSession = false;
+          }
         });
         _refreshNativeStatus();
       }
+    });
+  }
+
+  void _grantSettingsSessionUnlock() {
+    setState(() {
+      _settingsUnlockedSession = true;
+      _settingsUnlockedUntilMs = DateTime.now().millisecondsSinceEpoch + 45000;
     });
   }
 
@@ -1038,7 +1050,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         if (!ctx.mounted) return;
         _requireProtectionUnlock(
           ctx,
-          targetTitle: type.toUpperCase(),
+          targetTitle: _trSafeSettingLabel(type),
           onUnlocked: () {
             _openSafeSubSetting(ctx, type, unlockedByGate: true);
           },
@@ -1055,6 +1067,34 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'unlockedByGate': true,
       });
     } catch (_) {}
+  }
+
+  String _trSafeSettingLabel(String type) {
+    switch (type.toLowerCase()) {
+      case 'wifi':
+        return _tr('safeWifi');
+      case 'mobile_data':
+      case 'data':
+        return _tr('safeData');
+      case 'hotspot':
+        return _tr('safeHotspot');
+      case 'bluetooth':
+        return _tr('safeBluetooth');
+      case 'sound':
+        return _tr('safeSound');
+      case 'display':
+        return _tr('safeDisplay');
+      case 'battery':
+        return _tr('safeBattery');
+      case 'location':
+        return _tr('safeLocation');
+      case 'airplane':
+        return _tr('safeAirplane');
+      case 'private_dns':
+        return _tr('safeDnsTitle');
+      default:
+        return _tr('navSettings');
+    }
   }
 
   Future<void> _toggleTorch() async {
@@ -1120,7 +1160,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       ScaffoldMessenger.of(ctx).showSnackBar(
         SnackBar(
           content: Text(
-            '${_tr('monkActiveToast')} (${minsLeft}m)',
+            '${_tr('monkActiveToast')} ($minsLeft${_tr('minutesShort')})',
           ),
           backgroundColor: Colors.deepOrange,
         ),
@@ -1204,7 +1244,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
   Future<bool> _scanPhysicalQrWithCamera(BuildContext ctx) async {
     try {
-      final String? scanned = await _channel.invokeMethod<String>('scanQrCode');
+      final String? scanned = await _channel.invokeMethod<String>(
+        'scanQrCode',
+        {'prompt': _tr('qrScannerPrompt')},
+      );
       if (scanned == null || scanned.trim().isEmpty) return false;
       final String clean = scanned.trim().toUpperCase();
       final String target = _qrSecret.trim().toUpperCase();
@@ -1247,7 +1290,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       return;
     }
     try {
-      await _channel.invokeMethod('printQrCodeSheet', {'qrSecret': _qrSecret});
+      await _channel.invokeMethod('printQrCodeSheet', {
+        'qrSecret': _qrSecret,
+        'title': _tr('qrSheetDocTitle'),
+        'subtitle': _tr('qrSheetDocSub'),
+      });
     } catch (_) {}
   }
 
@@ -1502,8 +1549,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           ),
                           child: Text(
                             secondsLeft > 0
-                                ? '⏳ ${secondsLeft}s'
-                                : '✅ 15s',
+                                ? '⏳ $secondsLeft${_tr('secondsShort')}'
+                                : '✅ 15${_tr('secondsShort')}',
                             style: TextStyle(
                               color: secondsLeft > 0
                                   ? Colors.amber
@@ -1669,7 +1716,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                               },
                         child: Text(
                           secondsLeft > 0
-                              ? '${_tr('waitReflecting')} (${secondsLeft}s)'
+                              ? '${_tr('waitReflecting')} ($secondsLeft${_tr('secondsShort')})'
                               : _tr('confirmReflectionBtn'),
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
@@ -1758,7 +1805,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    '${breatheSec}s',
+                    '$breatheSec${_tr('secondsShort')}',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 42,
@@ -1795,7 +1842,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   },
                   child: Text(
                     breatheSec > 0
-                        ? '${_tr('sosGroundedBtn')} ($breatheSec s)'
+                        ? '${_tr('sosGroundedBtn')} ($breatheSec${_tr('secondsShort')})'
                         : _tr('sosCompleteBtn'),
                     style: const TextStyle(
                       color: Color(0xFF10B981),
@@ -2196,7 +2243,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                                   isDone: _osDnsIsFamilySafe,
                                   buttonLabel: _osDnsIsFamilySafe
                                       ? '🔒 ${_tr('grantedBtn')}'
-                                      : '1-Tap',
+                                      : _tr('oneTapBtn'),
                                   onTap: _osDnsIsFamilySafe
                                       ? null
                                       : () {
@@ -2253,8 +2300,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                                           : _tr('wizStep4SubTodo')),
                                   isDone: _qrSetupVerified,
                                   buttonLabel: _isNightWindow
-                                      ? '🔒 Night'
-                                      : '🖨️ Print',
+                                      ? _tr('nightBadgeShort')
+                                      : _tr('printShortBtn'),
                                   onTap: _isNightWindow
                                       ? null
                                       : () async {
@@ -2322,7 +2369,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                                   buttonLabel: _isDefaultLauncher
                                       ? '🔒 ${_tr('grantedBtn')}'
                                       : (_isNightWindow
-                                          ? '🔒 Night'
+                                          ? _tr('nightBadgeShort')
                                           : _tr('setDefaultBtn')),
                                   onTap:
                                       (_isDefaultLauncher || _isNightWindow)
@@ -4938,14 +4985,14 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 if (_isNightWindow) {
                   final bool ok = await _scanPhysicalQrWithCamera(ctx);
                   if (ok) {
-                    setState(() => _settingsUnlockedSession = true);
+                    _grantSettingsSessionUnlock();
                   }
                 } else {
                   _requireProtectionUnlock(
                     ctx,
                     targetTitle: targetTitle,
                     onUnlocked: () {
-                      setState(() => _settingsUnlockedSession = true);
+                      _grantSettingsSessionUnlock();
                     },
                   );
                 }
@@ -5884,12 +5931,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      _qrSecret,
+                      _qrSetupVerified ? _tr('qrSecretHiddenNote') : _qrSecret,
+                      textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.black87,
                         fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                        letterSpacing: 1.5,
+                        fontSize: 11,
+                        letterSpacing: 1.0,
                       ),
                     ),
                   ],
@@ -6173,7 +6221,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           ctx,
                           targetTitle: _tr('defaultLauncherCard'),
                           onUnlocked: () async {
-                            setState(() => _settingsUnlockedSession = true);
+                            _grantSettingsSessionUnlock();
                             await _channel
                                 .invokeMethod('requestDefaultLauncher');
                           },
@@ -6217,7 +6265,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                     ctx,
                     targetTitle: _tr('kioskPinCard'),
                     onUnlocked: () async {
-                      setState(() => _settingsUnlockedSession = true);
+                      _grantSettingsSessionUnlock();
                       await _channel.invokeMethod('toggleKioskPin');
                       _refreshNativeStatus();
                     },
@@ -6264,7 +6312,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             crossAxisSpacing: 10,
             childAspectRatio: 1.9,
             children: [
-              _buildStatBox('$_reclaimedMinutes m', _tr('statReclaimed')),
+              _buildStatBox('$_reclaimedMinutes ${_tr('minutesShort')}', _tr('statReclaimed')),
               _buildStatBox('$_mindfulPausesCompleted', _tr('statPauses')),
               _buildStatBox('$_urgesResisted', _tr('statUrges')),
               _buildStatBox('$_blockedOpens', _tr('statBlocked')),

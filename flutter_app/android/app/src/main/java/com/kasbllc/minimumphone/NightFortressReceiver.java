@@ -11,7 +11,7 @@ import java.util.Calendar;
 
 /**
  * BroadcastReceiver that ensures the Safe Private DNS & Night Fortress Watchdog starts
- * automatically on device boot, app update, or 22:00 Night Fortress transition.
+ * automatically on device boot, app update, 22:00 Night Fortress transition, or system clock/timezone tamper.
  */
 public class NightFortressReceiver extends BroadcastReceiver {
     public static final String ACTION_NIGHT_FORTRESS_ALARM = "com.kasbllc.minimumphone.NIGHT_FORTRESS_ALARM";
@@ -30,6 +30,25 @@ public class NightFortressReceiver extends BroadcastReceiver {
         int nightStartHour = prefs.getInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, 22);
         int nightEndHour = prefs.getInt(FortressWatchdogService.KEY_NIGHT_END_HOUR, 6);
 
+        // Anti-Clock-Tamper Defense:
+        // If user manually changes system clock, date, or timezone without a valid Camera QR lease,
+        // lock Night Fortress mode for 8 hours and revoke any temporary unlock lease!
+        boolean isClockAction = Intent.ACTION_TIME_CHANGED.equals(action)
+            || Intent.ACTION_DATE_CHANGED.equals(action)
+            || Intent.ACTION_TIMEZONE_CHANGED.equals(action)
+            || "android.intent.action.TIME_SET".equals(action);
+
+        long now = System.currentTimeMillis();
+        long nightQrVerifiedUntil = prefs.getLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, 0L);
+
+        if (isClockAction && now >= nightQrVerifiedUntil) {
+            prefs.edit()
+                .putLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, now + (8L * 3600_000L))
+                .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, 0L)
+                .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "")
+                .apply();
+        }
+
         if (watchdogEnabled) {
             startWatchdogSafely(context);
             scheduleNightAlarm(context, nightStartHour);
@@ -37,9 +56,10 @@ public class NightFortressReceiver extends BroadcastReceiver {
 
         Calendar cal = Calendar.getInstance();
         int hour = cal.get(Calendar.HOUR_OF_DAY);
-        boolean isNightNow = (nightStartHour > nightEndHour)
+        long clockTamperUntil = prefs.getLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
+        boolean isNightNow = (now < clockTamperUntil) || ((nightStartHour > nightEndHour)
             ? (hour >= nightStartHour || hour < nightEndHour)
-            : (hour >= nightStartHour && hour < nightEndHour);
+            : (hour >= nightStartHour && hour < nightEndHour));
 
         if (isNightNow && autoNightDns) {
             boolean ok = FortressWatchdogService.ensurePrivateDnsActiveAtNight(context);

@@ -1151,11 +1151,11 @@ class WisdomBank {
     WisdomEntry(category: 'quran', text: 'Şüphesiz her zorlukla beraber bir kolaylık vardır.', ref: 'Kur\'an 94:6', question: 'Bu ayetin temel mesajı nedir?', options: ['Sabır ve Allah\'ın yardımına güvenmek', 'Amaçsızca gezinmek', 'İşi yarım bırakmak', 'Gece geç saatlere kadar telefona bakmak'], correctIndex: 0),
     WisdomEntry(category: 'quran', text: 'Bir toplum kendi iç dünyasını değiştirmedikçe Allah onların durumunu değiştirmez.', ref: 'Kur\'an 13:11', question: 'Hayatımızda gerçek değişim nasıl başlar?', options: ['Niyetimizi ve günlük alışkanlıklarımızı değiştirerek', 'Duvar kağıdını değiştirerek', 'Başkalarını suçlayarak', 'Vakti boşa harcayarak'], correctIndex: 0),
     WisdomEntry(category: 'quran', text: 'Mümin erkeklere söyle, gözlerini haramdan sakınsınlar ve iffetlerini korusunlar; bu onlar için daha temizdir.', ref: 'Kur\'an 24:30', question: 'Gözü haramdan korumak kalbe ne kazandırır?', options: ['Kalp temizliği ve iç huzuru', 'Kaygı ve dağınıklık', 'Yorgunluk', 'Odak kaybı'], correctIndex: 0),
-    WisdomEntry(category: 'quran', text: 'Asra yemin olsun ki insan ziyandadır; ancak iman edenler, salih amel işleyenler, hakkı ve sabrı tavsiye edenler مستثنadır.', ref: 'Kur\'an 103:1-3', question: 'Zamanı ziyandan korumanın yolu nedir?', options: ['İman, salih amel ve sabır', 'Kısa videolar izlemek', 'Görevleri ertelemek', 'Uykusuz kalmak'], correctIndex: 0),
-    WisdomEntry(category: 'hadith', text: 'İki nimet vardır ki insanların çoğu কাদrini bilmez: sağlık ve boş vakit.', ref: 'Buhârî 6412', question: 'İnsanların çoğunun kıymetini bilmediği iki nimet nedir?', options: ['Sağlık ve boş vakit', 'Pil ve Wi-Fi', 'Beğeni ve takipçiler', 'Bildirimler'], correctIndex: 0),
+    WisdomEntry(category: 'quran', text: 'Asra yemin olsun ki insan ziyandadır; ancak iman edenler, salih amel işleyenler, hakkı ve sabrı tavsiye edenler müstesnadır.', ref: 'Kur\'an 103:1-3', question: 'Zamanı ziyandan korumanın yolu nedir?', options: ['İman, salih amel ve sabır', 'Kısa videolar izlemek', 'Görevleri ertelemek', 'Uykusuz kalmak'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'İki nimet vardır ki insanların çoğu kadrini bilmez: sağlık ve boş vakit.', ref: 'Buhârî 6412', question: 'İnsanların çoğunun kıymetini bilmediği iki nimet nedir?', options: ['Sağlık ve boş vakit', 'Pil ve Wi-Fi', 'Beğeni ve takipçiler', 'Bildirimler'], correctIndex: 0),
     WisdomEntry(category: 'hadith', text: 'Kişinin kendisini ilgilendirmeyen boş şeyleri terk etmesi, İslam\'ının güzelliğindendir.', ref: 'Tirmizî 2317', question: 'Güzel ahlakın ve olgun imanın işareti nedir?', options: ['Faydasız meşguliyetleri ve dikkat dağıtıcıları bırakmak', 'Her akımı takip etmek', 'Tartışmalara girmek', 'Gece boyu uyanık kalmak'], correctIndex: 0),
     WisdomEntry(category: 'hadith', text: 'Güçlü kimse insanları güreşte yenen değil, öfke ve arzu anında nefsine hakim olandır.', ref: 'Buhârî 6114', question: 'Gerçek güç nedir?', options: ['Öfke ve dürtü anında kendine hakim olmak', 'Ekran başında vakit kaybetmek', 'Pes etmek', 'Korumayı kapatmak'], correctIndex: 0),
-    WisdomEntry(category: 'hadith', text: 'Sana fayda veren şeye حرصla sarıl, Allah\'tan yardım dile ve acizlik gösterme.', ref: 'Müslim 2664', question: 'Bu hadis bize neyi öğütlüyor?', options: ['Faydalı işlere odaklanıp Allah\'a güvenmek', 'Tembellik etmek', 'Amaçsız kaydırmak', 'Pes etmek'], correctIndex: 0),
+    WisdomEntry(category: 'hadith', text: 'Sana fayda veren şeye hırsla sarıl, Allah\'tan yardım dile ve acizlik gösterme.', ref: 'Müslim 2664', question: 'Bu hadis bize neyi öğütlüyor?', options: ['Faydalı işlere odaklanıp Allah\'a güvenmek', 'Tembellik etmek', 'Amaçsız kaydırmak', 'Pes etmek'], correctIndex: 0),
     WisdomEntry(category: 'proverb', text: 'Dikkatin nereye giderse hayatın orada büyür; odağını en değerli hazinen gibi koru.', ref: 'Odak ve Disiplin İlkesi', question: 'Bu söz hangi olumlu alışkanlığı kazandırır?', options: ['Derin odağı bildirimlerden korumak', 'Gece boyu ekran kaydırmak', 'İşleri yarım bırakmak', 'Her bildirime bakmak'], correctIndex: 0),
   ];
 
@@ -1276,7 +1276,7 @@ class WisdomBank {
       'Bu saate besmele, derin bir nefes ve net bir öncelikle başla.',
       'Gece olduğunda uykunu ve kalbini korumak için dijital dikkat dağıtıcıları kapat.',
       'Dağınıklık yerine disiplini seçtiğin her an iraden daha da güçlenir.',
-      'Telefonun senin amacına hizmet etsin, sen ekranın اسيري olma.',
+      'Telefonun senin amacına hizmet etsin, sen ekranın esiri olma.',
       'Şimdi tek bir faydalı işe odaklan ve huzurla tamamla.',
     ],
     'hi': [

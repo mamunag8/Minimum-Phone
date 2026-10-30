@@ -23,6 +23,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Process;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -64,6 +65,7 @@ public class FortressWatchdogService extends Service {
     public static final String KEY_MONK_MODE_UNTIL_MS = "monk_mode_until_ms";
     public static final String KEY_NIGHT_LOCKED_PACKAGES = "night_locked_packages";
     public static final String KEY_QR_VERIFIED_UNLOCK_UNTIL_MS = "qr_verified_unlock_until_ms";
+    public static final String KEY_CLOCK_TAMPER_UNTIL_MS = "clock_tamper_until_ms";
     public static final String KEY_APP_STATE_JSON = "flutter_app_state_v2";
 
     private static volatile boolean watchdogActive = false;
@@ -71,6 +73,8 @@ public class FortressWatchdogService extends Service {
     private final Handler watchdogHandler = new Handler(Looper.getMainLooper());
     private long lastInterceptMs = 0L;
     private long lastNightDnsCheckMs = 0L;
+    private long lastWallTimeMs = 0L;
+    private long lastElapsedRealtimeMs = 0L;
     private boolean lastKnownOsDnsValid = false;
     private boolean lastKnownUsageGranted = false;
     private boolean lastKnownOverlayGranted = false;
@@ -164,12 +168,34 @@ public class FortressWatchdogService extends Service {
         String tempReason = prefs.getString(KEY_TEMP_UNLOCK_REASON, "");
         long nightQrVerifiedUntilMs = prefs.getLong(KEY_NIGHT_QR_VERIFIED_UNTIL_MS, 0L);
         long emergencyUntilMs = prefs.getLong(KEY_EMERGENCY_LOCKDOWN_UNTIL_MS, 0L);
+        long clockTamperUntilMs = prefs.getLong(KEY_CLOCK_TAMPER_UNTIL_MS, 0L);
         long now = System.currentTimeMillis();
+        long elapsed = SystemClock.elapsedRealtime();
+
+        // Monotonic Anti-Clock-Tamper Guard: If user shifts system time/timezone by >10 minutes without QR verification,
+        // lock down as Night Mode for 8 hours and revoke any temporary leases!
+        if (lastWallTimeMs > 0L && lastElapsedRealtimeMs > 0L) {
+            long wallDelta = now - lastWallTimeMs;
+            long elapsedDelta = elapsed - lastElapsedRealtimeMs;
+            if (Math.abs(wallDelta - elapsedDelta) > 600000L && now >= nightQrVerifiedUntilMs) {
+                clockTamperUntilMs = now + (8L * 3600000L);
+                tempUnlockUntilMs = 0L;
+                prefs.edit()
+                    .putLong(KEY_CLOCK_TAMPER_UNTIL_MS, clockTamperUntilMs)
+                    .putLong(KEY_TEMP_UNLOCK_UNTIL_MS, 0L)
+                    .putString(KEY_TEMP_UNLOCK_REASON, "")
+                    .putBoolean(KEY_LOCK_SETTINGS, true)
+                    .apply();
+            }
+        }
+        lastWallTimeMs = now;
+        lastElapsedRealtimeMs = elapsed;
 
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        boolean isNightWindow = (startH > endH)
+        boolean isClockTampered = now < clockTamperUntilMs && now >= nightQrVerifiedUntilMs;
+        boolean isNightWindow = isClockTampered || ((startH > endH)
             ? (hour >= startH || hour < endH)
-            : (hour >= startH && hour < endH);
+            : (hour >= startH && hour < endH));
         boolean isEmergencyLockdown = now < emergencyUntilMs;
         boolean isMonkActive = now < monkUntilMs;
 
@@ -185,7 +211,7 @@ public class FortressWatchdogService extends Service {
                 .putString(KEY_TEMP_UNLOCK_REASON, "")
                 .apply();
             hideOverlayShield();
-            Toast.makeText(ctx, "✅ Usage Access Activated! Returning to Minimum Phone.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, NativeI18n.tr(ctx, "toastUsageActive"), Toast.LENGTH_SHORT).show();
             Intent homeIntent = new Intent(ctx, MainActivity.class);
             homeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             ctx.startActivity(homeIntent);
@@ -200,7 +226,7 @@ public class FortressWatchdogService extends Service {
                 .putString(KEY_TEMP_UNLOCK_REASON, "")
                 .apply();
             hideOverlayShield();
-            Toast.makeText(ctx, "✅ Appear on Top Activated! Returning to Minimum Phone.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, NativeI18n.tr(ctx, "toastOverlayActive"), Toast.LENGTH_SHORT).show();
             Intent homeIntent = new Intent(ctx, MainActivity.class);
             homeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             ctx.startActivity(homeIntent);
@@ -217,7 +243,7 @@ public class FortressWatchdogService extends Service {
                 .putBoolean(KEY_LOCK_SETTINGS, true)
                 .apply();
             hideOverlayShield();
-            Toast.makeText(ctx, "🛡️ Safe Private DNS Active! Settings Auto-Locked.", Toast.LENGTH_LONG).show();
+            Toast.makeText(ctx, NativeI18n.tr(ctx, "toastDnsActiveLocked"), Toast.LENGTH_LONG).show();
             Intent homeIntent = new Intent(ctx, MainActivity.class);
             homeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             ctx.startActivity(homeIntent);
@@ -274,21 +300,39 @@ public class FortressWatchdogService extends Service {
 
         // 3. Check if user is inside a verified temporary setup/unlock lease
         if (now < tempUnlockUntilMs) {
-            // CRITICAL NIGHT QR ENFORCEMENT:
-            // At night (22:00-06:00), if Safe DNS is ALREADY active, NO temporary lease is valid unless QR was scanned!
-            // And if user is in "usage_access", "overlay_permission", or "default_launcher" setup lease,
-            // block immediately if they navigate into Wireless/Network/DNS settings!
+            // CRITICAL NIGHT QR & ANTI-BYPASS ENFORCEMENT:
+            // 1. Block ANY attempt to open App Info / Force Stop / Uninstall / Date & Time / Reset / Developer Options
+            //    unless the user has a live Camera QR verification lease!
+            boolean navigatedToTamperTarget = lowerClass.contains("installedappdetails")
+                || lowerClass.contains("appinfo")
+                || lowerClass.contains("spaactivity")
+                || lowerClass.contains("manageapplications")
+                || lowerClass.contains("applicationsettings")
+                || lowerClass.contains("deviceadmin")
+                || lowerClass.contains("development")
+                || lowerClass.contains("reset")
+                || lowerClass.contains("datetime")
+                || lowerClass.contains("zonepicker");
+
             boolean isNonDnsSetupLease = "usage_access".equals(tempReason)
                 || "overlay_permission".equals(tempReason)
-                || "default_launcher".equals(tempReason);
+                || "default_launcher".equals(tempReason)
+                || "safe_sub_setting".equals(tempReason);
             boolean navigatedToNetworkOrDns = lowerClass.contains("wireless")
                 || lowerClass.contains("network")
                 || lowerClass.contains("dns")
                 || lowerClass.contains("tether")
                 || lowerClass.contains("connectivity");
 
-            if (isNonDnsSetupLease && navigatedToNetworkOrDns) {
-                // User tried to abuse a permission setup lease to reach Network/DNS settings!
+            if (navigatedToTamperTarget && now >= nightQrVerifiedUntilMs) {
+                // User tried to reach App Info (Force Stop), Date/Time, or Reset during a temporary lease!
+                tempUnlockUntilMs = 0L;
+                prefs.edit()
+                    .putLong(KEY_TEMP_UNLOCK_UNTIL_MS, 0L)
+                    .putString(KEY_TEMP_UNLOCK_REASON, "")
+                    .apply();
+            } else if (isNonDnsSetupLease && navigatedToNetworkOrDns) {
+                // User tried to abuse a permission or sub-setting lease to reach Network/DNS settings!
                 tempUnlockUntilMs = 0L;
                 prefs.edit()
                     .putLong(KEY_TEMP_UNLOCK_UNTIL_MS, 0L)
@@ -422,11 +466,11 @@ public class FortressWatchdogService extends Service {
             int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
             boolean isNight = (hour >= 22 || hour < 6);
             String titleText = isNight
-                ? "🌙🔒 NIGHT DNS FORTRESS ACTIVE (22:00 – 06:00)\nরাতের বেলা QR স্ক্যান ছাড়া সেটিংস ও ডিএনএস পরিবর্তন সম্পূর্ণ নিষিদ্ধ"
-                : "🛡️ SYSTEM SETTINGS & SAFE DNS LOCKED\nফোন সেটিংস ও প্রাইভেট ডিএনএস সুরক্ষিত";
+                ? NativeI18n.tr(ctx, "overlayNightTitle")
+                : NativeI18n.tr(ctx, "overlayDayTitle");
             String subText = isNight
-                ? "Safe Private DNS & Phone Settings are strictly locked at night. You cannot change DNS or weaken security without scanning your Physical QR Card in another room."
-                : "Phone Settings & Safe Private DNS are protected by Minimum Phone Fortress.";
+                ? NativeI18n.tr(ctx, "overlayNightSub")
+                : NativeI18n.tr(ctx, "overlayDaySub");
 
             if (activeOverlayView != null) {
                 if (overlayTitleView != null) overlayTitleView.setText(titleText);
@@ -438,13 +482,16 @@ public class FortressWatchdogService extends Service {
             root.setOrientation(LinearLayout.VERTICAL);
             root.setGravity(Gravity.CENTER);
             root.setBackgroundColor(Color.parseColor("#050507"));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                root.setLayoutDirection(NativeI18n.isRtl(ctx) ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+            }
             int pad = dp(ctx, 24);
             root.setPadding(pad, pad, pad, pad);
             root.setClickable(true);
             root.setFocusable(true);
 
             TextView badge = new TextView(ctx);
-            badge.setText("🛡️ MINIMUM PHONE • HARDWARE OVERLAY LOCK");
+            badge.setText(NativeI18n.tr(ctx, "overlayBadge"));
             badge.setTextColor(Color.parseColor("#10B981"));
             badge.setTextSize(12f);
             badge.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -470,7 +517,7 @@ public class FortressWatchdogService extends Service {
 
             Button qrUnlockBtn = new Button(ctx);
             qrUnlockBtn.setAllCaps(false);
-            qrUnlockBtn.setText("📷 Open QR Verification Gate (QR কোড স্ক্যান করুন)");
+            qrUnlockBtn.setText(NativeI18n.tr(ctx, "overlayQrBtn"));
             qrUnlockBtn.setTextColor(Color.BLACK);
             GradientDrawable qrBg = new GradientDrawable();
             qrBg.setColor(Color.parseColor("#10B981"));
@@ -502,7 +549,7 @@ public class FortressWatchdogService extends Service {
 
             Button homeBtn = new Button(ctx);
             homeBtn.setAllCaps(false);
-            homeBtn.setText("🏠 Return to Minimum Phone Home");
+            homeBtn.setText(NativeI18n.tr(ctx, "overlayHomeBtn"));
             homeBtn.setTextColor(Color.WHITE);
             GradientDrawable homeBg = new GradientDrawable();
             homeBg.setColor(Color.parseColor("#27272A"));
@@ -610,20 +657,14 @@ public class FortressWatchdogService extends Service {
                                     return false;
                                 }
                             } else {
-                                // On an active network, if getPrivateDnsServerName() is null:
+                                // On an active network, if getPrivateDnsServerName() is null, Private DNS is NOT in strict hostname mode
+                                // unless Settings.Global explicitly confirms hostname mode with an approved family host.
                                 String gMode = Settings.Global.getString(ctx.getContentResolver(), "private_dns_mode");
                                 String gSpec = Settings.Global.getString(ctx.getContentResolver(), "private_dns_specifier");
                                 if ("hostname".equalsIgnoreCase(gMode) && isApprovedFamilySafeDnsHost(gSpec, expectedHost)) {
                                     return true;
                                 }
-                                if ("off".equalsIgnoreCase(gMode) || "opportunistic".equalsIgnoreCase(gMode) || !lp.isPrivateDnsActive()) {
-                                    prefs.edit().putString(KEY_USER_VERIFIED_DNS_HOST, "").apply();
-                                    return false;
-                                }
-                                String verifiedHost = prefs.getString(KEY_USER_VERIFIED_DNS_HOST, "");
-                                if (isApprovedFamilySafeDnsHost(verifiedHost, expectedHost)) {
-                                    return true;
-                                }
+                                prefs.edit().putString(KEY_USER_VERIFIED_DNS_HOST, "").apply();
                                 return false;
                             }
                         }
