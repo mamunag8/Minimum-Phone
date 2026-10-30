@@ -1000,11 +1000,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       return;
     }
 
-    // Safe floating panels (Android 10+ Settings.Panel) and standalone utility apps
-    // never open com.android.settings or expose Private DNS.
-    const Set<String> safePanelOrUtilityTypes = {
-      'wifi',
-      'mobile_data',
+    // Standalone utility apps & Volume slice that never expose Network/DNS or com.android.settings
+    const Set<String> alwaysSafeUtilityTypes = {
       'sound',
       'alarm',
       'calculator',
@@ -1023,21 +1020,22 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         }
         return;
       }
-    } else if (!safePanelOrUtilityTypes.contains(type)) {
-      // Sub-settings that open com.android.settings (hotspot, bluetooth, display, battery, location, airplane):
-      // Strictly blocked during Night Fortress (22:00-06:00) so DNS cannot be modified!
-      if (_isNightWindow) {
-        if (ctx.mounted) {
-          ScaffoldMessenger.of(ctx).showSnackBar(
-            SnackBar(
-              content: Text(_tr('nightOnlyQrNote')),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-        }
+      if (_isNightWindow && !unlockedByGate) {
+        if (!ctx.mounted) return;
+        _requireProtectionUnlock(
+          ctx,
+          targetTitle: _tr('safeDnsTitle'),
+          onUnlocked: () {
+            _openSafeSubSetting(ctx, type, unlockedByGate: true);
+          },
+        );
         return;
       }
-      if (_phoneSettingsLocked && !unlockedByGate) {
+    } else if (!alwaysSafeUtilityTypes.contains(type)) {
+      // Sub-settings & panels that touch Network/System Settings (wifi, mobile_data, hotspot, bluetooth, display, battery, location, airplane):
+      // At Night (22:00-06:00), strictly require Camera QR scan! During daytime, require Mindful Gate if Phone Settings Lock is enabled.
+      if ((_isNightWindow || _phoneSettingsLocked) && !unlockedByGate) {
+        if (!ctx.mounted) return;
         _requireProtectionUnlock(
           ctx,
           targetTitle: type.toUpperCase(),
@@ -1831,10 +1829,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 (_osDnsIsFamilySafe ? 1 : 0) +
                 (_qrSetupVerified ? 1 : 0) +
                 (_isDefaultLauncher ? 1 : 0);
+            // Strictly lock the 5-Step Setup Guide at night (22:00-06:00) unconditionally, and during daytime once core protections are active!
             final bool isCoreProtected =
                 _hasUsageAccess && _hasOverlayPermission && _osDnsIsFamilySafe;
             final bool isNightLocked =
-                _isNightWindow && isCoreProtected && !_settingsUnlockedSession;
+                (_isNightWindow || (_phoneSettingsLocked && isCoreProtected)) &&
+                    !_settingsUnlockedSession;
 
             return SafeArea(
               child: ConstrainedBox(
@@ -2064,22 +2064,40 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                                         size: 18,
                                       ),
                                       label: Text(
-                                        _tr('qrScanPrimaryBtn'),
+                                        _isNightWindow
+                                            ? _tr('qrScanPrimaryBtn')
+                                            : _tr('unlockBtn'),
                                         style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 12.5,
                                         ),
                                       ),
                                       onPressed: () async {
-                                        final bool ok =
-                                            await _scanPhysicalQrWithCamera(
-                                                ctx);
-                                        if (ok) {
-                                          setState(() =>
-                                              _settingsUnlockedSession = true);
-                                          if (sCtx.mounted) {
-                                            setWizardState(() {});
+                                        if (_isNightWindow) {
+                                          final bool ok =
+                                              await _scanPhysicalQrWithCamera(
+                                                  ctx);
+                                          if (ok) {
+                                            setState(() =>
+                                                _settingsUnlockedSession =
+                                                    true);
+                                            if (sCtx.mounted) {
+                                              setWizardState(() {});
+                                            }
                                           }
+                                        } else {
+                                          _requireProtectionUnlock(
+                                            ctx,
+                                            targetTitle: _tr('wizardTitle'),
+                                            onUnlocked: () {
+                                              setState(() =>
+                                                  _settingsUnlockedSession =
+                                                      true);
+                                              if (sCtx.mounted) {
+                                                setWizardState(() {});
+                                              }
+                                            },
+                                          );
                                         }
                                       },
                                     ),
@@ -2186,7 +2204,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                                           _activateSafePrivateDnsNow(ctx);
                                         },
                                 ),
-                                if (!_osDnsIsFamilySafe) ...[
+                                if (!_osDnsIsFamilySafe && !_isNightWindow) ...[
                                   const SizedBox(height: 6),
                                   SizedBox(
                                     width: double.infinity,
@@ -2357,7 +2375,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           },
         );
       },
-    );
+    ).whenComplete(() {
+      if (mounted && _settingsUnlockedSession) {
+        setState(() => _settingsUnlockedSession = false);
+      }
+    });
   }
 
   Widget _buildWizardStepTile({
@@ -2890,11 +2912,23 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      onPressed: (_osDnsIsFamilySafe && _isNightWindow)
+                      onPressed: _osDnsIsFamilySafe
                           ? null
                           : () {
                               Navigator.pop(ctx);
-                              _activateSafePrivateDnsNow(context);
+                              if (_isNightWindow && !_settingsUnlockedSession) {
+                                _requireProtectionUnlock(
+                                  context,
+                                  targetTitle: _tr('safeDnsTitle'),
+                                  onUnlocked: () {
+                                    setState(
+                                        () => _settingsUnlockedSession = true);
+                                    _activateSafePrivateDnsNow(context);
+                                  },
+                                );
+                              } else {
+                                _activateSafePrivateDnsNow(context);
+                              }
                             },
                     ),
                   ),
@@ -3143,6 +3177,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         Navigator.pop(ctx);
         setState(() {
           _currentTab = tab;
+          _settingsUnlockedSession = false;
           if (subTab != null) {
             if (tab == 1) _appsSubTab = subTab;
             if (tab == 2) _puritySubTab = subTab;
@@ -3743,7 +3778,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           },
         );
       },
-    );
+    ).whenComplete(() {
+      if (mounted && _settingsUnlockedSession) {
+        setState(() => _settingsUnlockedSession = false);
+      }
+    });
   }
 
   Widget _buildListSetupTabChip({
@@ -4426,7 +4465,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           },
         );
       },
-    );
+    ).whenComplete(() {
+      if (mounted && _settingsUnlockedSession) {
+        setState(() => _settingsUnlockedSession = false);
+      }
+    });
   }
 
   // =========================================================================
@@ -4932,8 +4975,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   Widget _buildSafePrivateDnsCard(BuildContext ctx) {
-    // Strictly lock DNS settings at night (22:00 - 06:00) once Safe DNS is active!
-    if (_isNightWindow && _osDnsIsFamilySafe && !_settingsUnlockedSession) {
+    // Strictly lock DNS settings at night (22:00 - 06:00) unconditionally, and during daytime when Settings Lock is active!
+    if ((_isNightWindow || (_phoneSettingsLocked && _osDnsIsFamilySafe)) &&
+        !_settingsUnlockedSession) {
       return _buildNightSettingsGateCard(
         ctx,
         targetTitle: _tr('safeDnsTitle'),
@@ -5055,36 +5099,39 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           const SizedBox(height: 8),
           Row(
             children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF10B981),
-                    side: const BorderSide(color: Color(0xFF10B981)),
+              if (!_isNightWindow && !_osDnsIsFamilySafe) ...[
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF10B981),
+                      side: const BorderSide(color: Color(0xFF10B981)),
+                    ),
+                    icon:
+                        const Icon(Icons.check_circle_outline_rounded, size: 16),
+                    label: Text(
+                      _tr('verifyDnsBtn'),
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () async {
+                      await _channel.invokeMethod('confirmManualDnsSetup', {
+                        'host': _dnsHost,
+                      });
+                      await _refreshNativeStatus();
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                                '✅ ${_tr('dnsVerified')} ($_dnsHost)'),
+                            backgroundColor: const Color(0xFF10B981),
+                          ),
+                        );
+                      }
+                    },
                   ),
-                  icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
-                  label: Text(
-                    _tr('verifyDnsBtn'),
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                  onPressed: () async {
-                    await _channel.invokeMethod('confirmManualDnsSetup', {
-                      'host': _dnsHost,
-                    });
-                    await _refreshNativeStatus();
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                              '✅ ${_tr('dnsVerified')} ($_dnsHost)'),
-                          backgroundColor: const Color(0xFF10B981),
-                        ),
-                      );
-                    }
-                  },
                 ),
-              ),
-              const SizedBox(width: 8),
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
@@ -5939,8 +5986,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     final bool isCoreProtected =
         _hasUsageAccess && _hasOverlayPermission && _osDnsIsFamilySafe;
     final bool isSystemLocked =
-        (_isNightWindow || _phoneSettingsLocked) &&
-            isCoreProtected &&
+        (_isNightWindow || (_phoneSettingsLocked && isCoreProtected)) &&
             !_settingsUnlockedSession;
     return Column(
       children: [
