@@ -1,6 +1,7 @@
 # Dependencies & Build Cache
 node_modules/
 dist/
+seo-dist/
 .vite/
 
 # Android Gradle Build Cache (keep source, manifest & release bundles in play-store-submission/)
