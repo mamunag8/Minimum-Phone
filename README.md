@@ -1,7 +1,8 @@
 # Minimum Phone — The Anti-Dopamine Launcher & Calm Mind OS
 
 > **100% Free · Zero Ads · Zero Internet Telemetry · Android (Google Play Store) & iOS (Apple App Store)**  
-> Built by **kasb LLC** (`com.kasbllc.minimumphone`)
+> Built by **kasb LLC** (`com.kasbllc.minimumphone`)  
+> 🌐 **Official 12-Language SEO & Documentation Portal:** [https://minimumphone.kasbpro.com](https://minimumphone.kasbpro.com) ([Alias](https://minimum-phone.kasbpro.com)) · [Printable QR Key Card](https://minimumphone.kasbpro.com/qr-card.html) · [Privacy Policy](https://minimumphone.kasbpro.com/privacy-policy.html)
 
 **Minimum Phone** is a minimalist, ad-free Android launcher and iOS digital wellness utility designed to strip away visual dopamine triggers, inject intentional friction into addictive phone habits, and restore peace of mind (*Sakīnah* / stillness).
 
@@ -128,6 +129,21 @@ npx cap sync
 
 ## 🔒 Verifiable Zero-Telemetry Privacy
 Minimum Phone's Android manifest (`android/app/src/main/AndroidManifest.xml`) requests **zero `android.permission.INTERNET` permission**. Every screen-time metric, journal entry, notification digest, and purity streak stays 100% on your device.
+
+---
+
+## 🌐 Official Community & Social Channels
+
+Join the global **Minimum Phone: Detox & Focus** community to share screen-time transformations, minimalist setups, feature requests, and deep-work workflows:
+
+- **Facebook Official Page:** [Minimum Phone: Detox & Focus](https://www.facebook.com/profile.php?id=61595932508101)
+- **Facebook Public Community Group:** [Minimum Phone Community — Digital Detox & Calm Mind](https://www.facebook.com/groups/28497753259904620)
+- **LinkedIn Official Company Page:** [Minimum Phone: Detox & Focus](https://www.linkedin.com/company/minimum-phone/)
+- **LinkedIn Public Group:** [Minimum Phone — Digital Detox, Deep Work & Mindful Tech](https://www.linkedin.com/groups/40625419/)
+- **YouTube Official Channel:** [@MinimumPhone](https://www.youtube.com/@MinimumPhone) (`UC8DK7Ycm1DH3DmWuaS1R8AQ`)
+- **Official Website:** [https://kasbpro.com](https://kasbpro.com) · **Contact:** `info@kasbpro.com`
+
+See [`docs/social-media-kit.md`](docs/social-media-kit.md) for the complete social media kit, branding assets, and community guidelines.
 
 ---
 
