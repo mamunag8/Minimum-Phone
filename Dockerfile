@@ -6,7 +6,7 @@ COPY docs ./docs
 COPY play-store-submission/graphics ./play-store-submission/graphics
 COPY flutter_app/lib/i18n.dart ./flutter_app/lib/i18n.dart
 COPY flutter_app/lib/wisdom_bank.dart ./flutter_app/lib/wisdom_bank.dart
-RUN node scripts/build_seo_site.mjs && test -f seo-dist/index.html && test -f seo-dist/bn/index.html && test -f seo-dist/ar/index.html
+RUN node scripts/build_seo_site.mjs && test -f seo-dist/index.html && test -f seo-dist/bn/index.html && test -f seo-dist/blog/index.html && test -f seo-dist/llms-full.txt
 
 # ── Stage 2: serve via Nginx ───────────────────────────────────────────
 FROM nginx:1.27-alpine

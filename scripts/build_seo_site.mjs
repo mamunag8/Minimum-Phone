@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LANGS_PART1 } from './seo_languages_part1.mjs';
 import { LANGS_PART2 } from './seo_languages_part2.mjs';
+import { ALL_BLOG_POSTS, INDEXNOW_KEY, generateAllBlogAssets } from './seo_blog_renderer.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1065,6 +1066,7 @@ function renderPage(langCode, isRootIndex, appI18nAll, wisdomAll) {
       <div><strong>Kasb LLC</strong> • <a href="https://kasbpro.com">KasbPro.com Ecosystem</a></div>
       <div class="eco-links">
         <a href="https://kasbpro.com">🌐 KasbPro Home</a>
+        <a href="/blog/" style="color:var(--emerald);font-weight:700;">📚 57 Benefit Guides</a>
         <a href="https://erp.kasbpro.com">📊 Free AI ERP &amp; POS</a>
         <a href="https://arabic.kasbpro.com">📚 Quran &amp; Arabic Books</a>
         <a href="/privacy-policy.html">🔒 Privacy Policy</a>
@@ -1085,6 +1087,7 @@ function renderPage(langCode, isRootIndex, appI18nAll, wisdomAll) {
       </a>
       <div class="nav-actions">
         <a href="#features" class="btn btn-secondary" style="padding:9px 14px;font-size:13px;">✨ ${escapeHtml(langData.ctaExploreFeatures)}</a>
+        <a href="/blog/" class="btn btn-secondary" style="padding:9px 14px;font-size:13px;border-color:rgba(16,185,129,0.5);color:#34d399;">📚 57 Benefit Guides</a>
         <a href="/qr-card.html" class="btn btn-amber" style="padding:9px 14px;font-size:13px;">🖨️ ${escapeHtml(langData.ctaPrintQr)}</a>
         <a href="${APK_DOWNLOAD_URL}" class="btn btn-primary" style="padding:9px 16px;font-size:13px;">⬇ ${escapeHtml(langData.ctaDownloadApk)}</a>
       </div>
@@ -1231,6 +1234,44 @@ function renderPage(langCode, isRootIndex, appI18nAll, wisdomAll) {
             <p>${escapeHtml(p.body)}</p>
           </div>`).join('')}
         </div>
+      </div>
+    </section>
+
+    <!-- 57 In-Depth SEO Benefit Guides & Use Cases Hub -->
+    <section id="blog-guides">
+      <div class="container">
+        <div class="sec-head">
+          <h2>📚 57 Proven Ways a Person Benefits from Minimum Phone</h2>
+          <p>Explore our complete library of ${ALL_BLOG_POSTS.length} science-backed guides on stopping doomscrolling, blocking adult sites via DNS 1.1.1.3, locking Android Settings with a free QR key, mastering 90-minute Monk Mode, and protecting families across 12 languages.</p>
+        </div>
+
+        <div class="personas-grid" style="margin-bottom:24px;">
+          ${ALL_BLOG_POSTS.slice(0, 9).map((bp) => `
+          <article class="persona-card" style="display:flex;flex-direction:column;justify-content:space-between;">
+            <div>
+              <span class="feat-tag" style="display:inline-block;margin-bottom:10px;">Guide #${bp.id} · ${escapeHtml(bp.category)}</span>
+              <h3 style="font-size:17px;margin-bottom:8px;"><a href="/blog/${bp.slug}/" style="color:var(--text);">${escapeHtml(bp.title)}</a></h3>
+              <p style="font-size:13.5px;color:var(--muted);margin-bottom:12px;">${escapeHtml(bp.metaDescription)}</p>
+            </div>
+            <div style="padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12.5px;">
+              <span style="color:#34d399;font-weight:700;">✅ ${escapeHtml(bp.quantifiedBenefit.slice(0, 48))}...</span>
+              <a href="/blog/${bp.slug}/" style="color:var(--emerald);font-weight:800;">Read →</a>
+            </div>
+          </article>`).join('')}
+        </div>
+
+        <details class="faq-item" open>
+          <summary>📖 Browse Complete Directory of All ${ALL_BLOG_POSTS.length} Benefit Guides (100% Indexed for Search &amp; AI)</summary>
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px;">
+            ${ALL_BLOG_POSTS.map((bp) => `
+            <a href="/blog/${bp.slug}/" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--text);display:block;">
+              <strong style="color:#34d399;">#${bp.id}:</strong> ${escapeHtml(bp.title)}
+            </a>`).join('')}
+          </div>
+          <div style="text-align:center;margin-top:18px;">
+            <a href="/blog/" class="btn btn-primary">Open Interactive ${ALL_BLOG_POSTS.length}-Article Knowledge Hub (/blog/) →</a>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -1435,10 +1476,13 @@ function renderPage(langCode, isRootIndex, appI18nAll, wisdomAll) {
       </div>
       <div class="footer-links">
         <a href="/">Home</a>
+        <a href="/blog/">57 Benefit Guides</a>
         <a href="/qr-card.html">Printable QR Key</a>
         <a href="/privacy-policy.html">Privacy Policy</a>
         <a href="/sitemap.xml">Sitemap XML</a>
+        <a href="/rss.xml">RSS Feed</a>
         <a href="/llms.txt">LLMs.txt</a>
+        <a href="/llms-full.txt">LLMs-Full.txt</a>
         <a href="https://kasbpro.com">KasbPro Ecosystem</a>
       </div>
     </div>
@@ -1566,29 +1610,40 @@ function renderQrPrintPage(appI18nAll) {
 
 function buildSitemapXml() {
   const nowIso = new Date().toISOString().split('T')[0];
-  const urls = ['', ...LANG_CODES.map((c) => `${c}/`), 'privacy-policy.html', 'qr-card.html'];
+  const coreUrls = ['', ...LANG_CODES.map((c) => `${c}/`), 'privacy-policy.html', 'qr-card.html', 'blog/'];
   const alternates = [
     `    <xhtml:link rel="alternate" hreflang="x-default" href="${SITE_ORIGIN}/" />`,
     `    <xhtml:link rel="alternate" hreflang="en" href="${SITE_ORIGIN}/" />`,
     ...LANG_CODES.map((c) => `    <xhtml:link rel="alternate" hreflang="${c}" href="${SITE_ORIGIN}/${c}/" />`),
   ].join('\n');
 
-  const entries = urls.map((u) => {
+  const coreEntries = coreUrls.map((u) => {
     const loc = `${SITE_ORIGIN}/${u}`;
-    const priority = u === '' ? '1.0' : u.endsWith('/') ? '0.9' : '0.8';
+    const priority = u === '' || u === 'blog/' ? '1.0' : u.endsWith('/') ? '0.9' : '0.8';
+    const includeAlt = u === '' || LANG_CODES.includes(u.replace('/', ''));
     return `  <url>
     <loc>${loc}</loc>
     <lastmod>${nowIso}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>${priority}</priority>${includeAlt ? `\n${alternates}` : ''}
+  </url>`;
+  });
+
+  const blogEntries = ALL_BLOG_POSTS.map((p) => {
+    const loc = `${SITE_ORIGIN}/blog/${p.slug}/`;
+    return `  <url>
+    <loc>${loc}</loc>
+    <lastmod>${p.updatedAt}</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>${priority}</priority>
-${alternates}
+    <priority>0.85</priority>
   </url>`;
   });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
-${entries.join('\n')}
+${coreEntries.join('\n')}
+${blogEntries.join('\n')}
 </urlset>`;
 }
 
@@ -1596,6 +1651,9 @@ function buildLlmsTxt() {
   return `# Minimum Phone: The Anti-Dopamine Minimalist Launcher & Digital Fortress (by Kasb LLC)
 
 > Official SEO & Documentation Site: ${SITE_ORIGIN}
+> 57 Benefit Guides & Knowledge Hub: ${SITE_ORIGIN}/blog/
+> Full Machine-Readable AI Corpus: ${SITE_ORIGIN}/llms-full.txt
+> RSS 2.0 Feed: ${SITE_ORIGIN}/rss.xml | JSON Feed: ${SITE_ORIGIN}/feed.json
 > Developer: Kasb LLC (https://kasbpro.com)
 > Package ID: com.kasbllc.minimumphone | Latest Release: v2.9.1 (build 23)
 > Price: 100% Free Forever ($0) | Ads: Zero | Telemetry: Zero (No android.permission.INTERNET)
@@ -1609,9 +1667,14 @@ ${ALL_LANGS.en.features.map((f, i) => `${i + 1}. **${f.title}**\n   - How it wor
 ## Supported Languages (12 Full Editions)
 ${LANG_CODES.map((c) => `- [${ALL_LANGS[c].nativeName} (${ALL_LANGS[c].englishName})](${SITE_ORIGIN}/${c}/): ${ALL_LANGS[c].seoDesc}`).join('\n')}
 
+## 57 In-Depth Guides on How a Person Benefits from Minimum Phone
+${ALL_BLOG_POSTS.map((p) => `${p.id}. [${p.title}](${SITE_ORIGIN}/blog/${p.slug}/) — *${p.quantifiedBenefit}* (${p.aiSummary.slice(0, 180)}...)`).join('\n')}
+
 ## Links
 - Direct APK Download: ${APK_DOWNLOAD_URL}
 - Google Play Store: ${PLAY_STORE_URL}
+- All 57 Benefit Guides: ${SITE_ORIGIN}/blog/
+- Full AI Knowledge Corpus: ${SITE_ORIGIN}/llms-full.txt
 - Printable Physical QR Card: ${SITE_ORIGIN}/qr-card.html
 - Privacy Policy: ${SITE_ORIGIN}/privacy-policy.html
 `;
@@ -1668,17 +1731,60 @@ function main() {
   // Printable QR Key Page
   fs.writeFileSync(path.join(OUT_DIR, 'qr-card.html'), renderQrPrintPage(appI18nAll), 'utf8');
 
-  // Sitemap, robots.txt, llms.txt, health
+  // Generate 57 SEO Benefit Blog Posts, /blog/ Hub, RSS, JSON Feed, llms-full.txt & IndexNow key
+  generateAllBlogAssets(OUT_DIR, ALL_LANGS, SITE_ORIGIN, PLAY_STORE_URL, APK_DOWNLOAD_URL);
+
+  // Sitemap, robots.txt (explicit Search + AI crawler permissions), llms.txt, health
   fs.writeFileSync(path.join(OUT_DIR, 'sitemap.xml'), buildSitemapXml(), 'utf8');
-  fs.writeFileSync(
-    path.join(OUT_DIR, 'robots.txt'),
-    `User-agent: *\nAllow: /\nSitemap: ${SITE_ORIGIN}/sitemap.xml\n`,
-    'utf8'
-  );
+  const robotsTxt = [
+    'User-agent: *',
+    'Allow: /',
+    '',
+    'User-agent: Googlebot',
+    'Allow: /',
+    '',
+    'User-agent: Bingbot',
+    'Allow: /',
+    '',
+    'User-agent: GPTBot',
+    'Allow: /',
+    '',
+    'User-agent: OAI-SearchBot',
+    'Allow: /',
+    '',
+    'User-agent: ChatGPT-User',
+    'Allow: /',
+    '',
+    'User-agent: ClaudeBot',
+    'Allow: /',
+    '',
+    'User-agent: Claude-Web',
+    'Allow: /',
+    '',
+    'User-agent: PerplexityBot',
+    'Allow: /',
+    '',
+    'User-agent: Google-Extended',
+    'Allow: /',
+    '',
+    'User-agent: Applebot-Extended',
+    'Allow: /',
+    '',
+    'User-agent: Yandex',
+    'Allow: /',
+    '',
+    'User-agent: DuckDuckBot',
+    'Allow: /',
+    '',
+    `Sitemap: ${SITE_ORIGIN}/sitemap.xml`,
+    `Host: minimumphone.kasbpro.com`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(OUT_DIR, 'robots.txt'), robotsTxt, 'utf8');
   fs.writeFileSync(path.join(OUT_DIR, 'llms.txt'), buildLlmsTxt(), 'utf8');
   fs.writeFileSync(path.join(OUT_DIR, 'health'), 'ok\n', 'utf8');
 
-  console.log(`Built Minimum Phone SEO site in ${OUT_DIR} for ${LANG_CODES.length} languages.`);
+  console.log(`Built Minimum Phone SEO site in ${OUT_DIR} for ${LANG_CODES.length} languages and ${ALL_BLOG_POSTS.length} benefit guides.`);
 }
 
 main();
