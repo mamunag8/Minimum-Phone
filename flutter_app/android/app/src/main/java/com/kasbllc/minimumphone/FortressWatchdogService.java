@@ -1051,13 +1051,35 @@ public class FortressWatchdogService extends Service {
         if (pkg == null) return true;
         String lower = pkg.trim().toLowerCase(Locale.ROOT);
         if (lower.isEmpty()) return true;
+        try {
+            String defIme = Settings.Secure.getString(getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
+            if (defIme != null && !defIme.isEmpty()) {
+                String imePkg = defIme.split("/")[0].trim().toLowerCase(Locale.ROOT);
+                if (!imePkg.isEmpty() && lower.equals(imePkg)) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
         return lower.equals("android") ||
                lower.equals("com.android.systemui") ||
                lower.contains("inputmethod") ||
                lower.contains("keyboard") ||
                lower.contains("gboard") ||
                lower.contains("honeyboard") ||
-               lower.contains("swiftkey");
+               lower.contains("swiftkey") ||
+               lower.contains("ridmik") ||
+               lower.contains("desh") ||
+               lower.contains("indic") ||
+               lower.contains("openboard") ||
+               lower.contains("florisboard") ||
+               lower.contains("fleksy") ||
+               lower.contains("kika") ||
+               lower.contains("bobble") ||
+               lower.contains("facemoji") ||
+               lower.contains("touchpal") ||
+               lower.contains("sogou") ||
+               lower.contains("baidu.input") ||
+               lower.contains("latinime");
     }
 
     private String getCurrentForegroundPackage(Context ctx) {

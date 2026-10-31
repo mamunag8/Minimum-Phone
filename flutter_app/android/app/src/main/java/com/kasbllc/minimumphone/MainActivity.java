@@ -36,6 +36,9 @@ import android.provider.AlarmClock;
 import android.provider.CalendarContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
+import android.view.View;
+import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
@@ -72,6 +75,8 @@ public class MainActivity extends FlutterActivity {
     private String pendingScanPrompt = null;
     private WebView printWebView = null;
     private boolean isTorchEnabled = false;
+    private volatile String cachedBackgroundLocation = "";
+    private long lastLocationLookupMs = 0L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,6 +88,14 @@ public class MainActivity extends FlutterActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        try {
+            if (getWindow() != null) {
+                getWindow().clearFlags(
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                    WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+                );
+            }
+        } catch (Exception ignored) {}
         NightFortressReceiver.startWatchdogSafely(this);
     }
 
@@ -374,12 +387,68 @@ public class MainActivity extends FlutterActivity {
                             break;
                         }
 
+                        case "showSoftKeyboard": {
+                            showNativeSoftKeyboard();
+                            result.success(true);
+                            break;
+                        }
+
+                        case "hideSoftKeyboard": {
+                            hideNativeSoftKeyboard();
+                            result.success(true);
+                            break;
+                        }
+
                         default:
                             result.notImplemented();
                             break;
                     }
                 }
             });
+    }
+
+    private void showNativeSoftKeyboard() {
+        try {
+            if (getWindow() != null) {
+                getWindow().clearFlags(
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                    WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+                );
+                View focusView = getCurrentFocus();
+                if (focusView == null) {
+                    focusView = getWindow().getDecorView().findFocus();
+                }
+                if (focusView == null) {
+                    focusView = getWindow().getDecorView();
+                }
+                if (focusView != null) {
+                    focusView.setFocusable(true);
+                    focusView.setFocusableInTouchMode(true);
+                    focusView.requestFocus();
+                    InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (imm != null) {
+                        imm.showSoftInput(focusView, InputMethodManager.SHOW_IMPLICIT);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void hideNativeSoftKeyboard() {
+        try {
+            if (getWindow() != null) {
+                View focusView = getCurrentFocus();
+                if (focusView == null) {
+                    focusView = getWindow().getDecorView();
+                }
+                if (focusView != null) {
+                    InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (imm != null) {
+                        imm.hideSoftInputFromWindow(focusView.getWindowToken(), 0);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private Map<String, Object> buildStatusMap(Context ctx) {
@@ -438,41 +507,60 @@ public class MainActivity extends FlutterActivity {
         return map;
     }
 
-    private String resolveBackgroundLocation(Context ctx) {
-        try {
-            LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
-            if (lm != null) {
-                boolean hasCoarse = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                    || ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                    || ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-                if (hasCoarse) {
-                    Location loc = lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
-                    if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-                    if (loc == null) loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-                    if (loc != null && Geocoder.isPresent()) {
-                        Geocoder geo = new Geocoder(ctx, Locale.getDefault());
-                        List<Address> addrs = geo.getFromLocation(loc.getLatitude(), loc.getLongitude(), 1);
-                        if (addrs != null && !addrs.isEmpty()) {
-                            Address a = addrs.get(0);
-                            if (a.getLocality() != null && !a.getLocality().isEmpty()) {
-                                return a.getLocality();
-                            }
-                            if (a.getSubAdminArea() != null && !a.getSubAdminArea().isEmpty()) {
-                                return a.getSubAdminArea();
-                            }
-                        }
+    private String resolveBackgroundLocation(final Context ctx) {
+        if (cachedBackgroundLocation == null || cachedBackgroundLocation.isEmpty()) {
+            try {
+                String tz = TimeZone.getDefault().getID();
+                if (tz != null && tz.contains("/")) {
+                    String city = tz.substring(tz.lastIndexOf('/') + 1).replace('_', ' ');
+                    if (!city.isEmpty()) {
+                        cachedBackgroundLocation = city;
                     }
                 }
+            } catch (Exception ignored) {}
+            if (cachedBackgroundLocation == null || cachedBackgroundLocation.isEmpty()) {
+                cachedBackgroundLocation = "Auto GPS";
             }
-        } catch (Exception ignored) {}
-        try {
-            String tz = TimeZone.getDefault().getID();
-            if (tz != null && tz.contains("/")) {
-                String city = tz.substring(tz.lastIndexOf('/') + 1).replace('_', ' ');
-                if (!city.isEmpty()) return city;
-            }
-        } catch (Exception ignored) {}
-        return "Auto GPS";
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - lastLocationLookupMs > 600000L) {
+            lastLocationLookupMs = now;
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
+                        if (lm != null) {
+                            boolean hasCoarse = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                                || ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                || ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+                            if (hasCoarse) {
+                                Location loc = lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
+                                if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+                                if (loc == null) loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                                if (loc != null && Geocoder.isPresent()) {
+                                    Geocoder geo = new Geocoder(ctx, Locale.getDefault());
+                                    List<Address> addrs = geo.getFromLocation(loc.getLatitude(), loc.getLongitude(), 1);
+                                    if (addrs != null && !addrs.isEmpty()) {
+                                        Address a = addrs.get(0);
+                                        if (a.getLocality() != null && !a.getLocality().isEmpty()) {
+                                            cachedBackgroundLocation = a.getLocality();
+                                            return;
+                                        }
+                                        if (a.getSubAdminArea() != null && !a.getSubAdminArea().isEmpty()) {
+                                            cachedBackgroundLocation = a.getSubAdminArea();
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }).start();
+        }
+        return cachedBackgroundLocation;
     }
 
     private Map<String, Object> activateSafePrivateDns(Context ctx, String targetHost, boolean openSettingsIfNeeded) {

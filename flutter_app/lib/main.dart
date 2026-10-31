@@ -225,6 +225,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   Timer? _clockTimer;
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _keywordController = TextEditingController();
+  final FocusNode _appSearchFocusNode = FocusNode();
+  final FocusNode _notesSearchFocusNode = FocusNode();
+  final FocusNode _quickHomeNoteFocusNode = FocusNode();
+  final FocusNode _keywordFocusNode = FocusNode();
 
   List<AppItem> _apps = [];
   final List<Map<String, String>> _digestItems = [
@@ -268,18 +272,52 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         final DateTime current = DateTime.now();
         final bool nightNow = current.hour >= 22 || current.hour < 6;
         final int nowMs = current.millisecondsSinceEpoch;
-        setState(() {
+        final bool minuteChanged = current.minute != _now.minute ||
+            current.hour != _now.hour ||
+            current.day != _now.day;
+        final bool shouldLockSettings =
+            nightNow && _nightAutoDnsEnabled && !_phoneSettingsLocked;
+        final bool shouldExpireUnlock =
+            _settingsUnlockedSession && nowMs > _settingsUnlockedUntilMs;
+        if (minuteChanged || shouldLockSettings || shouldExpireUnlock) {
+          setState(() {
+            _now = current;
+            if (shouldLockSettings) {
+              _phoneSettingsLocked = true;
+            }
+            if (shouldExpireUnlock) {
+              _settingsUnlockedSession = false;
+            }
+          });
+        } else {
           _now = current;
-          if (nightNow && _nightAutoDnsEnabled && !_phoneSettingsLocked) {
-            _phoneSettingsLocked = true;
-          }
-          if (_settingsUnlockedSession && nowMs > _settingsUnlockedUntilMs) {
-            _settingsUnlockedSession = false;
-          }
-        });
+        }
         _refreshNativeStatus();
       }
     });
+  }
+
+  void _focusAndShowKeyboard(FocusNode node) {
+    if (!node.hasFocus) {
+      FocusScope.of(context).requestFocus(node);
+    }
+    SystemChannels.textInput.invokeMethod('TextInput.show');
+    _channel.invokeMethod('showSoftKeyboard');
+    Future.delayed(const Duration(milliseconds: 70), () {
+      if (mounted) {
+        if (!node.hasFocus) {
+          FocusScope.of(context).requestFocus(node);
+        }
+        SystemChannels.textInput.invokeMethod('TextInput.show');
+        _channel.invokeMethod('showSoftKeyboard');
+      }
+    });
+  }
+
+  void _dismissKeyboardAndUnfocus() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+    _channel.invokeMethod('hideSoftKeyboard');
   }
 
   void _grantSettingsSessionUnlock() {
@@ -297,13 +335,21 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     _notesSearchController.dispose();
     _searchController.dispose();
     _keywordController.dispose();
+    _appSearchFocusNode.dispose();
+    _notesSearchFocusNode.dispose();
+    _quickHomeNoteFocusNode.dispose();
+    _keywordFocusNode.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      if (mounted && _settingsUnlockedSession) {
+        setState(() => _settingsUnlockedSession = false);
+      }
+    } else if (state == AppLifecycleState.inactive) {
       if (mounted && _settingsUnlockedSession) {
         setState(() => _settingsUnlockedSession = false);
       }
@@ -629,25 +675,41 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       final Map<dynamic, dynamic>? status =
           await _channel.invokeMethod<Map<dynamic, dynamic>>('getLauncherStatus');
       if (status != null && mounted) {
-        setState(() {
-          _isDefaultLauncher = status['isDefaultLauncher'] == true;
-          _hasUsageAccess = (status['isUsageStatsGranted'] == true) ||
-              (status['hasUsageAccess'] == true);
-          _hasOverlayPermission = (status['isOverlayGranted'] == true) ||
-              (status['hasOverlayPermission'] == true);
-          _isKioskPinned = status['isKioskPinned'] == true;
-          _osDnsSpecifier =
-              (status['privateDnsHost'] ?? status['osDnsSpecifier'] ?? '')
-                  .toString();
-          _osDnsIsFamilySafe = (status['privateDnsActive'] == true) ||
-              (status['osDnsIsFamilySafe'] == true);
-          _batteryLevel = (status['batteryLevel'] as int?) ?? 100;
-          final String bgLoc =
-              (status['backgroundLocation'] ?? '').toString().trim();
-          if (bgLoc.isNotEmpty) {
-            _backgroundLocation = bgLoc;
-          }
-        });
+        final bool nextDefault = status['isDefaultLauncher'] == true;
+        final bool nextUsage = (status['isUsageStatsGranted'] == true) ||
+            (status['hasUsageAccess'] == true);
+        final bool nextOverlay = (status['isOverlayGranted'] == true) ||
+            (status['hasOverlayPermission'] == true);
+        final bool nextKiosk = status['isKioskPinned'] == true;
+        final String nextDnsSpec =
+            (status['privateDnsHost'] ?? status['osDnsSpecifier'] ?? '')
+                .toString();
+        final bool nextDnsSafe = (status['privateDnsActive'] == true) ||
+            (status['osDnsIsFamilySafe'] == true);
+        final int nextBat = (status['batteryLevel'] as int?) ?? 100;
+        final String bgLoc =
+            (status['backgroundLocation'] ?? '').toString().trim();
+        final String nextLoc = bgLoc.isNotEmpty ? bgLoc : _backgroundLocation;
+
+        if (nextDefault != _isDefaultLauncher ||
+            nextUsage != _hasUsageAccess ||
+            nextOverlay != _hasOverlayPermission ||
+            nextKiosk != _isKioskPinned ||
+            nextDnsSpec != _osDnsSpecifier ||
+            nextDnsSafe != _osDnsIsFamilySafe ||
+            nextBat != _batteryLevel ||
+            nextLoc != _backgroundLocation) {
+          setState(() {
+            _isDefaultLauncher = nextDefault;
+            _hasUsageAccess = nextUsage;
+            _hasOverlayPermission = nextOverlay;
+            _isKioskPinned = nextKiosk;
+            _osDnsSpecifier = nextDnsSpec;
+            _osDnsIsFamilySafe = nextDnsSafe;
+            _batteryLevel = nextBat;
+            _backgroundLocation = nextLoc;
+          });
+        }
       }
     } catch (_) {}
   }
@@ -1134,6 +1196,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   void _handleAppTap(BuildContext ctx, AppItem app) {
+    _dismissKeyboardAndUnfocus();
     final String pkgLower = app.packageName.toLowerCase();
     final bool isSystemSettingsApp =
         pkgLower == 'com.android.settings' || app.id == 'settings';
@@ -2544,7 +2607,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 Navigator.of(innerCtx).pop();
                 return;
               }
+              if (FocusManager.instance.primaryFocus?.hasFocus == true) {
+                _dismissKeyboardAndUnfocus();
+                return;
+              }
               if (_currentTab != 0) {
+                _dismissKeyboardAndUnfocus();
                 setState(() {
                   _currentTab = 0;
                   _settingsUnlockedSession = false;
@@ -2597,7 +2665,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       leading: IconButton(
         icon: Icon(Icons.menu_rounded, color: _textColor),
         tooltip: _tr('menuTitle'),
-        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        onPressed: () {
+          _dismissKeyboardAndUnfocus();
+          _scaffoldKey.currentState?.openDrawer();
+        },
       ),
       titleSpacing: 0,
       title: Row(
@@ -2606,10 +2677,13 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: InkWell(
-                onTap: () => setState(() {
-                  _currentTab = 0;
-                  _settingsUnlockedSession = false;
-                }),
+                onTap: () {
+                  _dismissKeyboardAndUnfocus();
+                  setState(() {
+                    _currentTab = 0;
+                    _settingsUnlockedSession = false;
+                  });
+                },
                 borderRadius: BorderRadius.circular(16),
                 child: Container(
                   padding:
@@ -3239,6 +3313,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         ),
       ),
       onTap: () {
+        _dismissKeyboardAndUnfocus();
         Navigator.pop(ctx);
         setState(() {
           _currentTab = tab;
@@ -3550,6 +3625,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                   Expanded(
                     child: TextField(
                       controller: _quickHomeNoteController,
+                      focusNode: _quickHomeNoteFocusNode,
+                      textInputAction: TextInputAction.done,
+                      onTap: () =>
+                          _focusAndShowKeyboard(_quickHomeNoteFocusNode),
                       style: TextStyle(color: _textColor, fontSize: 13),
                       decoration: InputDecoration(
                         hintText: _tr('takeQuickNoteHint'),
@@ -3672,6 +3751,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
   void _showHomeListsSetupModal(BuildContext ctx, {String? initialProfile}) {
     String selectedList = initialProfile ?? _activeProfile;
+    String modalSearchQuery = '';
+    final TextEditingController modalSearchCtrl = TextEditingController();
+    final FocusNode modalSearchFocus = FocusNode();
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,
@@ -3688,155 +3770,213 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 _apps.where((a) => a.profiles.contains('personal')).length;
             final int sunsetCount =
                 _apps.where((a) => a.profiles.contains('sunset')).length;
+            final List<AppItem> modalFilteredApps = _apps.where((app) {
+              if (modalSearchQuery.isEmpty) return true;
+              final String q = modalSearchQuery.toLowerCase();
+              return app.name.toLowerCase().contains(q) ||
+                  app.packageName.toLowerCase().contains(q);
+            }).toList();
 
-            return SizedBox(
-              height: MediaQuery.of(sCtx).size.height * 0.78,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.tune_rounded, color: _accentColor),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _tr('setupThreeListsTitle'),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(sCtx).viewInsets.bottom,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(sCtx).size.height * 0.78,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.tune_rounded, color: _accentColor),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _tr('setupThreeListsTitle'),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white70),
-                          onPressed: () => Navigator.pop(mCtx),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      _tr('setupThreeListsSub'),
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
+                          IconButton(
+                            icon:
+                                const Icon(Icons.close, color: Colors.white70),
+                            onPressed: () {
+                              _dismissKeyboardAndUnfocus();
+                              Navigator.pop(mCtx);
+                            },
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    // 3 Separate List Tabs: Work | Personal | Sunset
-                    Row(
-                      children: [
-                        _buildListSetupTabChip(
-                          id: 'work',
-                          label: '💼 ${_tr('profileWork')} ($workCount)',
-                          selected: selectedList == 'work',
-                          onTap: () =>
-                              setSheetState(() => selectedList = 'work'),
+                      Text(
+                        _tr('setupThreeListsSub'),
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
                         ),
-                        const SizedBox(width: 6),
-                        _buildListSetupTabChip(
-                          id: 'personal',
-                          label:
-                              '🏠 ${_tr('profilePersonal')} ($personalCount)',
-                          selected: selectedList == 'personal',
-                          onTap: () =>
-                              setSheetState(() => selectedList = 'personal'),
+                      ),
+                      const SizedBox(height: 10),
+                      // Search apps inside Setup 3 Homepage Lists modal
+                      TextField(
+                        controller: modalSearchCtrl,
+                        focusNode: modalSearchFocus,
+                        textInputAction: TextInputAction.search,
+                        onTap: () => _focusAndShowKeyboard(modalSearchFocus),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText: _tr('searchAppsHint'),
+                          hintStyle: const TextStyle(
+                              color: Colors.white54, fontSize: 12),
+                          prefixIcon: const Icon(Icons.search_rounded,
+                              color: Colors.white54, size: 18),
+                          suffixIcon: modalSearchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.close_rounded,
+                                      color: Colors.white54, size: 18),
+                                  onPressed: () {
+                                    modalSearchCtrl.clear();
+                                    setSheetState(() => modalSearchQuery = '');
+                                    _focusAndShowKeyboard(modalSearchFocus);
+                                  },
+                                )
+                              : null,
+                          filled: true,
+                          fillColor: Colors.white.withValues(alpha: 0.06),
+                          isDense: true,
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide.none,
+                          ),
                         ),
-                        const SizedBox(width: 6),
-                        _buildListSetupTabChip(
-                          id: 'sunset',
-                          label: '🌆 ${_tr('profileSunset')} ($sunsetCount)',
-                          selected: selectedList == 'sunset',
-                          onTap: () =>
-                              setSheetState(() => selectedList = 'sunset'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: _apps.length,
-                        itemBuilder: (lCtx, idx) {
-                          final AppItem app = _apps[idx];
-                          final bool inList =
-                              app.profiles.contains(selectedList);
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            decoration: BoxDecoration(
-                              color: inList
-                                  ? const Color(0xFF10B981)
-                                      .withValues(alpha: 0.12)
-                                  : Colors.white.withValues(alpha: 0.04),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
+                        onChanged: (v) =>
+                            setSheetState(() => modalSearchQuery = v.trim()),
+                      ),
+                      const SizedBox(height: 10),
+                      // 3 Separate List Tabs: Work | Personal | Sunset
+                      Row(
+                        children: [
+                          _buildListSetupTabChip(
+                            id: 'work',
+                            label: '💼 ${_tr('profileWork')} ($workCount)',
+                            selected: selectedList == 'work',
+                            onTap: () =>
+                                setSheetState(() => selectedList = 'work'),
+                          ),
+                          const SizedBox(width: 6),
+                          _buildListSetupTabChip(
+                            id: 'personal',
+                            label:
+                                '🏠 ${_tr('profilePersonal')} ($personalCount)',
+                            selected: selectedList == 'personal',
+                            onTap: () =>
+                                setSheetState(() => selectedList = 'personal'),
+                          ),
+                          const SizedBox(width: 6),
+                          _buildListSetupTabChip(
+                            id: 'sunset',
+                            label: '🌆 ${_tr('profileSunset')} ($sunsetCount)',
+                            selected: selectedList == 'sunset',
+                            onTap: () =>
+                                setSheetState(() => selectedList = 'sunset'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ListView.builder(
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          itemCount: modalFilteredApps.length,
+                          itemBuilder: (lCtx, idx) {
+                            final AppItem app = modalFilteredApps[idx];
+                            final bool inList =
+                                app.profiles.contains(selectedList);
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 6),
+                              decoration: BoxDecoration(
                                 color: inList
                                     ? const Color(0xFF10B981)
-                                    : Colors.white10,
-                              ),
-                            ),
-                            child: CheckboxListTile(
-                              dense: true,
-                              activeColor: const Color(0xFF10B981),
-                              checkColor: Colors.black,
-                              title: Text(
-                                app.name, // App name untranslated!
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
+                                        .withValues(alpha: 0.12)
+                                    : Colors.white.withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: inList
+                                      ? const Color(0xFF10B981)
+                                      : Colors.white10,
                                 ),
                               ),
-                              subtitle: Text(
-                                '${_trCategory(app.category)} • ${app.packageName}',
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 11,
+                              child: CheckboxListTile(
+                                dense: true,
+                                activeColor: const Color(0xFF10B981),
+                                checkColor: Colors.black,
+                                title: Text(
+                                  app.name, // App name untranslated!
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              value: inList,
-                              onChanged: (val) {
-                                setState(() {
-                                  if (val == true) {
-                                    if (!app.profiles.contains(selectedList)) {
-                                      app.profiles.add(selectedList);
+                                subtitle: Text(
+                                  '${_trCategory(app.category)} • ${app.packageName}',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                value: inList,
+                                onChanged: (val) {
+                                  setState(() {
+                                    if (val == true) {
+                                      if (!app.profiles
+                                          .contains(selectedList)) {
+                                        app.profiles.add(selectedList);
+                                      }
+                                    } else {
+                                      app.profiles.remove(selectedList);
                                     }
-                                  } else {
-                                    app.profiles.remove(selectedList);
-                                  }
-                                  app.pinned = app.profiles.isNotEmpty;
-                                });
-                                setSheetState(() {});
-                                _saveState();
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF10B981),
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 13),
-                        ),
-                        onPressed: () {
-                          setState(() => _activeProfile = selectedList);
-                          _saveState();
-                          Navigator.pop(mCtx);
-                        },
-                        child: Text(
-                          _tr('saveBtn'),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                                    app.pinned = app.profiles.isNotEmpty;
+                                  });
+                                  setSheetState(() {});
+                                  _saveState();
+                                },
+                              ),
+                            );
+                          },
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF10B981),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                          onPressed: () {
+                            _dismissKeyboardAndUnfocus();
+                            setState(() => _activeProfile = selectedList);
+                            _saveState();
+                            Navigator.pop(mCtx);
+                          },
+                          child: Text(
+                            _tr('saveBtn'),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -3844,6 +3984,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         );
       },
     ).whenComplete(() {
+      modalSearchCtrl.dispose();
+      modalSearchFocus.dispose();
       if (mounted && _settingsUnlockedSession) {
         setState(() => _settingsUnlockedSession = false);
       }
@@ -3992,12 +4134,26 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               Expanded(
                 child: TextField(
                   controller: _notesSearchController,
+                  focusNode: _notesSearchFocusNode,
+                  textInputAction: TextInputAction.search,
+                  onTap: () => _focusAndShowKeyboard(_notesSearchFocusNode),
                   style: TextStyle(color: _textColor, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: _tr('searchNotesHint'),
                     hintStyle: TextStyle(color: _subTextColor, fontSize: 12),
                     prefixIcon:
                         Icon(Icons.search_rounded, color: _subTextColor, size: 18),
+                    suffixIcon: _notesSearchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.close_rounded,
+                                color: _subTextColor, size: 18),
+                            onPressed: () {
+                              _notesSearchController.clear();
+                              setState(() => _notesSearchQuery = '');
+                              _focusAndShowKeyboard(_notesSearchFocusNode);
+                            },
+                          )
+                        : null,
                     filled: true,
                     fillColor: _cardColor,
                     contentPadding: const EdgeInsets.symmetric(vertical: 0),
@@ -4574,11 +4730,35 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               Expanded(
                 child: TextField(
                   controller: _searchController,
+                  focusNode: _appSearchFocusNode,
+                  textInputAction: TextInputAction.search,
+                  onTap: () => _focusAndShowKeyboard(_appSearchFocusNode),
                   style: TextStyle(color: _textColor, fontSize: 14),
                   decoration: InputDecoration(
                     hintText: _tr('searchAppsHint'),
                     hintStyle: TextStyle(color: _subTextColor, fontSize: 13),
-                    prefixIcon: Icon(Icons.search, color: _subTextColor),
+                    prefixIcon: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () => _focusAndShowKeyboard(_appSearchFocusNode),
+                      child: Icon(Icons.search, color: _subTextColor),
+                    ),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.close_rounded,
+                                color: _subTextColor, size: 19),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _searchQuery = '');
+                              _focusAndShowKeyboard(_appSearchFocusNode);
+                            },
+                          )
+                        : IconButton(
+                            icon: Icon(Icons.keyboard_alt_outlined,
+                                color: _subTextColor.withValues(alpha: 0.7),
+                                size: 18),
+                            onPressed: () =>
+                                _focusAndShowKeyboard(_appSearchFocusNode),
+                          ),
                     filled: true,
                     fillColor: _cardColor,
                     contentPadding: const EdgeInsets.symmetric(vertical: 0),
@@ -4610,6 +4790,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         ),
         Expanded(
           child: ListView.builder(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             itemCount: filtered.length,
             itemBuilder: (lCtx, idx) {
@@ -5579,6 +5760,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               Expanded(
                 child: TextField(
                   controller: _keywordController,
+                  focusNode: _keywordFocusNode,
+                  textInputAction: TextInputAction.done,
+                  onTap: () => _focusAndShowKeyboard(_keywordFocusNode),
                   style: TextStyle(color: _textColor, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: _tr('addKeywordHint'),
