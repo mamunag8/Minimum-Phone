@@ -1072,7 +1072,7 @@ const TIMEZONE_COORDS: Record<string, [number, number]> = {
   'Asia/Jakarta': [-6.2088, 106.8456],
   'Asia/Kuala_Lumpur': [3.139, 101.6869],
   'Asia/Singapore': [1.3521, 103.8198],
-  'Europe/Istanbul': [41.0082, 28.9784],
+  'Europe/Istanbul': [39.9043, 41.2679], // Erzurum hyperlocal default for Turkey timezone until live GPS/Geo-IP resolves
   'Africa/Cairo': [30.0444, 31.2357],
   'Europe/London': [51.5072, -0.1276],
   'America/New_York': [40.7128, -74.006],

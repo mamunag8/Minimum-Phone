@@ -755,14 +755,75 @@ export function App() {
     filteredCalmTriggers[triggerIndex % Math.max(1, filteredCalmTriggers.length)] ||
     CALM_MIND_TRIGGERS[0];
 
+  const [hyperlocalCoords, setHyperlocalCoords] = useState<{ lat: number; lng: number } | null>(
+    () => {
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        if (tz.includes('Istanbul') || tz.includes('Turkey')) {
+          return { lat: 39.9043, lng: 41.2679 }; // Erzurum default
+        }
+      } catch {
+        // ignore
+      }
+      return null;
+    }
+  );
+  const [hyperlocalCity, setHyperlocalCity] = useState<string>(() => {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      if (tz.includes('Istanbul') || tz.includes('Turkey')) return 'Erzurum';
+      if (tz.includes('/')) return tz.split('/').pop()!.replace(/_/g, ' ');
+    } catch {
+      // ignore
+    }
+    return 'Erzurum';
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!cancelled) {
+            setHyperlocalCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          }
+        },
+        () => {
+          // Geo-IP fallback
+        },
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 600000 }
+      );
+    }
+    fetch('https://ipwho.is/')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled || !data || data.success === false) return;
+        if (typeof data.latitude === 'number' && typeof data.longitude === 'number') {
+          setHyperlocalCoords((prev) => prev || { lat: data.latitude, lng: data.longitude });
+        }
+        if (data.city) {
+          setHyperlocalCity(
+            data.region && data.region !== data.city
+              ? `${data.city}, ${data.region}`
+              : String(data.city)
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const localPrayerTimes = useMemo(
-    () => computeLocalPrayerTimes(currentTime),
+    () => computeLocalPrayerTimes(currentTime, hyperlocalCoords),
     [
       currentTime.getFullYear(),
       currentTime.getMonth(),
       currentTime.getDate(),
       currentTime.getHours(),
       currentTime.getMinutes(),
+      hyperlocalCoords,
     ]
   );
 
@@ -2166,46 +2227,57 @@ export function App() {
               </div>
 
               {/* Short Generalized Local Solar / Prayer Times Bar (Sunrise · Noon · Afternoon · Sunset) */}
-              <div className="grid grid-cols-4 gap-1 pt-1.5 border-t border-zinc-900 font-mono-tech text-[10px]">
-                {(
-                  [
-                    {
-                      id: 'sunrise',
-                      label: tx(lang, 'Sunrise', 'সূর্যোদয়', 'الشروق', 'طلوع', 'Terbit'),
-                      time: localPrayerTimes.sunrise,
-                    },
-                    {
-                      id: 'noon',
-                      label: tx(lang, 'Noon', 'দুপুর', 'الظهيرة', 'دوپہر', 'Siang'),
-                      time: localPrayerTimes.noon,
-                    },
-                    {
-                      id: 'afternoon',
-                      label: tx(lang, 'Afternoon', 'বিকেল', 'بعد الظهر', 'سہ پہر', 'Sore'),
-                      time: localPrayerTimes.afternoon,
-                    },
-                    {
-                      id: 'sunset',
-                      label: tx(lang, 'Sunset', 'সূর্যাস্ত', 'الغروب', 'غروب', 'Senja'),
-                      time: localPrayerTimes.sunset,
-                    },
-                  ] as const
-                ).map((slot) => {
-                  const isActive = localPrayerTimes.activeSlot === slot.id;
-                  return (
-                    <div
-                      key={slot.id}
-                      className={`py-1 px-1.5 border text-center truncate ${
-                        isActive
-                          ? 'border-zinc-500 bg-zinc-900/90 text-zinc-100 font-semibold'
-                          : 'border-zinc-900 bg-zinc-950/40 text-zinc-400'
-                      }`}
-                    >
-                      <span className="opacity-75">{slot.label}</span>{' '}
-                      <span className="text-zinc-200">{slot.time}</span>
-                    </div>
-                  );
-                })}
+              <div className="pt-1.5 border-t border-zinc-900 font-mono-tech text-[10px]">
+                <div className="flex items-center justify-between text-[9px] text-zinc-400 mb-1">
+                  <span>
+                    📍 {hyperlocalCity}
+                    {hyperlocalCoords
+                      ? ` • ${Math.abs(hyperlocalCoords.lat).toFixed(2)}°${hyperlocalCoords.lat >= 0 ? 'N' : 'S'}, ${Math.abs(hyperlocalCoords.lng).toFixed(2)}°${hyperlocalCoords.lng >= 0 ? 'E' : 'W'}`
+                      : ''}
+                  </span>
+                  <span className="text-zinc-500 uppercase tracking-wider">Hyperlocal Solar</span>
+                </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {(
+                    [
+                      {
+                        id: 'sunrise',
+                        label: tx(lang, 'Sunrise', 'সূর্যোদয়', 'الشروق', 'طلوع', 'Terbit'),
+                        time: localPrayerTimes.sunrise,
+                      },
+                      {
+                        id: 'noon',
+                        label: tx(lang, 'Noon', 'দুপুর', 'الظهيرة', 'دوپہر', 'Siang'),
+                        time: localPrayerTimes.noon,
+                      },
+                      {
+                        id: 'afternoon',
+                        label: tx(lang, 'Afternoon', 'বিকেল', 'بعد الظهر', 'سہ پہر', 'Sore'),
+                        time: localPrayerTimes.afternoon,
+                      },
+                      {
+                        id: 'sunset',
+                        label: tx(lang, 'Sunset', 'সূর্যাস্ত', 'الغروب', 'غروب', 'Senja'),
+                        time: localPrayerTimes.sunset,
+                      },
+                    ] as const
+                  ).map((slot) => {
+                    const isActive = localPrayerTimes.activeSlot === slot.id;
+                    return (
+                      <div
+                        key={slot.id}
+                        className={`py-1 px-1.5 border text-center truncate ${
+                          isActive
+                            ? 'border-zinc-500 bg-zinc-900/90 text-zinc-100 font-semibold'
+                            : 'border-zinc-900 bg-zinc-950/40 text-zinc-400'
+                        }`}
+                      >
+                        <span className="opacity-75">{slot.label}</span>{' '}
+                        <span className="text-zinc-200">{slot.time}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>

@@ -21,6 +21,7 @@ import android.hardware.camera2.CameraManager;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
+import android.location.LocationListener;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.BatteryManager;
@@ -51,6 +52,10 @@ import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
 import com.google.zxing.qrcode.QRCodeWriter;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -60,6 +65,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
+
+import org.json.JSONObject;
 
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
@@ -76,11 +83,16 @@ public class MainActivity extends FlutterActivity {
     private WebView printWebView = null;
     private boolean isTorchEnabled = false;
     private volatile String cachedBackgroundLocation = "";
+    private volatile double cachedLat = 0.0;
+    private volatile double cachedLng = 0.0;
+    private volatile boolean locationLookupInFlight = false;
     private long lastLocationLookupMs = 0L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        loadSavedHyperlocalFromPrefs(this);
+        triggerHyperlocalLookup(this, false);
         NightFortressReceiver.startWatchdogSafely(this);
         NightFortressReceiver.scheduleNightAlarm(this, 22);
     }
@@ -96,6 +108,7 @@ public class MainActivity extends FlutterActivity {
                 );
             }
         } catch (Exception ignored) {}
+        triggerHyperlocalLookup(this, false);
         NightFortressReceiver.startWatchdogSafely(this);
     }
 
@@ -399,6 +412,91 @@ public class MainActivity extends FlutterActivity {
                             break;
                         }
 
+                        case "requestHyperlocalLocation": {
+                            Boolean askPermObj = call.argument("requestPermission");
+                            boolean askPerm = askPermObj == null || askPermObj;
+                            SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+                            prefs.edit().putBoolean("hyperlocal_manual", false).apply();
+                            if (askPerm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !hasLocationPermission(ctx)) {
+                                prefs.edit()
+                                    .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 20000L)
+                                    .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, "location_permission")
+                                    .apply();
+                                try {
+                                    requestPermissions(
+                                        new String[]{
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                        },
+                                        802
+                                    );
+                                } catch (Exception ignored) {}
+                            }
+                            lastLocationLookupMs = 0L;
+                            triggerHyperlocalLookup(ctx, true);
+                            result.success(buildStatusMap(ctx));
+                            break;
+                        }
+
+                        case "setHyperlocalLocation": {
+                            String city = call.argument("city");
+                            Number latNum = call.argument("lat");
+                            Number lngNum = call.argument("lng");
+                            Boolean manualObj = call.argument("manual");
+                            boolean manual = manualObj == null || manualObj;
+                            if (city != null && !city.trim().isEmpty() && latNum != null && lngNum != null) {
+                                cachedBackgroundLocation = city.trim();
+                                cachedLat = latNum.doubleValue();
+                                cachedLng = lngNum.doubleValue();
+                                saveHyperlocalToPrefs(ctx, cachedBackgroundLocation, cachedLat, cachedLng, manual);
+                            }
+                            result.success(buildStatusMap(ctx));
+                            break;
+                        }
+
+                        case "geocodeCityQuery": {
+                            final String query = call.argument("query");
+                            final MethodChannel.Result geoResult = result;
+                            new Thread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    final List<Map<String, Object>> matches = new ArrayList<>();
+                                    try {
+                                        if (query != null && !query.trim().isEmpty() && Geocoder.isPresent()) {
+                                            Geocoder geo = new Geocoder(ctx, Locale.getDefault());
+                                            List<Address> addrs = geo.getFromLocationName(query.trim(), 5);
+                                            if (addrs != null) {
+                                                for (Address a : addrs) {
+                                                    if (a.hasLatitude() && a.hasLongitude()) {
+                                                        Map<String, Object> item = new HashMap<>();
+                                                        String label = formatHyperlocalAddress(a);
+                                                        if (label == null || label.isEmpty()) {
+                                                            label = query.trim();
+                                                        }
+                                                        if (a.getCountryName() != null && !a.getCountryName().isEmpty()
+                                                                && !label.toLowerCase(Locale.ROOT).contains(a.getCountryName().toLowerCase(Locale.ROOT))) {
+                                                            label = label + " (" + a.getCountryName() + ")";
+                                                        }
+                                                        item.put("city", label);
+                                                        item.put("lat", a.getLatitude());
+                                                        item.put("lng", a.getLongitude());
+                                                        matches.add(item);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } catch (Exception ignored) {}
+                                    sessionHandler.post(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            geoResult.success(matches);
+                                        }
+                                    });
+                                }
+                            }).start();
+                            break;
+                        }
+
                         default:
                             result.notImplemented();
                             break;
@@ -504,63 +602,262 @@ public class MainActivity extends FlutterActivity {
         map.put("watchdogActive", watchdogActive);
         map.put("isNightWindow", isNightNow);
         map.put("backgroundLocation", resolveBackgroundLocation(ctx));
+        map.put("locationLat", cachedLat);
+        map.put("locationLng", cachedLng);
+        map.put("hasLocationPermission", hasLocationPermission(ctx));
         return map;
+    }
+
+    private boolean hasLocationPermission(Context ctx) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        return ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            || ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void loadSavedHyperlocalFromPrefs(Context ctx) {
+        try {
+            SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+            boolean verified = prefs.getBoolean("hyperlocal_verified", false);
+            String savedCity = prefs.getString("hyperlocal_city", "");
+            long latBits = prefs.getLong("hyperlocal_lat_bits", 0L);
+            long lngBits = prefs.getLong("hyperlocal_lng_bits", 0L);
+            if (verified && savedCity != null && !savedCity.isEmpty() && (latBits != 0L || lngBits != 0L)) {
+                cachedBackgroundLocation = savedCity;
+                cachedLat = Double.longBitsToDouble(latBits);
+                cachedLng = Double.longBitsToDouble(lngBits);
+                return;
+            }
+            String tz = TimeZone.getDefault().getID();
+            if (tz != null && (tz.equalsIgnoreCase("Europe/Istanbul") || tz.equalsIgnoreCase("Turkey"))) {
+                // Default Turkey hyperlocal fallback to Erzurum until GPS/Geo-IP resolves exact district/city
+                cachedBackgroundLocation = "Erzurum";
+                cachedLat = 39.9043;
+                cachedLng = 41.2679;
+            } else if (tz != null && tz.contains("/")) {
+                cachedBackgroundLocation = tz.substring(tz.lastIndexOf('/') + 1).replace('_', ' ');
+            } else {
+                cachedBackgroundLocation = "Auto GPS";
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void saveHyperlocalToPrefs(Context ctx, String city, double lat, double lng, boolean manual) {
+        try {
+            SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+            SharedPreferences.Editor ed = prefs.edit();
+            ed.putString("hyperlocal_city", city != null ? city : "");
+            ed.putLong("hyperlocal_lat_bits", Double.doubleToRawLongBits(lat));
+            ed.putLong("hyperlocal_lng_bits", Double.doubleToRawLongBits(lng));
+            ed.putBoolean("hyperlocal_verified", true);
+            ed.putBoolean("hyperlocal_manual", manual);
+            ed.apply();
+        } catch (Exception ignored) {}
+    }
+
+    private String formatHyperlocalAddress(Address a) {
+        if (a == null) return "";
+        String subAdmin = a.getSubAdminArea() != null ? a.getSubAdminArea().trim() : "";
+        String locality = a.getLocality() != null ? a.getLocality().trim() : "";
+        String admin = a.getAdminArea() != null ? a.getAdminArea().trim() : "";
+        String subLocality = a.getSubLocality() != null ? a.getSubLocality().trim() : "";
+
+        // In Turkey & many countries: adminArea = Province (e.g. Erzurum), subAdminArea = District (e.g. Yakutiye / Palandöken)
+        if (!subAdmin.isEmpty() && !admin.isEmpty() && !subAdmin.equalsIgnoreCase(admin)) {
+            return subAdmin + ", " + admin;
+        }
+        if (!locality.isEmpty() && !admin.isEmpty() && !locality.equalsIgnoreCase(admin)) {
+            return locality + ", " + admin;
+        }
+        if (!subLocality.isEmpty() && !locality.isEmpty() && !subLocality.equalsIgnoreCase(locality)) {
+            return subLocality + ", " + locality;
+        }
+        if (!locality.isEmpty()) return locality;
+        if (!admin.isEmpty()) return admin;
+        if (!subAdmin.isEmpty()) return subAdmin;
+        return "";
     }
 
     private String resolveBackgroundLocation(final Context ctx) {
         if (cachedBackgroundLocation == null || cachedBackgroundLocation.isEmpty()) {
-            try {
-                String tz = TimeZone.getDefault().getID();
-                if (tz != null && tz.contains("/")) {
-                    String city = tz.substring(tz.lastIndexOf('/') + 1).replace('_', ' ');
-                    if (!city.isEmpty()) {
-                        cachedBackgroundLocation = city;
-                    }
-                }
-            } catch (Exception ignored) {}
-            if (cachedBackgroundLocation == null || cachedBackgroundLocation.isEmpty()) {
-                cachedBackgroundLocation = "Auto GPS";
-            }
+            loadSavedHyperlocalFromPrefs(ctx);
         }
-
         long now = System.currentTimeMillis();
-        if (now - lastLocationLookupMs > 600000L) {
-            lastLocationLookupMs = now;
-            new Thread(new Runnable() {
+        if (now - lastLocationLookupMs > 180000L) {
+            triggerHyperlocalLookup(ctx, false);
+        }
+        return cachedBackgroundLocation;
+    }
+
+    private void triggerHyperlocalLookup(final Context ctx, final boolean force) {
+        long now = System.currentTimeMillis();
+        if (!force && (locationLookupInFlight || (now - lastLocationLookupMs < 60000L))) {
+            return;
+        }
+        final SharedPreferences prefs = ctx.getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
+        if (!force && prefs.getBoolean("hyperlocal_manual", false) && cachedLat != 0.0 && cachedLng != 0.0) {
+            return;
+        }
+        lastLocationLookupMs = now;
+        locationLookupInFlight = true;
+
+        // If location permission is granted, also request a fresh single update on the main looper
+        if (hasLocationPermission(ctx)) {
+            sessionHandler.post(new Runnable() {
                 @Override
                 public void run() {
                     try {
-                        LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
-                        if (lm != null) {
-                            boolean hasCoarse = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                                || ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                                || ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-                            if (hasCoarse) {
-                                Location loc = lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
-                                if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-                                if (loc == null) loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-                                if (loc != null && Geocoder.isPresent()) {
-                                    Geocoder geo = new Geocoder(ctx, Locale.getDefault());
-                                    List<Address> addrs = geo.getFromLocation(loc.getLatitude(), loc.getLongitude(), 1);
-                                    if (addrs != null && !addrs.isEmpty()) {
-                                        Address a = addrs.get(0);
-                                        if (a.getLocality() != null && !a.getLocality().isEmpty()) {
-                                            cachedBackgroundLocation = a.getLocality();
-                                            return;
-                                        }
-                                        if (a.getSubAdminArea() != null && !a.getSubAdminArea().isEmpty()) {
-                                            cachedBackgroundLocation = a.getSubAdminArea();
-                                            return;
-                                        }
+                        final LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
+                        if (lm == null) return;
+                        LocationListener oneShot = new LocationListener() {
+                            @Override
+                            public void onLocationChanged(@NonNull final Location loc) {
+                                try {
+                                    lm.removeUpdates(this);
+                                } catch (Exception ignored) {}
+                                new Thread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        applyGpsLocationFix(ctx, loc);
                                     }
-                                }
+                                }).start();
                             }
+                            @Override
+                            public void onStatusChanged(String provider, int status, Bundle extras) {}
+                            @Override
+                            public void onProviderEnabled(@NonNull String provider) {}
+                            @Override
+                            public void onProviderDisabled(@NonNull String provider) {}
+                        };
+                        if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                            lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0L, 0f, oneShot, Looper.getMainLooper());
+                        }
+                        if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, oneShot, Looper.getMainLooper());
                         }
                     } catch (Exception ignored) {}
                 }
-            }).start();
+            });
         }
-        return cachedBackgroundLocation;
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean resolvedByGps = false;
+                    LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
+                    if (lm != null && hasLocationPermission(ctx)) {
+                        Location bestLoc = null;
+                        String[] providers = new String[]{
+                            LocationManager.GPS_PROVIDER,
+                            LocationManager.NETWORK_PROVIDER,
+                            LocationManager.PASSIVE_PROVIDER,
+                            "fused"
+                        };
+                        for (String p : providers) {
+                            try {
+                                Location candidate = lm.getLastKnownLocation(p);
+                                if (candidate != null) {
+                                    if (bestLoc == null || candidate.getTime() > bestLoc.getTime()) {
+                                        bestLoc = candidate;
+                                    }
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                        if (bestLoc != null) {
+                            applyGpsLocationFix(ctx, bestLoc);
+                            resolvedByGps = true;
+                        }
+                    }
+
+                    // Zero-Permission Hyperlocal HTTPS Geo-IP Fallback when GPS is unavailable or permission not yet granted
+                    if (!resolvedByGps) {
+                        resolveViaGeoIpFallback(ctx);
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    locationLookupInFlight = false;
+                }
+            }
+        }).start();
+    }
+
+    private void applyGpsLocationFix(Context ctx, Location loc) {
+        if (loc == null) return;
+        double lat = loc.getLatitude();
+        double lng = loc.getLongitude();
+        if (lat == 0.0 && lng == 0.0) return;
+        cachedLat = lat;
+        cachedLng = lng;
+        String resolvedName = "";
+        try {
+            if (Geocoder.isPresent()) {
+                Geocoder geo = new Geocoder(ctx, Locale.getDefault());
+                List<Address> addrs = geo.getFromLocation(lat, lng, 1);
+                if (addrs != null && !addrs.isEmpty()) {
+                    resolvedName = formatHyperlocalAddress(addrs.get(0));
+                }
+            }
+        } catch (Exception ignored) {}
+        if (resolvedName == null || resolvedName.isEmpty()) {
+            resolvedName = String.format(Locale.US, "%.2f°N, %.2f°E", lat, lng);
+        }
+        cachedBackgroundLocation = resolvedName;
+        saveHyperlocalToPrefs(ctx, resolvedName, lat, lng, false);
+    }
+
+    private void resolveViaGeoIpFallback(Context ctx) {
+        String[] endpoints = new String[]{
+            "https://ipwho.is/",
+            "https://get.geojs.io/v1/ip/geo.json",
+            "https://ipapi.co/json/"
+        };
+        for (String urlStr : endpoints) {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(urlStr);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(4000);
+                conn.setReadTimeout(4000);
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("User-Agent", "MinimumPhone/2.9.2");
+                if (conn.getResponseCode() == 200) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    reader.close();
+                    JSONObject json = new JSONObject(sb.toString());
+                    String city = json.optString("city", "").trim();
+                    String region = json.optString("region", "").trim();
+                    double lat = json.optDouble("latitude", 0.0);
+                    double lng = json.optDouble("longitude", 0.0);
+                    if (lat != 0.0 || lng != 0.0) {
+                        String label = city;
+                        if (!city.isEmpty() && !region.isEmpty() && !city.equalsIgnoreCase(region)) {
+                            label = city + ", " + region;
+                        } else if (label.isEmpty() && !region.isEmpty()) {
+                            label = region;
+                        }
+                        if (!label.isEmpty()) {
+                            cachedBackgroundLocation = label;
+                        }
+                        cachedLat = lat;
+                        cachedLng = lng;
+                        saveHyperlocalToPrefs(ctx, cachedBackgroundLocation, lat, lng, false);
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (conn != null) {
+                    try {
+                        conn.disconnect();
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
     }
 
     private Map<String, Object> activateSafePrivateDns(Context ctx, String targetHost, boolean openSettingsIfNeeded) {
@@ -1125,6 +1422,9 @@ public class MainActivity extends FlutterActivity {
                     pendingQrScanResult = null;
                 }
             }
+        } else if (requestCode == 802) {
+            lastLocationLookupMs = 0L;
+            triggerHyperlocalLookup(this, true);
         }
     }
 

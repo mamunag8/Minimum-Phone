@@ -1062,6 +1062,7 @@ public class FortressWatchdogService extends Service {
         } catch (Exception ignored) {}
         return lower.equals("android") ||
                lower.equals("com.android.systemui") ||
+               lower.contains("permissioncontroller") ||
                lower.contains("inputmethod") ||
                lower.contains("keyboard") ||
                lower.contains("gboard") ||

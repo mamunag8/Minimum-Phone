@@ -159,7 +159,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   String _lang = 'en';
   String _themeMode = 'oled'; // 'oled', 'eink', 'amber'
   String _activeProfile = 'work'; // 'work', 'personal', 'sunset'
-  String _backgroundLocation = 'Auto GPS';
+  String _backgroundLocation = 'Erzurum';
+  double _locationLat = 39.9043;
+  double _locationLng = 41.2679;
+  bool _hasLocationPermission = false;
+  bool _manualLocationOverride = false;
   String _searchQuery = '';
   int _wisdomIndex = 0;
   String _favoriteQuoteCategory = 'all'; // 'all', 'quran', 'hadith', 'proverb', 'focus', 'time', 'peace', 'discipline'
@@ -571,6 +575,24 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           _lang = data['lang'] ?? _lang;
           _themeMode = data['themeMode'] ?? _themeMode;
           _activeProfile = data['activeProfile'] ?? _activeProfile;
+          if (data['hyperlocalCity'] != null &&
+              data['hyperlocalCity'].toString().trim().isNotEmpty) {
+            final String savedCity = data['hyperlocalCity'].toString().trim();
+            final bool savedManual = data['manualLocationOverride'] == true;
+            final double? savedLat = (data['hyperlocalLat'] as num?)?.toDouble();
+            final double? savedLng = (data['hyperlocalLng'] as num?)?.toDouble();
+            if (savedLat != null &&
+                savedLng != null &&
+                (savedLat != 0.0 || savedLng != 0.0)) {
+              // Ignore legacy unverified timezone-only "Istanbul" fallback so Erzurum / real GPS wins
+              if (savedManual || savedCity.toLowerCase() != 'istanbul') {
+                _backgroundLocation = savedCity;
+                _locationLat = savedLat;
+                _locationLng = savedLng;
+                _manualLocationOverride = savedManual;
+              }
+            }
+          }
           _favoriteQuoteCategory =
               (data['favoriteQuoteCategory'] ?? _favoriteQuoteCategory)
                   .toString();
@@ -657,6 +679,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'lang': _lang,
         'themeMode': _themeMode,
         'activeProfile': _activeProfile,
+        'hyperlocalCity': _backgroundLocation,
+        'hyperlocalLat': _locationLat,
+        'hyperlocalLng': _locationLng,
+        'manualLocationOverride': _manualLocationOverride,
         'favoriteQuoteCategory': _favoriteQuoteCategory,
         'quoteRotationSeconds': _quoteRotationSeconds,
         'homeListsV23': true,
@@ -738,7 +764,24 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         final int nextBat = (status['batteryLevel'] as int?) ?? 100;
         final String bgLoc =
             (status['backgroundLocation'] ?? '').toString().trim();
-        final String nextLoc = bgLoc.isNotEmpty ? bgLoc : _backgroundLocation;
+        final double rawLat =
+            (status['locationLat'] as num?)?.toDouble() ?? 0.0;
+        final double rawLng =
+            (status['locationLng'] as num?)?.toDouble() ?? 0.0;
+        final bool nextLocPerm = status['hasLocationPermission'] == true;
+
+        String nextLoc = _backgroundLocation;
+        double nextLat = _locationLat;
+        double nextLng = _locationLng;
+        if (!_manualLocationOverride) {
+          if (bgLoc.isNotEmpty && bgLoc != 'Auto GPS') {
+            nextLoc = bgLoc;
+          }
+          if (rawLat != 0.0 || rawLng != 0.0) {
+            nextLat = rawLat;
+            nextLng = rawLng;
+          }
+        }
 
         if (nextDefault != _isDefaultLauncher ||
             nextUsage != _hasUsageAccess ||
@@ -747,7 +790,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             nextDnsSpec != _osDnsSpecifier ||
             nextDnsSafe != _osDnsIsFamilySafe ||
             nextBat != _batteryLevel ||
-            nextLoc != _backgroundLocation) {
+            nextLoc != _backgroundLocation ||
+            (nextLat - _locationLat).abs() > 0.0005 ||
+            (nextLng - _locationLng).abs() > 0.0005 ||
+            nextLocPerm != _hasLocationPermission) {
           setState(() {
             _isDefaultLauncher = nextDefault;
             _hasUsageAccess = nextUsage;
@@ -757,6 +803,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             _osDnsIsFamilySafe = nextDnsSafe;
             _batteryLevel = nextBat;
             _backgroundLocation = nextLoc;
+            _locationLat = nextLat;
+            _locationLng = nextLng;
+            _hasLocationPermission = nextLocPerm;
           });
         }
       }
@@ -1085,45 +1134,182 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
   }
 
+  static const List<Map<String, dynamic>> _hyperlocalCatalog = [
+    // Erzurum & Districts (Hyperlocal Eastern Anatolia)
+    {'city': 'Erzurum', 'country': 'TR', 'lat': 39.9043, 'lng': 41.2679},
+    {'city': 'Yakutiye, Erzurum', 'country': 'TR', 'lat': 39.9043, 'lng': 41.2679},
+    {'city': 'Palandöken, Erzurum', 'country': 'TR', 'lat': 39.8820, 'lng': 41.2700},
+    {'city': 'Aziziye, Erzurum', 'country': 'TR', 'lat': 39.9450, 'lng': 41.1080},
+    {'city': 'Horasan, Erzurum', 'country': 'TR', 'lat': 40.0408, 'lng': 42.1728},
+    {'city': 'Oltu, Erzurum', 'country': 'TR', 'lat': 40.5403, 'lng': 41.9958},
+    {'city': 'Pasinler, Erzurum', 'country': 'TR', 'lat': 39.9797, 'lng': 41.6761},
+    {'city': 'Aşkale, Erzurum', 'country': 'TR', 'lat': 39.9211, 'lng': 40.6950},
+    {'city': 'İspir, Erzurum', 'country': 'TR', 'lat': 40.4836, 'lng': 40.9975},
+    {'city': 'Hınıs, Erzurum', 'country': 'TR', 'lat': 39.3581, 'lng': 41.6961},
+    {'city': 'Tortum, Erzurum', 'country': 'TR', 'lat': 40.2939, 'lng': 41.5472},
+    {'city': 'Narman, Erzurum', 'country': 'TR', 'lat': 40.3436, 'lng': 41.8658},
+    // All Major Turkish Provinces (81 Provinces Coverage)
+    {'city': 'Ankara', 'country': 'TR', 'lat': 39.9334, 'lng': 32.8597},
+    {'city': 'İstanbul', 'country': 'TR', 'lat': 41.0082, 'lng': 28.9784},
+    {'city': 'İzmir', 'country': 'TR', 'lat': 38.4237, 'lng': 27.1428},
+    {'city': 'Bursa', 'country': 'TR', 'lat': 40.1885, 'lng': 29.0610},
+    {'city': 'Antalya', 'country': 'TR', 'lat': 36.8969, 'lng': 30.7133},
+    {'city': 'Konya', 'country': 'TR', 'lat': 37.8746, 'lng': 32.4932},
+    {'city': 'Adana', 'country': 'TR', 'lat': 37.0000, 'lng': 35.3213},
+    {'city': 'Gaziantep', 'country': 'TR', 'lat': 37.0662, 'lng': 37.3833},
+    {'city': 'Шanlıurfa / Şanlıurfa', 'country': 'TR', 'lat': 37.1591, 'lng': 38.7969},
+    {'city': 'Kocaeli', 'country': 'TR', 'lat': 40.8533, 'lng': 29.8815},
+    {'city': 'Mersin', 'country': 'TR', 'lat': 36.8121, 'lng': 34.6415},
+    {'city': 'Diyarbakır', 'country': 'TR', 'lat': 37.9144, 'lng': 40.2306},
+    {'city': 'Hatay', 'country': 'TR', 'lat': 36.2021, 'lng': 36.1606},
+    {'city': 'Manisa', 'country': 'TR', 'lat': 38.6191, 'lng': 27.4289},
+    {'city': 'Kayseri', 'country': 'TR', 'lat': 38.7312, 'lng': 35.4787},
+    {'city': 'Samsun', 'country': 'TR', 'lat': 41.2867, 'lng': 36.3300},
+    {'city': 'Balıkesir', 'country': 'TR', 'lat': 39.6484, 'lng': 27.8826},
+    {'city': 'Kahramanmaraş', 'country': 'TR', 'lat': 37.5858, 'lng': 36.9371},
+    {'city': 'Van', 'country': 'TR', 'lat': 38.4891, 'lng': 43.4089},
+    {'city': 'Aydın', 'country': 'TR', 'lat': 37.8560, 'lng': 27.8416},
+    {'city': 'Tekirdağ', 'country': 'TR', 'lat': 40.9833, 'lng': 27.5167},
+    {'city': 'Sakarya', 'country': 'TR', 'lat': 40.7569, 'lng': 30.3783},
+    {'city': 'Denizli', 'country': 'TR', 'lat': 37.7765, 'lng': 29.0864},
+    {'city': 'Muğla', 'country': 'TR', 'lat': 37.2153, 'lng': 28.3636},
+    {'city': 'Eskişehir', 'country': 'TR', 'lat': 39.7767, 'lng': 30.5206},
+    {'city': 'Mardin', 'country': 'TR', 'lat': 37.3212, 'lng': 40.7245},
+    {'city': 'Trabzon', 'country': 'TR', 'lat': 41.0027, 'lng': 39.7168},
+    {'city': 'Malatya', 'country': 'TR', 'lat': 38.3552, 'lng': 38.3095},
+    {'city': 'Ordu', 'country': 'TR', 'lat': 40.9839, 'lng': 37.8764},
+    {'city': 'Afyonkarahisar', 'country': 'TR', 'lat': 38.7507, 'lng': 30.5567},
+    {'city': 'Sivas', 'country': 'TR', 'lat': 39.7477, 'lng': 37.0179},
+    {'city': 'Adıyaman', 'country': 'TR', 'lat': 37.7648, 'lng': 38.2786},
+    {'city': 'Batman', 'country': 'TR', 'lat': 37.8812, 'lng': 41.1351},
+    {'city': 'Tokat', 'country': 'TR', 'lat': 40.3167, 'lng': 36.5500},
+    {'city': 'Elazığ', 'country': 'TR', 'lat': 38.6810, 'lng': 39.2264},
+    {'city': 'Zonguldak', 'country': 'TR', 'lat': 41.4564, 'lng': 31.7987},
+    {'city': 'Kütahya', 'country': 'TR', 'lat': 39.4167, 'lng': 29.9833},
+    {'city': 'Çanakkale', 'country': 'TR', 'lat': 40.1553, 'lng': 26.4142},
+    {'city': 'Osmaniye', 'country': 'TR', 'lat': 37.0742, 'lng': 36.2478},
+    {'city': 'Çorum', 'country': 'TR', 'lat': 40.5506, 'lng': 34.9556},
+    {'city': 'Ağrı', 'country': 'TR', 'lat': 39.7191, 'lng': 43.0503},
+    {'city': 'Giresun', 'country': 'TR', 'lat': 40.9128, 'lng': 38.3895},
+    {'city': 'Şırnak', 'country': 'TR', 'lat': 37.5164, 'lng': 42.4611},
+    {'city': 'Isparta', 'country': 'TR', 'lat': 37.7648, 'lng': 30.5566},
+    {'city': 'Yozgat', 'country': 'TR', 'lat': 39.8181, 'lng': 34.8147},
+    {'city': 'Muş', 'country': 'TR', 'lat': 38.7432, 'lng': 41.5065},
+    {'city': 'Edirne', 'country': 'TR', 'lat': 41.6771, 'lng': 26.5557},
+    {'city': 'Aksaray', 'country': 'TR', 'lat': 38.3687, 'lng': 34.0370},
+    {'city': 'Düzce', 'country': 'TR', 'lat': 40.8438, 'lng': 31.1565},
+    {'city': 'Kastamonu', 'country': 'TR', 'lat': 41.3887, 'lng': 33.7827},
+    {'city': 'Uşak', 'country': 'TR', 'lat': 38.6823, 'lng': 29.4082},
+    {'city': 'Niğde', 'country': 'TR', 'lat': 37.9667, 'lng': 34.6833},
+    {'city': 'Bitlis', 'country': 'TR', 'lat': 38.4006, 'lng': 42.1095},
+    {'city': 'Rize', 'country': 'TR', 'lat': 41.0201, 'lng': 40.5234},
+    {'city': 'Amasya', 'country': 'TR', 'lat': 40.6499, 'lng': 35.8353},
+    {'city': 'Siirt', 'country': 'TR', 'lat': 37.9333, 'lng': 41.9500},
+    {'city': 'Kars', 'country': 'TR', 'lat': 40.6013, 'lng': 43.0975},
+    {'city': 'Nevşehir', 'country': 'TR', 'lat': 38.6244, 'lng': 34.7239},
+    {'city': 'Bolu', 'country': 'TR', 'lat': 40.7350, 'lng': 31.6061},
+    {'city': 'Hakkari', 'country': 'TR', 'lat': 37.5833, 'lng': 43.7333},
+    {'city': 'Kırıkkale', 'country': 'TR', 'lat': 39.8468, 'lng': 33.5153},
+    {'city': 'Bingöl', 'country': 'TR', 'lat': 38.8854, 'lng': 40.4980},
+    {'city': 'Burdur', 'country': 'TR', 'lat': 37.7203, 'lng': 30.2908},
+    {'city': 'Karaman', 'country': 'TR', 'lat': 37.1759, 'lng': 33.2287},
+    {'city': 'Karabük', 'country': 'TR', 'lat': 41.2061, 'lng': 32.6204},
+    {'city': 'Kırşehir', 'country': 'TR', 'lat': 39.1425, 'lng': 34.1709},
+    {'city': 'Erzincan', 'country': 'TR', 'lat': 39.7500, 'lng': 39.5000},
+    {'city': 'Bilecik', 'country': 'TR', 'lat': 40.1451, 'lng': 29.9799},
+    {'city': 'Sinop', 'country': 'TR', 'lat': 42.0231, 'lng': 35.1531},
+    {'city': 'Iğdır', 'country': 'TR', 'lat': 39.9167, 'lng': 44.0333},
+    {'city': 'Bartın', 'country': 'TR', 'lat': 41.6344, 'lng': 32.3375},
+    {'city': 'Çankırı', 'country': 'TR', 'lat': 40.6013, 'lng': 33.6134},
+    {'city': 'Artvin', 'country': 'TR', 'lat': 41.1828, 'lng': 41.8183},
+    {'city': 'Gümüşhane', 'country': 'TR', 'lat': 40.4603, 'lng': 39.4814},
+    {'city': 'Kilis', 'country': 'TR', 'lat': 36.7184, 'lng': 37.1212},
+    {'city': 'Ardahan', 'country': 'TR', 'lat': 41.1105, 'lng': 42.7022},
+    {'city': 'Tunceli', 'country': 'TR', 'lat': 39.1079, 'lng': 39.5401},
+    {'city': 'Bayburt', 'country': 'TR', 'lat': 40.2552, 'lng': 40.2249},
+    // Bangladesh & South Asia
+    {'city': 'Dhaka', 'country': 'BD', 'lat': 23.8103, 'lng': 90.4125},
+    {'city': 'Chattogram / Chittagong', 'country': 'BD', 'lat': 22.3569, 'lng': 91.7832},
+    {'city': 'Sylhet', 'country': 'BD', 'lat': 24.8949, 'lng': 91.8687},
+    {'city': 'Rajshahi', 'country': 'BD', 'lat': 24.3745, 'lng': 88.6042},
+    {'city': 'Khulna', 'country': 'BD', 'lat': 22.8456, 'lng': 89.5403},
+    {'city': 'Barishal', 'country': 'BD', 'lat': 22.7010, 'lng': 90.3535},
+    {'city': 'Rangpur', 'country': 'BD', 'lat': 25.7439, 'lng': 89.2752},
+    {'city': 'Mymensingh', 'country': 'BD', 'lat': 24.7471, 'lng': 90.4203},
+    {'city': 'Cumilla', 'country': 'BD', 'lat': 23.4607, 'lng': 91.1809},
+    {'city': 'Karachi', 'country': 'PK', 'lat': 24.8607, 'lng': 67.0011},
+    {'city': 'Lahore', 'country': 'PK', 'lat': 31.5204, 'lng': 74.3587},
+    {'city': 'Islamabad', 'country': 'PK', 'lat': 33.6844, 'lng': 73.0479},
+    {'city': 'New Delhi', 'country': 'IN', 'lat': 28.6139, 'lng': 77.2090},
+    {'city': 'Mumbai', 'country': 'IN', 'lat': 19.0760, 'lng': 72.8777},
+    {'city': 'Kolkata', 'country': 'IN', 'lat': 22.5726, 'lng': 88.3639},
+    {'city': 'Hyderabad', 'country': 'IN', 'lat': 17.3850, 'lng': 78.4867},
+    // Middle East, SE Asia, Europe & Global
+    {'city': 'Makkah', 'country': 'SA', 'lat': 21.3891, 'lng': 39.8579},
+    {'city': 'Madinah', 'country': 'SA', 'lat': 24.5247, 'lng': 39.5692},
+    {'city': 'Riyadh', 'country': 'SA', 'lat': 24.7136, 'lng': 46.6753},
+    {'city': 'Jeddah', 'country': 'SA', 'lat': 21.4858, 'lng': 39.1925},
+    {'city': 'Dubai', 'country': 'AE', 'lat': 25.2048, 'lng': 55.2708},
+    {'city': 'Doha', 'country': 'QA', 'lat': 25.2854, 'lng': 51.5310},
+    {'city': 'Cairo', 'country': 'EG', 'lat': 30.0444, 'lng': 31.2357},
+    {'city': 'Baku', 'country': 'AZ', 'lat': 40.4093, 'lng': 49.8671},
+    {'city': 'Jakarta', 'country': 'ID', 'lat': -6.2088, 'lng': 106.8456},
+    {'city': 'Kuala Lumpur', 'country': 'MY', 'lat': 3.1390, 'lng': 101.6869},
+    {'city': 'Singapore', 'country': 'SG', 'lat': 1.3521, 'lng': 103.8198},
+    {'city': 'London', 'country': 'GB', 'lat': 51.5072, 'lng': -0.1276},
+    {'city': 'Berlin', 'country': 'DE', 'lat': 52.5200, 'lng': 13.4050},
+    {'city': 'Paris', 'country': 'FR', 'lat': 48.8566, 'lng': 2.3522},
+    {'city': 'Moscow', 'country': 'RU', 'lat': 55.7558, 'lng': 37.6173},
+    {'city': 'New York', 'country': 'US', 'lat': 40.7128, 'lng': -74.0060},
+    {'city': 'Toronto', 'country': 'CA', 'lat': 43.6532, 'lng': -79.3832},
+  ];
+
+  Map<String, double>? _matchCatalogCity(String rawName) {
+    final String q = rawName.trim().toLowerCase();
+    if (q.isEmpty) return null;
+    for (final item in _hyperlocalCatalog) {
+      final String cName = (item['city'] as String).toLowerCase();
+      if (cName == q || q.contains(cName) || cName.contains(q)) {
+        return {
+          'lat': (item['lat'] as num).toDouble(),
+          'lng': (item['lng'] as num).toDouble(),
+        };
+      }
+    }
+    return null;
+  }
+
   Map<String, String> _computeLocalSolarTimes(DateTime date) {
     final double tzHours = date.timeZoneOffset.inMinutes / 60.0;
-    double lat = 24.0;
-    double lng = tzHours * 15.0;
+    double lat = _locationLat;
+    double lng = _locationLng;
 
-    final String locLower = _backgroundLocation.toLowerCase();
-    if (locLower.contains('dhaka') || locLower.contains('bangladesh')) {
-      lat = 23.8103;
-      lng = 90.4125;
-    } else if (locLower.contains('riyadh') ||
-        locLower.contains('makkah') ||
-        locLower.contains('jeddah')) {
-      lat = 24.7136;
-      lng = 46.6753;
-    } else if (locLower.contains('istanbul') || locLower.contains('ankara')) {
-      lat = 41.0082;
-      lng = 28.9784;
-    } else if (locLower.contains('karachi') || locLower.contains('lahore')) {
-      lat = 24.8607;
-      lng = 67.0011;
-    } else if (locLower.contains('jakarta')) {
-      lat = -6.2088;
-      lng = 106.8456;
-    } else if (locLower.contains('kuala') || locLower.contains('singapore')) {
-      lat = 3.1390;
-      lng = 101.6869;
-    } else if (locLower.contains('london')) {
-      lat = 51.5072;
-      lng = -0.1276;
-    } else if (locLower.contains('new york')) {
-      lat = 40.7128;
-      lng = -74.0060;
+    // If coordinates are not yet populated, resolve from _backgroundLocation catalog or timezone
+    if (lat == 0.0 && lng == 0.0) {
+      final Map<String, double>? matched =
+          _matchCatalogCity(_backgroundLocation);
+      if (matched != null) {
+        lat = matched['lat']!;
+        lng = matched['lng']!;
+      } else if ((tzHours - 3.0).abs() < 0.1) {
+        // Default UTC+3 Eastern Anatolia / Erzurum fallback
+        lat = 39.9043;
+        lng = 41.2679;
+      } else {
+        lat = 24.0;
+        lng = tzHours * 15.0;
+      }
     }
 
     final int dayOfYear =
         date.difference(DateTime(date.year, 1, 1)).inDays + 1;
+    final int daysInYear =
+        (date.year % 4 == 0 && (date.year % 100 != 0 || date.year % 400 == 0))
+            ? 366
+            : 365;
     const double deg2rad = math.pi / 180.0;
     const double rad2deg = 180.0 / math.pi;
-    final double gamma = (2.0 * math.pi / 365.0) * (dayOfYear - 1);
+    final double gamma = (2.0 * math.pi / daysInYear) * (dayOfYear - 1);
 
     final double eqTime = 229.18 *
         (0.000075 +
@@ -1143,7 +1329,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     final double latRad = lat * deg2rad;
     final double solarNoonMin = 720.0 - 4.0 * lng - eqTime + tzHours * 60.0;
 
-    final double cosSun = ((math.cos(90.833 * deg2rad) -
+    final double cosSun = ((math.cos(90.8333 * deg2rad) -
                 math.sin(latRad) * math.sin(decl)) /
             (math.cos(latRad) * math.cos(decl)))
         .clamp(-1.0, 1.0);
@@ -1176,7 +1362,335 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       'afternoon': _fmtSolarMinutes(afternoonMin),
       'sunset': _fmtSolarMinutes(sunsetMin),
       'activeSlot': activeSlot,
+      'coords':
+          '${lat.abs().toStringAsFixed(2)}°${lat >= 0 ? 'N' : 'S'}, ${lng.abs().toStringAsFixed(2)}°${lng >= 0 ? 'E' : 'W'}',
     };
+  }
+
+  void _showHyperlocalLocationModal(BuildContext ctx) {
+    String searchQ = '';
+    bool isGeocoding = false;
+    List<Map<String, dynamic>> geocodedResults = [];
+    final TextEditingController cityCtrl = TextEditingController();
+    final FocusNode cityFocus = FocusNode();
+
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF11131A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (mCtx) {
+        return StatefulBuilder(
+          builder: (sCtx, setSheetState) {
+            final Map<String, String> liveSolar = _computeLocalSolarTimes(_now);
+            final List<Map<String, dynamic>> filteredCatalog =
+                _hyperlocalCatalog.where((item) {
+              if (searchQ.isEmpty) return true;
+              final String c = (item['city'] as String).toLowerCase();
+              final String k = (item['country'] as String).toLowerCase();
+              final String q = searchQ.toLowerCase();
+              return c.contains(q) || k.contains(q);
+            }).toList();
+
+            final List<Map<String, dynamic>> combinedList = [
+              ...geocodedResults,
+              ...filteredCatalog,
+            ];
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(sCtx).viewInsets.bottom,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(sCtx).size.height * 0.80,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.my_location_rounded, color: _accentColor),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '📍 $_backgroundLocation (${liveSolar['coords']})',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            icon:
+                                const Icon(Icons.close, color: Colors.white70),
+                            onPressed: () {
+                              _dismissKeyboardAndUnfocus();
+                              Navigator.pop(mCtx);
+                            },
+                          ),
+                        ],
+                      ),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: _accentColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: _accentColor.withValues(alpha: 0.4)),
+                        ),
+                        child: Text(
+                          '${_solarSlotLabel('sunrise')}: ${liveSolar['sunrise']}  •  '
+                          '${_solarSlotLabel('noon')}: ${liveSolar['noon']}  •  '
+                          '${_solarSlotLabel('afternoon')}: ${liveSolar['afternoon']}  •  '
+                          '${_solarSlotLabel('sunset')}: ${liveSolar['sunset']}',
+                          style: TextStyle(
+                            color: _accentColor,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF10B981),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                          ),
+                          icon: const Icon(Icons.gps_fixed_rounded, size: 18),
+                          label: const Text(
+                            'Auto-Detect Exact GPS / Hyperlocal Location',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 12.5),
+                          ),
+                          onPressed: () async {
+                            setState(() => _manualLocationOverride = false);
+                            await _channel.invokeMethod(
+                              'requestHyperlocalLocation',
+                              {'requestPermission': true},
+                            );
+                            await Future.delayed(
+                                const Duration(milliseconds: 900));
+                            await _refreshNativeStatus();
+                            await _saveState();
+                            if (sCtx.mounted) setSheetState(() {});
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: cityCtrl,
+                              focusNode: cityFocus,
+                              textInputAction: TextInputAction.search,
+                              onTap: () => _focusAndShowKeyboard(cityFocus),
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 13),
+                              decoration: InputDecoration(
+                                hintText:
+                                    'Search city or district (e.g. Erzurum, Yakutiye, Palandöken)...',
+                                hintStyle: const TextStyle(
+                                    color: Colors.white54, fontSize: 12),
+                                prefixIcon: const Icon(Icons.search_rounded,
+                                    color: Colors.white54, size: 18),
+                                suffixIcon: searchQ.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.close_rounded,
+                                            color: Colors.white54, size: 18),
+                                        onPressed: () {
+                                          cityCtrl.clear();
+                                          setSheetState(() {
+                                            searchQ = '';
+                                            geocodedResults = [];
+                                          });
+                                          _focusAndShowKeyboard(cityFocus);
+                                        },
+                                      )
+                                    : null,
+                                filled: true,
+                                fillColor: Colors.white.withValues(alpha: 0.06),
+                                isDense: true,
+                                contentPadding:
+                                    const EdgeInsets.symmetric(vertical: 10),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide.none,
+                                ),
+                              ),
+                              onChanged: (v) =>
+                                  setSheetState(() => searchQ = v.trim()),
+                              onSubmitted: (v) async {
+                                if (v.trim().isEmpty) return;
+                                setSheetState(() => isGeocoding = true);
+                                try {
+                                  final List<dynamic>? res =
+                                      await _channel.invokeMethod<List<dynamic>>(
+                                    'geocodeCityQuery',
+                                    {'query': v.trim()},
+                                  );
+                                  if (res != null && sCtx.mounted) {
+                                    setSheetState(() {
+                                      geocodedResults = res
+                                          .map((e) =>
+                                              Map<String, dynamic>.from(e as Map))
+                                          .toList();
+                                    });
+                                  }
+                                } catch (_) {}
+                                if (sCtx.mounted) {
+                                  setSheetState(() => isGeocoding = false);
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          IconButton(
+                            style: IconButton.styleFrom(
+                              backgroundColor:
+                                  const Color(0xFF10B981).withValues(alpha: 0.2),
+                            ),
+                            icon: isGeocoding
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Color(0xFF10B981),
+                                    ),
+                                  )
+                                : const Icon(Icons.travel_explore_rounded,
+                                    color: Color(0xFF10B981), size: 20),
+                            onPressed: () async {
+                              final String q = cityCtrl.text.trim();
+                              if (q.isEmpty) return;
+                              setSheetState(() => isGeocoding = true);
+                              try {
+                                final List<dynamic>? res =
+                                    await _channel.invokeMethod<List<dynamic>>(
+                                  'geocodeCityQuery',
+                                  {'query': q},
+                                );
+                                if (res != null && sCtx.mounted) {
+                                  setSheetState(() {
+                                    geocodedResults = res
+                                        .map((e) =>
+                                            Map<String, dynamic>.from(e as Map))
+                                        .toList();
+                                  });
+                                }
+                              } catch (_) {}
+                              if (sCtx.mounted) {
+                                setSheetState(() => isGeocoding = false);
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ListView.builder(
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          itemCount: combinedList.length,
+                          itemBuilder: (lCtx, idx) {
+                            final Map<String, dynamic> item = combinedList[idx];
+                            final String cName = (item['city'] ?? '').toString();
+                            final double cLat =
+                                (item['lat'] as num).toDouble();
+                            final double cLng =
+                                (item['lng'] as num).toDouble();
+                            final bool isSelected = _backgroundLocation
+                                    .toLowerCase() ==
+                                cName.toLowerCase();
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 6),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF10B981)
+                                        .withValues(alpha: 0.15)
+                                    : Colors.white.withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? const Color(0xFF10B981)
+                                      : Colors.white10,
+                                ),
+                              ),
+                              child: ListTile(
+                                dense: true,
+                                leading: Icon(
+                                  isSelected
+                                      ? Icons.check_circle_rounded
+                                      : Icons.location_on_outlined,
+                                  color: isSelected
+                                      ? const Color(0xFF10B981)
+                                      : Colors.white54,
+                                  size: 20,
+                                ),
+                                title: Text(
+                                  cName,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${cLat.toStringAsFixed(4)}°N, ${cLng.toStringAsFixed(4)}°E',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                onTap: () async {
+                                  _dismissKeyboardAndUnfocus();
+                                  setState(() {
+                                    _backgroundLocation = cName;
+                                    _locationLat = cLat;
+                                    _locationLng = cLng;
+                                    _manualLocationOverride = true;
+                                  });
+                                  await _channel.invokeMethod(
+                                    'setHyperlocalLocation',
+                                    {
+                                      'city': cName,
+                                      'lat': cLat,
+                                      'lng': cLng,
+                                      'manual': true,
+                                    },
+                                  );
+                                  await _saveState();
+                                  if (mCtx.mounted) Navigator.pop(mCtx);
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(() {
+      cityCtrl.dispose();
+      cityFocus.dispose();
+    });
   }
 
   String _displayNoteTitle(KeepNoteItem n) {
@@ -3216,24 +3730,41 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.my_location_rounded,
-                        size: 13,
-                        color: _accentColor,
+                  InkWell(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showHyperlocalLocationModal(context);
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.my_location_rounded,
+                            size: 13,
+                            color: _accentColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            bgLocLabel,
+                            style: TextStyle(
+                              color: _textColor,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 2),
+                          Icon(
+                            Icons.edit_location_alt_outlined,
+                            size: 12,
+                            color: _subTextColor,
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        bgLocLabel,
-                        style: TextStyle(
-                          color: _textColor,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -4198,53 +4729,88 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
         const SizedBox(height: 10),
 
-        // 6. Simple Generalized Local Solar Times Bar (Sunrise · Noon · Afternoon · Sunset)
-        Row(
-          children: ['sunrise', 'noon', 'afternoon', 'sunset'].map((slotId) {
-            final bool isActive = solarTimes['activeSlot'] == slotId;
-            return Expanded(
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 2.5),
+        // 6. Hyperlocal Solar Times Bar (Sunrise · Noon · Afternoon · Sunset) + Tappable City/GPS Selector
+        InkWell(
+          onTap: () => _showHyperlocalLocationModal(ctx),
+          borderRadius: BorderRadius.circular(10),
+          child: Column(
+            children: [
+              Padding(
                 padding:
-                    const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                decoration: BoxDecoration(
-                  color: isActive
-                      ? _accentColor.withValues(alpha: 0.14)
-                      : _cardColor.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(
-                    color: isActive
-                        ? _accentColor.withValues(alpha: 0.55)
-                        : Colors.white10,
-                  ),
-                ),
-                child: Column(
+                    const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                child: Row(
                   children: [
-                    Text(
-                      _solarSlotLabel(slotId),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: isActive ? _accentColor : _subTextColor,
-                        fontSize: 10,
-                        fontWeight:
-                            isActive ? FontWeight.w700 : FontWeight.w500,
+                    Icon(Icons.my_location_rounded,
+                        size: 12, color: _accentColor),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        '$_backgroundLocation  •  ${solarTimes['coords'] ?? ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _subTextColor,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      solarTimes[slotId] ?? '--:--',
-                      style: TextStyle(
-                        color: _textColor,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    Icon(Icons.gps_fixed_rounded,
+                        size: 11.5, color: _accentColor),
                   ],
                 ),
               ),
-            );
-          }).toList(),
+              const SizedBox(height: 3),
+              Row(
+                children:
+                    ['sunrise', 'noon', 'afternoon', 'sunset'].map((slotId) {
+                  final bool isActive = solarTimes['activeSlot'] == slotId;
+                  return Expanded(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 2.5),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 6, horizontal: 4),
+                      decoration: BoxDecoration(
+                        color: isActive
+                            ? _accentColor.withValues(alpha: 0.14)
+                            : _cardColor.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(
+                          color: isActive
+                              ? _accentColor.withValues(alpha: 0.55)
+                              : Colors.white10,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            _solarSlotLabel(slotId),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isActive ? _accentColor : _subTextColor,
+                              fontSize: 10,
+                              fontWeight:
+                                  isActive ? FontWeight.w700 : FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            solarTimes[slotId] ?? '--:--',
+                            style: TextStyle(
+                              color: _textColor,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
         ),
       ],
     );
