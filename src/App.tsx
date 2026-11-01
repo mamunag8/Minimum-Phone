@@ -21,7 +21,9 @@ import type {
 } from './types/app';
 import {
   CALM_MIND_TRIGGERS,
+  computeLocalPrayerTimes,
   filterMotivationalQuotes,
+  getDailyDynamicQuoteIndex,
   getQuoteCategoryLabel,
   getTriggerQuoteCategory,
   getTriggerSource,
@@ -733,8 +735,15 @@ export function App() {
     setTriggerIndex((prev) => pickRandomQuoteIndex(prev, filteredCalmTriggers.length));
   };
 
-  // Automatically change motivational quote randomly from time to time
+  // Dynamically update quote every new calendar day (and rotate randomly from time to time)
+  const currentDayKey = `${currentTime.getFullYear()}-${currentTime.getMonth() + 1}-${currentTime.getDate()}`;
   useEffect(() => {
+    const dailyIdx = getDailyDynamicQuoteIndex(currentTime, filteredCalmTriggers.length);
+    setTriggerIndex((prev) => (prev + dailyIdx) % Math.max(1, filteredCalmTriggers.length));
+  }, [currentDayKey, filteredCalmTriggers.length]);
+
+  useEffect(() => {
+    if (quoteRotationSeconds >= 86400) return;
     const intervalMs = Math.max(10, quoteRotationSeconds || 30) * 1000;
     const timer = setInterval(() => {
       setTriggerIndex((prev) => pickRandomQuoteIndex(prev, filteredCalmTriggers.length));
@@ -745,6 +754,17 @@ export function App() {
   const activeCalmTrigger =
     filteredCalmTriggers[triggerIndex % Math.max(1, filteredCalmTriggers.length)] ||
     CALM_MIND_TRIGGERS[0];
+
+  const localPrayerTimes = useMemo(
+    () => computeLocalPrayerTimes(currentTime),
+    [
+      currentTime.getFullYear(),
+      currentTime.getMonth(),
+      currentTime.getDate(),
+      currentTime.getHours(),
+      currentTime.getMinutes(),
+    ]
+  );
 
   // Active Home Apps (up to 7 apps for current Home Screen profile; Phone Calls, Messages & WhatsApp first)
   const pinnedHomeApps = useMemo(() => {
@@ -2087,67 +2107,105 @@ export function App() {
               </div>
             )}
 
-            {/* Bottom Random Motivational Quote Bar (Changes Time to Time + Category Badge) */}
-            <div className="border-t border-zinc-800/90 pt-2.5 space-y-1">
-              <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono-tech uppercase tracking-widest opacity-70">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="truncate">
-                    {t.calmWhisperLabel} · 🏅 {masteryRank}
-                  </span>
+            {/* Bottom Motivational Quote (Dynamic Daily / Random) + Short Common Prayer Times */}
+            <div className="border-t border-zinc-800/90 pt-2 space-y-2">
+              <div className="space-y-1">
+                {showArabicScript &&
+                  activeCalmTrigger.arabic &&
+                  lang !== 'ar' &&
+                  inspirationMode !== 'universal' && (
+                    <p
+                      dir="rtl"
+                      className="font-arabic text-sm sm:text-base opacity-85 leading-snug text-right"
+                    >
+                      {activeCalmTrigger.arabic}
+                    </p>
+                  )}
+
+                <p className="text-xs sm:text-sm font-normal leading-snug">
+                  “{getTriggerText(activeCalmTrigger, lang)}”
+                </p>
+
+                <div className="flex items-center justify-between gap-2 text-[10px] font-mono-tech opacity-65">
+                  <div className="flex items-center gap-1.5 min-w-0 truncate">
+                    <span className="truncate">— {getTriggerSource(activeCalmTrigger, lang)}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSettingsSubTab('language');
+                        handleSelectNavigationTab('system-kasb');
+                      }}
+                      className="underline hover:opacity-100 cursor-pointer truncate"
+                      title={tx(
+                        lang,
+                        'Set Favourite Quote Category in Settings',
+                        'সেটিংস থেকে পছন্দের বাণীর ক্যাটাগরি নির্বাচন করুন',
+                        'تغيير فئة الاقتباسات من الإعدادات',
+                        'سیٹنگز سے پسندیدہ کیٹیگری منتخب کریں',
+                        'Pilih Kategori Kutipan di Pengaturan'
+                      )}
+                    >
+                      ·{' '}
+                      {getQuoteCategoryLabel(
+                        favoriteQuoteCategory === 'all'
+                          ? getTriggerQuoteCategory(activeCalmTrigger)
+                          : favoriteQuoteCategory,
+                        lang
+                      )}
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      setSettingsSubTab('language');
-                      handleSelectNavigationTab('system-kasb');
-                    }}
-                    className="px-1.5 py-0.5 border border-zinc-700 bg-zinc-950/80 text-[9px] text-zinc-200 hover:border-zinc-400 cursor-pointer truncate shrink-0"
-                    title={tx(
-                      lang,
-                      'Change Favourite Quote Category in Settings',
-                      'সেটিংস থেকে পছন্দের বাণীর ক্যাটাগরি পরিবর্তন করুন',
-                      'تغيير فئة الاقتباسات المفضلة من الإعدادات',
-                      'سیٹنگز سے پسندیدہ اقوال کی کیٹیگری تبدیل کریں',
-                      'Ubah Kategori Kutipan Favorit di Pengaturan'
-                    )}
+                    onClick={rotateRandomQuote}
+                    className="px-1.5 py-0.5 border border-zinc-800 hover:border-zinc-500 cursor-pointer shrink-0"
+                    title={t.nextWhisperBtn}
                   >
-                    {getQuoteCategoryLabel(
-                      favoriteQuoteCategory === 'all'
-                        ? getTriggerQuoteCategory(activeCalmTrigger)
-                        : favoriteQuoteCategory,
-                      lang
-                    )}
+                    ↻ {t.nextWhisperBtn}
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={rotateRandomQuote}
-                  className="hover:opacity-100 underline cursor-pointer shrink-0"
-                >
-                  🎲 {t.nextWhisperBtn} ↻
-                </button>
               </div>
 
-              {showArabicScript &&
-                activeCalmTrigger.arabic &&
-                lang !== 'ar' &&
-                inspirationMode !== 'universal' && (
-                  <p
-                    dir="rtl"
-                    className="font-arabic text-base opacity-85 leading-relaxed text-right"
-                  >
-                    {activeCalmTrigger.arabic}
-                  </p>
-                )}
-
-              <p className="text-xs sm:text-sm font-normal leading-snug">
-                “{getTriggerText(activeCalmTrigger, lang)}”
-              </p>
-              <div className="flex items-center justify-between text-[10px] font-mono-tech opacity-55">
-                <span>— {getTriggerSource(activeCalmTrigger, lang)}</span>
-                <span>
-                  ⏱ {quoteRotationSeconds}s{' '}
-                  {tx(lang, 'auto-rotate', 'স্বয়ংক্রিয় পরিবর্তন', 'تبديل تلقائي', 'خودکار تبدیلی', 'putar otomatis')}
-                </span>
+              {/* Short Generalized Local Solar / Prayer Times Bar (Sunrise · Noon · Afternoon · Sunset) */}
+              <div className="grid grid-cols-4 gap-1 pt-1.5 border-t border-zinc-900 font-mono-tech text-[10px]">
+                {(
+                  [
+                    {
+                      id: 'sunrise',
+                      label: tx(lang, 'Sunrise', 'সূর্যোদয়', 'الشروق', 'طلوع', 'Terbit'),
+                      time: localPrayerTimes.sunrise,
+                    },
+                    {
+                      id: 'noon',
+                      label: tx(lang, 'Noon', 'দুপুর', 'الظهيرة', 'دوپہر', 'Siang'),
+                      time: localPrayerTimes.noon,
+                    },
+                    {
+                      id: 'afternoon',
+                      label: tx(lang, 'Afternoon', 'বিকেল', 'بعد الظهر', 'سہ پہر', 'Sore'),
+                      time: localPrayerTimes.afternoon,
+                    },
+                    {
+                      id: 'sunset',
+                      label: tx(lang, 'Sunset', 'সূর্যাস্ত', 'الغروب', 'غروب', 'Senja'),
+                      time: localPrayerTimes.sunset,
+                    },
+                  ] as const
+                ).map((slot) => {
+                  const isActive = localPrayerTimes.activeSlot === slot.id;
+                  return (
+                    <div
+                      key={slot.id}
+                      className={`py-1 px-1.5 border text-center truncate ${
+                        isActive
+                          ? 'border-zinc-500 bg-zinc-900/90 text-zinc-100 font-semibold'
+                          : 'border-zinc-900 bg-zinc-950/40 text-zinc-400'
+                      }`}
+                    >
+                      <span className="opacity-75">{slot.label}</span>{' '}
+                      <span className="text-zinc-200">{slot.time}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

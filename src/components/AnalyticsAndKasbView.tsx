@@ -1000,8 +1000,11 @@ export const AnalyticsAndKasbView: React.FC<AnalyticsAndKasbViewProps> = ({
                     { sec: 15, label: '15s' },
                     { sec: 30, label: '30s' },
                     { sec: 60, label: '1m' },
-                    { sec: 120, label: '2m' },
                     { sec: 300, label: '5m' },
+                    {
+                      sec: 86400,
+                      label: tx(lang, 'Daily', 'প্রতিদিন', 'يومياً', 'روزانہ', 'Harian'),
+                    },
                   ].map((item) => (
                     <button
                       key={item.sec}

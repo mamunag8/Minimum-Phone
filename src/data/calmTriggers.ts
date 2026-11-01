@@ -1043,6 +1043,156 @@ export function pickRandomQuoteIndex(currentIndex: number, listLength: number): 
   return next;
 }
 
+export function getDailyDynamicQuoteIndex(date: Date, listLength: number): number {
+  if (listLength <= 1) return 0;
+  const y = date.getFullYear();
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  const seed = y * 10000 + m * 100 + d;
+  // Knuth multiplicative hash for well-distributed daily shift
+  return Math.abs((seed * 2654435761) >>> 0) % listLength;
+}
+
+export interface LocalPrayerSolarTimes {
+  dawn: string;
+  sunrise: string;
+  noon: string;
+  afternoon: string;
+  sunset: string;
+  night: string;
+  activeSlot: 'sunrise' | 'noon' | 'afternoon' | 'sunset';
+}
+
+const TIMEZONE_COORDS: Record<string, [number, number]> = {
+  'Asia/Dhaka': [23.8103, 90.4125],
+  'Asia/Kolkata': [22.5726, 88.3639],
+  'Asia/Karachi': [24.8607, 67.0011],
+  'Asia/Riyadh': [24.7136, 46.6753],
+  'Asia/Dubai': [25.2048, 55.2708],
+  'Asia/Jakarta': [-6.2088, 106.8456],
+  'Asia/Kuala_Lumpur': [3.139, 101.6869],
+  'Asia/Singapore': [1.3521, 103.8198],
+  'Europe/Istanbul': [41.0082, 28.9784],
+  'Africa/Cairo': [30.0444, 31.2357],
+  'Europe/London': [51.5072, -0.1276],
+  'America/New_York': [40.7128, -74.006],
+  'America/Chicago': [41.8781, -87.6298],
+  'America/Los_Angeles': [34.0522, -118.2437],
+};
+
+function formatMinutesToHHMM(totalMinutes: number): string {
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  const hh = Math.floor(normalized / 60);
+  const mm = normalized % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+export function computeLocalPrayerTimes(
+  date: Date,
+  customCoords?: { lat: number; lng: number } | null
+): LocalPrayerSolarTimes {
+  const tzOffsetHours = -date.getTimezoneOffset() / 60;
+  let lat = 24.0;
+  let lng = tzOffsetHours * 15;
+
+  if (customCoords) {
+    lat = customCoords.lat;
+    lng = customCoords.lng;
+  } else {
+    try {
+      const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tzName && TIMEZONE_COORDS[tzName]) {
+        lat = TIMEZONE_COORDS[tzName][0];
+        lng = TIMEZONE_COORDS[tzName][1];
+      }
+    } catch {
+      // Fallback to timezone offset meridian
+    }
+  }
+
+  const startOfYear = new Date(date.getFullYear(), 0, 0);
+  const diff = date.getTime() - startOfYear.getTime();
+  const dayOfYear = Math.floor(diff / 86400000);
+
+  const deg2rad = Math.PI / 180;
+  const rad2deg = 180 / Math.PI;
+  const gamma = ((2 * Math.PI) / 365) * (dayOfYear - 1);
+
+  // Equation of time (minutes) & solar declination (radians)
+  const eqTime =
+    229.18 *
+    (0.000075 +
+      0.001868 * Math.cos(gamma) -
+      0.032077 * Math.sin(gamma) -
+      0.014615 * Math.cos(2 * gamma) -
+      0.040849 * Math.sin(2 * gamma));
+
+  const decl =
+    0.006918 -
+    0.399912 * Math.cos(gamma) +
+    0.070257 * Math.sin(gamma) -
+    0.006758 * Math.cos(2 * gamma) +
+    0.000907 * Math.sin(2 * gamma) -
+    0.002697 * Math.cos(3 * gamma) +
+    0.00148 * Math.sin(3 * gamma);
+
+  const latRad = lat * deg2rad;
+
+  // Solar Noon
+  const solarNoonMin = 720 - 4 * lng - eqTime + tzOffsetHours * 60;
+  const noonMin = solarNoonMin;
+
+  // Sunrise & Sunset (zenith 90.833 deg)
+  const cosSun =
+    (Math.cos(90.833 * deg2rad) - Math.sin(latRad) * Math.sin(decl)) /
+    (Math.cos(latRad) * Math.cos(decl));
+  const clampedCosSun = Math.max(-1, Math.min(1, cosSun));
+  const haSunDeg = Math.acos(clampedCosSun) * rad2deg;
+
+  const sunriseMin = solarNoonMin - 4 * haSunDeg;
+  const sunsetMin = solarNoonMin + 4 * haSunDeg;
+
+  // Afternoon (solar shadow factor 1)
+  const aftAlt = Math.atan(1 / (1 + Math.tan(Math.abs(latRad - decl))));
+  const cosAft =
+    (Math.sin(aftAlt) - Math.sin(latRad) * Math.sin(decl)) /
+    (Math.cos(latRad) * Math.cos(decl));
+  const clampedCosAft = Math.max(-1, Math.min(1, cosAft));
+  const haAftDeg = Math.acos(clampedCosAft) * rad2deg;
+  const afternoonMin = solarNoonMin + 4 * haAftDeg;
+
+  // Dawn & Night — 18 deg twilight
+  const cosTw =
+    (Math.cos(108 * deg2rad) - Math.sin(latRad) * Math.sin(decl)) /
+    (Math.cos(latRad) * Math.cos(decl));
+  const clampedCosTw = Math.max(-1, Math.min(1, cosTw));
+  const haTwDeg = Math.acos(clampedCosTw) * rad2deg;
+  const dawnMin = solarNoonMin - 4 * haTwDeg;
+  const nightMin = solarNoonMin + 4 * haTwDeg;
+
+  const nowMin = date.getHours() * 60 + date.getMinutes();
+  let activeSlot: 'sunrise' | 'noon' | 'afternoon' | 'sunset' = 'sunrise';
+  if (nowMin >= sunsetMin || nowMin < sunriseMin - 90) {
+    activeSlot = 'sunset';
+  } else if (nowMin >= afternoonMin) {
+    activeSlot = 'afternoon';
+  } else if (nowMin >= noonMin - 30) {
+    activeSlot = 'noon';
+  } else {
+    activeSlot = 'sunrise';
+  }
+
+  return {
+    dawn: formatMinutesToHHMM(dawnMin),
+    sunrise: formatMinutesToHHMM(sunriseMin),
+    noon: formatMinutesToHHMM(noonMin),
+    afternoon: formatMinutesToHHMM(afternoonMin),
+    sunset: formatMinutesToHHMM(sunsetMin),
+    night: formatMinutesToHHMM(nightMin),
+    activeSlot,
+  };
+}
+
 export interface ReadingPassage {
   page: number;
   title: { en: string; bn: string; ar: string; ur: string; id: string };

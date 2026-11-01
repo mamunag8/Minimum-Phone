@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'i18n.dart';
@@ -161,6 +162,11 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   String _backgroundLocation = 'Auto GPS';
   String _searchQuery = '';
   int _wisdomIndex = 0;
+  String _favoriteQuoteCategory = 'all'; // 'all', 'quran', 'hadith', 'proverb', 'focus', 'time', 'peace', 'discipline'
+  int _quoteRotationSeconds = 30; // 15, 30, 60, 300, or 0 (Daily)
+  int _lastQuoteRotateMs = 0;
+  int _lastQuoteDaySeed = 0;
+  final math.Random _rng = math.Random();
   bool _torchOn = false;
 
   // Keep Notes State
@@ -262,6 +268,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final DateTime initNow = DateTime.now();
+    _lastQuoteDaySeed = _computeDaySeed(initNow);
+    _lastQuoteRotateMs = initNow.millisecondsSinceEpoch;
+    _wisdomIndex = ((_lastQuoteDaySeed * 37) + _rng.nextInt(500)) % 535;
     _initDefaultApps();
     _initDefaultKeepNotes();
     _loadPersistedState();
@@ -279,7 +289,15 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             nightNow && _nightAutoDnsEnabled && !_phoneSettingsLocked;
         final bool shouldExpireUnlock =
             _settingsUnlockedSession && nowMs > _settingsUnlockedUntilMs;
-        if (minuteChanged || shouldLockSettings || shouldExpireUnlock) {
+        final int daySeedNow = _computeDaySeed(current);
+        final bool dayChanged = daySeedNow != _lastQuoteDaySeed;
+        final bool quoteRotateDue = _quoteRotationSeconds > 0 &&
+            (nowMs - _lastQuoteRotateMs >= _quoteRotationSeconds * 1000);
+        if (minuteChanged ||
+            shouldLockSettings ||
+            shouldExpireUnlock ||
+            dayChanged ||
+            quoteRotateDue) {
           setState(() {
             _now = current;
             if (shouldLockSettings) {
@@ -287,6 +305,24 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             }
             if (shouldExpireUnlock) {
               _settingsUnlockedSession = false;
+            }
+            if (dayChanged) {
+              _lastQuoteDaySeed = daySeedNow;
+              _lastQuoteRotateMs = nowMs;
+              final int len = _getFilteredWisdomList().length;
+              if (len > 0) {
+                _wisdomIndex = ((daySeedNow * 37) + _rng.nextInt(len)) % len;
+              }
+            } else if (quoteRotateDue) {
+              _lastQuoteRotateMs = nowMs;
+              final int len = _getFilteredWisdomList().length;
+              if (len > 1) {
+                int nextIdx = _rng.nextInt(len);
+                if (nextIdx == (_wisdomIndex % len)) {
+                  nextIdx = (nextIdx + 1) % len;
+                }
+                _wisdomIndex = nextIdx;
+              }
             }
           });
         } else {
@@ -535,6 +571,17 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           _lang = data['lang'] ?? _lang;
           _themeMode = data['themeMode'] ?? _themeMode;
           _activeProfile = data['activeProfile'] ?? _activeProfile;
+          _favoriteQuoteCategory =
+              (data['favoriteQuoteCategory'] ?? _favoriteQuoteCategory)
+                  .toString();
+          _quoteRotationSeconds =
+              (data['quoteRotationSeconds'] as int?) ?? _quoteRotationSeconds;
+          final int len = _getFilteredWisdomList().length;
+          if (len > 0) {
+            _wisdomIndex =
+                ((_computeDaySeed(DateTime.now()) * 37) + _rng.nextInt(len)) %
+                    len;
+          }
           _dnsProvider = data['dnsProvider'] ?? 'cloudflare';
           _dnsHost = data['dnsHost'] ?? 'family.cloudflare-dns.com';
           _phoneSettingsLocked = data['phoneSettingsLocked'] ?? true;
@@ -610,6 +657,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'lang': _lang,
         'themeMode': _themeMode,
         'activeProfile': _activeProfile,
+        'favoriteQuoteCategory': _favoriteQuoteCategory,
+        'quoteRotationSeconds': _quoteRotationSeconds,
         'homeListsV23': true,
         'dnsProvider': _dnsProvider,
         'dnsHost': _dnsHost,
@@ -774,6 +823,361 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   }
 
   String _tr(String key) => AppDataDefaults.tr(_lang, key);
+
+  int _computeDaySeed(DateTime dt) =>
+      dt.year * 10000 + dt.month * 100 + dt.day;
+
+  List<WisdomEntry> _getFilteredWisdomList() {
+    final List<WisdomEntry> all = AppDataDefaults.getWisdomList(_lang);
+    if (_favoriteQuoteCategory == 'all' || all.isEmpty) return all;
+    if (_favoriteQuoteCategory == 'quran' ||
+        _favoriteQuoteCategory == 'hadith' ||
+        _favoriteQuoteCategory == 'proverb') {
+      final List<WisdomEntry> byCat =
+          all.where((e) => e.category == _favoriteQuoteCategory).toList();
+      return byCat.isNotEmpty ? byCat : all;
+    }
+    final List<WisdomEntry> thematic = [];
+    for (int i = 0; i < all.length; i++) {
+      final WisdomEntry e = all[i];
+      final String lower = '${e.text} ${e.ref}'.toLowerCase();
+      if (_favoriteQuoteCategory == 'focus') {
+        if (lower.contains('focus') ||
+            lower.contains('attention') ||
+            lower.contains('scroll') ||
+            lower.contains('screen') ||
+            lower.contains('distract') ||
+            i % 4 == 0) {
+          thematic.add(e);
+        }
+      } else if (_favoriteQuoteCategory == 'time') {
+        if (lower.contains('time') ||
+            lower.contains('morning') ||
+            lower.contains('hour') ||
+            lower.contains('breath') ||
+            lower.contains('youth') ||
+            i % 4 == 1) {
+          thematic.add(e);
+        }
+      } else if (_favoriteQuoteCategory == 'peace') {
+        if (lower.contains('heart') ||
+            lower.contains('peace') ||
+            lower.contains('rest') ||
+            lower.contains('mercy') ||
+            lower.contains('gratitude') ||
+            lower.contains('patient') ||
+            i % 4 == 2) {
+          thematic.add(e);
+        }
+      } else if (_favoriteQuoteCategory == 'discipline') {
+        if (lower.contains('strong') ||
+            lower.contains('control') ||
+            lower.contains('habit') ||
+            lower.contains('discipline') ||
+            lower.contains('strive') ||
+            i % 4 == 3) {
+          thematic.add(e);
+        }
+      }
+    }
+    return thematic.isNotEmpty ? thematic : all;
+  }
+
+  void _rotateRandomWisdom() {
+    final int len = _getFilteredWisdomList().length;
+    if (len <= 1) return;
+    int nextIdx = _rng.nextInt(len);
+    if (nextIdx == (_wisdomIndex % len)) {
+      nextIdx = (nextIdx + 1) % len;
+    }
+    setState(() {
+      _wisdomIndex = nextIdx;
+      _lastQuoteRotateMs = DateTime.now().millisecondsSinceEpoch;
+    });
+  }
+
+  String _quoteCategoryLabel(String cat) {
+    const Map<String, Map<String, String>> labels = {
+      'all': {
+        'en': 'All Quotes',
+        'bn': 'সব উক্তি',
+        'ar': 'جميع الحكم',
+        'ur': 'تمام اقوال',
+        'id': 'Semua Kutipan',
+        'tr': 'Tüm Sözler',
+        'hi': 'सभी विचार',
+        'ms': 'Semua Kata Hikmah',
+        'es': 'Todas las Citas',
+        'fr': 'Toutes les Citations',
+        'de': 'Alle Zitate',
+        'ru': 'Все цитаты',
+      },
+      'quran': {
+        'en': 'Quran',
+        'bn': 'কুরআন',
+        'ar': 'القرآن',
+        'ur': 'قرآن',
+        'id': 'Al-Quran',
+        'tr': 'Kur\'an',
+        'hi': 'क़ुरआन',
+        'ms': 'Al-Quran',
+        'es': 'Corán',
+        'fr': 'Coran',
+        'de': 'Koran',
+        'ru': 'Коран',
+      },
+      'hadith': {
+        'en': 'Hadith',
+        'bn': 'হাদিস',
+        'ar': 'الحديث',
+        'ur': 'حدیث',
+        'id': 'Hadis',
+        'tr': 'Hadis',
+        'hi': 'हदीस',
+        'ms': 'Hadis',
+        'es': 'Hadiz',
+        'fr': 'Hadith',
+        'de': 'Hadith',
+        'ru': 'Хадис',
+      },
+      'proverb': {
+        'en': 'Proverbs',
+        'bn': 'প্রবাদ ও প্রজ্ঞা',
+        'ar': 'حكم وأمثال',
+        'ur': 'اقوال و حکمت',
+        'id': 'Pepatah',
+        'tr': 'Özdeyişler',
+        'hi': 'सूक्तियाँ',
+        'ms': 'Pepatah',
+        'es': 'Proverbios',
+        'fr': 'Proverbes',
+        'de': 'Sprichwörter',
+        'ru': 'Пословицы',
+      },
+      'focus': {
+        'en': 'Deep Focus',
+        'bn': 'গভীর মনোযোগ',
+        'ar': 'التركيز العميق',
+        'ur': 'گہری توجہ',
+        'id': 'Fokus Mendalam',
+        'tr': 'Derin Odak',
+        'hi': 'गहरा ध्यान',
+        'ms': 'Fokus Mendalam',
+        'es': 'Enfoque Profundo',
+        'fr': 'Concentration',
+        'de': 'Tiefer Fokus',
+        'ru': 'Глубокий фокус',
+      },
+      'time': {
+        'en': 'Time & Purpose',
+        'bn': 'সময় ও উদ্দেশ্য',
+        'ar': 'الوقت والغاية',
+        'ur': 'وقت اور مقصد',
+        'id': 'Waktu & Tujuan',
+        'tr': 'Zaman ve Amaç',
+        'hi': 'समय और उद्देश्य',
+        'ms': 'Masa & Tujuan',
+        'es': 'Tiempo y Propósito',
+        'fr': 'Temps et But',
+        'de': 'Zeit & Sinn',
+        'ru': 'Время и цель',
+      },
+      'peace': {
+        'en': 'Inner Peace',
+        'bn': 'মানসিক প্রশান্তি',
+        'ar': 'السكينة والطمأنينة',
+        'ur': 'ذہنی سکون',
+        'id': 'Ketenangan Batin',
+        'tr': 'İç Huzur',
+        'hi': 'आंतरिक शांति',
+        'ms': 'Ketenangan Jiwa',
+        'es': 'Paz Interior',
+        'fr': 'Paix Intérieure',
+        'de': 'Innerer Frieden',
+        'ru': 'Внутренний покой',
+      },
+      'discipline': {
+        'en': 'Self-Mastery',
+        'bn': 'আত্মনিয়ন্ত্রণ',
+        'ar': 'ضبط النفس',
+        'ur': 'خود ضابطگی',
+        'id': 'Pengendalian Diri',
+        'tr': 'Öz Disiplin',
+        'hi': 'आत्म-नियंत्रण',
+        'ms': 'Kawalan Diri',
+        'es': 'Autodominio',
+        'fr': 'Maîtrise de Soi',
+        'de': 'Selbstbeherrschung',
+        'ru': 'Самообладание',
+      },
+    };
+    final Map<String, String>? m = labels[cat] ?? labels['all'];
+    return m?[_lang] ?? m?['en'] ?? 'Quotes';
+  }
+
+  String _solarSlotLabel(String slot) {
+    const Map<String, Map<String, String>> slotLabels = {
+      'sunrise': {
+        'en': 'Sunrise',
+        'bn': 'সূর্যোদয়',
+        'ar': 'الشروق',
+        'ur': 'طلوع',
+        'id': 'Terbit',
+        'tr': 'Gündoğumu',
+        'hi': 'सूर्योदय',
+        'ms': 'Terbit',
+        'es': 'Amanecer',
+        'fr': 'Lever',
+        'de': 'Aufgang',
+        'ru': 'Восход',
+      },
+      'noon': {
+        'en': 'Noon',
+        'bn': 'দুপুর',
+        'ar': 'الظهيرة',
+        'ur': 'دوپہر',
+        'id': 'Siang',
+        'tr': 'Öğle',
+        'hi': 'दोपहर',
+        'ms': 'Tengah Hari',
+        'es': 'Mediodía',
+        'fr': 'Midi',
+        'de': 'Mittag',
+        'ru': 'Полдень',
+      },
+      'afternoon': {
+        'en': 'Afternoon',
+        'bn': 'বিকেল',
+        'ar': 'بعد الظهر',
+        'ur': 'سہ پہر',
+        'id': 'Sore',
+        'tr': 'İkindi',
+        'hi': 'अपराह्न',
+        'ms': 'Petang',
+        'es': 'Tarde',
+        'fr': 'Après-midi',
+        'de': 'Nachmittag',
+        'ru': 'День',
+      },
+      'sunset': {
+        'en': 'Sunset',
+        'bn': 'সূর্যাস্ত',
+        'ar': 'الغروب',
+        'ur': 'غروب',
+        'id': 'Senja',
+        'tr': 'Günbatımı',
+        'hi': 'सूर्यास्त',
+        'ms': 'Senja',
+        'es': 'Atardecer',
+        'fr': 'Coucher',
+        'de': 'Untergang',
+        'ru': 'Закат',
+      },
+    };
+    final Map<String, String>? m = slotLabels[slot];
+    return m?[_lang] ?? m?['en'] ?? slot;
+  }
+
+  String _fmtSolarMinutes(double totalMinutes) {
+    final int norm = ((totalMinutes.round() % 1440) + 1440) % 1440;
+    final int h = norm ~/ 60;
+    final int m = norm % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }
+
+  Map<String, String> _computeLocalSolarTimes(DateTime date) {
+    final double tzHours = date.timeZoneOffset.inMinutes / 60.0;
+    double lat = 24.0;
+    double lng = tzHours * 15.0;
+
+    final String locLower = _backgroundLocation.toLowerCase();
+    if (locLower.contains('dhaka') || locLower.contains('bangladesh')) {
+      lat = 23.8103;
+      lng = 90.4125;
+    } else if (locLower.contains('riyadh') ||
+        locLower.contains('makkah') ||
+        locLower.contains('jeddah')) {
+      lat = 24.7136;
+      lng = 46.6753;
+    } else if (locLower.contains('istanbul') || locLower.contains('ankara')) {
+      lat = 41.0082;
+      lng = 28.9784;
+    } else if (locLower.contains('karachi') || locLower.contains('lahore')) {
+      lat = 24.8607;
+      lng = 67.0011;
+    } else if (locLower.contains('jakarta')) {
+      lat = -6.2088;
+      lng = 106.8456;
+    } else if (locLower.contains('kuala') || locLower.contains('singapore')) {
+      lat = 3.1390;
+      lng = 101.6869;
+    } else if (locLower.contains('london')) {
+      lat = 51.5072;
+      lng = -0.1276;
+    } else if (locLower.contains('new york')) {
+      lat = 40.7128;
+      lng = -74.0060;
+    }
+
+    final int dayOfYear =
+        date.difference(DateTime(date.year, 1, 1)).inDays + 1;
+    const double deg2rad = math.pi / 180.0;
+    const double rad2deg = 180.0 / math.pi;
+    final double gamma = (2.0 * math.pi / 365.0) * (dayOfYear - 1);
+
+    final double eqTime = 229.18 *
+        (0.000075 +
+            0.001868 * math.cos(gamma) -
+            0.032077 * math.sin(gamma) -
+            0.014615 * math.cos(2 * gamma) -
+            0.040849 * math.sin(2 * gamma));
+
+    final double decl = 0.006918 -
+        0.399912 * math.cos(gamma) +
+        0.070257 * math.sin(gamma) -
+        0.006758 * math.cos(2 * gamma) +
+        0.000907 * math.sin(2 * gamma) -
+        0.002697 * math.cos(3 * gamma) +
+        0.001480 * math.sin(3 * gamma);
+
+    final double latRad = lat * deg2rad;
+    final double solarNoonMin = 720.0 - 4.0 * lng - eqTime + tzHours * 60.0;
+
+    final double cosSun = ((math.cos(90.833 * deg2rad) -
+                math.sin(latRad) * math.sin(decl)) /
+            (math.cos(latRad) * math.cos(decl)))
+        .clamp(-1.0, 1.0);
+    final double haSunDeg = math.acos(cosSun) * rad2deg;
+    final double sunriseMin = solarNoonMin - 4.0 * haSunDeg;
+    final double sunsetMin = solarNoonMin + 4.0 * haSunDeg;
+
+    final double aftAlt =
+        math.atan(1.0 / (1.0 + math.tan((latRad - decl).abs())));
+    final double cosAft =
+        ((math.sin(aftAlt) - math.sin(latRad) * math.sin(decl)) /
+                (math.cos(latRad) * math.cos(decl)))
+            .clamp(-1.0, 1.0);
+    final double haAftDeg = math.acos(cosAft) * rad2deg;
+    final double afternoonMin = solarNoonMin + 4.0 * haAftDeg;
+
+    final int nowMin = date.hour * 60 + date.minute;
+    String activeSlot = 'sunrise';
+    if (nowMin >= sunsetMin || nowMin < sunriseMin - 90) {
+      activeSlot = 'sunset';
+    } else if (nowMin >= afternoonMin) {
+      activeSlot = 'afternoon';
+    } else if (nowMin >= solarNoonMin - 30) {
+      activeSlot = 'noon';
+    }
+
+    return {
+      'sunrise': _fmtSolarMinutes(sunriseMin),
+      'noon': _fmtSolarMinutes(solarNoonMin),
+      'afternoon': _fmtSolarMinutes(afternoonMin),
+      'sunset': _fmtSolarMinutes(sunsetMin),
+      'activeSlot': activeSlot,
+    };
+  }
 
   String _displayNoteTitle(KeepNoteItem n) {
     if (n.id == 'note_1' && n.title == 'Today\'s Core Priorities') {
@@ -3446,9 +3850,12 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     final List<KeepNoteItem> pinnedNotes =
         _keepNotes.where((n) => n.pinned).take(2).toList();
 
-    final List<WisdomEntry> wList = AppDataDefaults.getWisdomList(_lang);
-    final int qIdx = _wisdomIndex % wList.length;
-    final WisdomEntry currentWisdom = wList[qIdx];
+    final List<WisdomEntry> wList = _getFilteredWisdomList();
+    final int qIdx = wList.isEmpty ? 0 : (_wisdomIndex % wList.length);
+    final WisdomEntry currentWisdom = wList.isEmpty
+        ? AppDataDefaults.getWisdomList(_lang).first
+        : wList[qIdx];
+    final Map<String, String> solarTimes = _computeLocalSolarTimes(_now);
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -3709,9 +4116,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
 
         const SizedBox(height: 14),
 
-        // 5. Translated Wisdom Footer in User's Selected Language
+        // 5. Dynamic Motivational Quote Card (Random + Daily Shift + Category Filter)
         InkWell(
-          onTap: () => setState(() => _wisdomIndex++),
+          onTap: _rotateRandomWisdom,
           borderRadius: BorderRadius.circular(12),
           child: Container(
             padding: const EdgeInsets.all(12),
@@ -3723,6 +4130,49 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  children: [
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _currentTab = 4;
+                          _settingsSubTab = 2;
+                        });
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _accentColor.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: _accentColor.withValues(alpha: 0.35)),
+                        ),
+                        child: Text(
+                          _quoteCategoryLabel(_favoriteQuoteCategory == 'all'
+                              ? currentWisdom.category
+                              : _favoriteQuoteCategory),
+                          style: TextStyle(
+                            color: _accentColor,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '↻ ${_tr('tapForNextWisdom')}',
+                      style: TextStyle(
+                        color: _subTextColor,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
                 Text(
                   '"${currentWisdom.text}"',
                   style: TextStyle(
@@ -3734,7 +4184,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  '— ${currentWisdom.ref}  (#${qIdx + 1}/${wList.length} • ${_tr('tapForNextWisdom')})',
+                  '— ${currentWisdom.ref}',
                   style: TextStyle(
                     color: _accentColor.withValues(alpha: 0.9),
                     fontSize: 11,
@@ -3744,6 +4194,57 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
               ],
             ),
           ),
+        ),
+
+        const SizedBox(height: 10),
+
+        // 6. Simple Generalized Local Solar Times Bar (Sunrise · Noon · Afternoon · Sunset)
+        Row(
+          children: ['sunrise', 'noon', 'afternoon', 'sunset'].map((slotId) {
+            final bool isActive = solarTimes['activeSlot'] == slotId;
+            return Expanded(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 2.5),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                decoration: BoxDecoration(
+                  color: isActive
+                      ? _accentColor.withValues(alpha: 0.14)
+                      : _cardColor.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: isActive
+                        ? _accentColor.withValues(alpha: 0.55)
+                        : Colors.white10,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      _solarSlotLabel(slotId),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isActive ? _accentColor : _subTextColor,
+                        fontSize: 10,
+                        fontWeight:
+                            isActive ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      solarTimes[slotId] ?? '--:--',
+                      style: TextStyle(
+                        color: _textColor,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
         ),
       ],
     );
@@ -6662,6 +7163,93 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 },
               ),
             ],
+          ),
+          const Divider(height: 24, color: Colors.white12),
+          Row(
+            children: [
+              Icon(Icons.format_quote_rounded, color: _accentColor, size: 18),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _quoteCategoryLabel(_favoriteQuoteCategory),
+                  style: TextStyle(
+                    color: _textColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _rotateRandomWisdom,
+                icon: const Icon(Icons.shuffle_rounded, size: 15),
+                label: Text(
+                  _tr('tapForNextWisdom'),
+                  style: const TextStyle(fontSize: 11.5),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              'all',
+              'quran',
+              'hadith',
+              'proverb',
+              'focus',
+              'time',
+              'peace',
+              'discipline',
+            ].map((catId) {
+              final bool sel = _favoriteQuoteCategory == catId;
+              return ChoiceChip(
+                label: Text(
+                  _quoteCategoryLabel(catId),
+                  style: const TextStyle(fontSize: 12),
+                ),
+                selected: sel,
+                onSelected: (_) {
+                  setState(() {
+                    _favoriteQuoteCategory = catId;
+                    final int len = _getFilteredWisdomList().length;
+                    if (len > 0) {
+                      _wisdomIndex = _rng.nextInt(len);
+                    }
+                    _lastQuoteRotateMs = DateTime.now().millisecondsSinceEpoch;
+                  });
+                  _saveState();
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              {'sec': 15, 'label': '15s'},
+              {'sec': 30, 'label': '30s'},
+              {'sec': 60, 'label': '1m'},
+              {'sec': 300, 'label': '5m'},
+              {'sec': 0, 'label': 'Daily'},
+            ].map((opt) {
+              final int sec = opt['sec'] as int;
+              final String lbl = opt['label'] as String;
+              final bool sel = _quoteRotationSeconds == sec;
+              return ChoiceChip(
+                label: Text(lbl, style: const TextStyle(fontSize: 11.5)),
+                selected: sel,
+                onSelected: (_) {
+                  setState(() {
+                    _quoteRotationSeconds = sec;
+                    _lastQuoteRotateMs = DateTime.now().millisecondsSinceEpoch;
+                  });
+                  _saveState();
+                },
+              );
+            }).toList(),
           ),
         ],
       ),
