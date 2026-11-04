@@ -552,6 +552,26 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         profiles: [],
       ),
       AppItem(
+        id: 'gemini',
+        name: 'Google Gemini',
+        packageName: 'com.google.android.apps.bard',
+        category: 'Guarded',
+        tier: 'restricted',
+        pinned: false,
+        nightQrLocked: true,
+        profiles: [],
+      ),
+      AppItem(
+        id: 'googlesearch',
+        name: 'Google Search & Assistant',
+        packageName: 'com.google.android.googlequicksearchbox',
+        category: 'Guarded',
+        tier: 'restricted',
+        pinned: false,
+        nightQrLocked: true,
+        profiles: [],
+      ),
+      AppItem(
         id: 'settings',
         name: 'Settings',
         packageName: 'com.android.settings',
@@ -562,6 +582,99 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         profiles: [],
       ),
     ];
+  }
+
+  bool _isCoreEssentialUtilityPackage(String lowerPkg) {
+    if (lowerPkg.isEmpty) return false;
+    return lowerPkg.contains('incallui') ||
+        lowerPkg.contains('dialer') ||
+        lowerPkg == 'com.android.phone' ||
+        lowerPkg == 'com.android.server.telecom' ||
+        lowerPkg.contains('contacts') ||
+        lowerPkg.contains('deskclock') ||
+        lowerPkg.contains('clockpackage') ||
+        lowerPkg.contains('alarmclock') ||
+        lowerPkg.contains('calculator') ||
+        lowerPkg == 'com.google.android.apps.messaging' ||
+        lowerPkg == 'com.samsung.android.messaging' ||
+        lowerPkg == 'com.android.mms' ||
+        lowerPkg == 'com.google.android.apps.maps' ||
+        lowerPkg == 'com.google.android.calendar' ||
+        lowerPkg == 'com.samsung.android.calendar';
+  }
+
+  bool _isAlwaysNightLockedGatewayOrSocial(String lowerPkg) {
+    if (lowerPkg.isEmpty) return false;
+    return lowerPkg.contains('chrome') ||
+        lowerPkg.contains('firefox') ||
+        lowerPkg.contains('brave') ||
+        lowerPkg.contains('sbrowser') ||
+        lowerPkg.contains('opera') ||
+        lowerPkg.contains('emmx') ||
+        lowerPkg.contains('duckduckgo') ||
+        lowerPkg.contains('ucmobile') ||
+        lowerPkg.contains('kiwi') ||
+        lowerPkg.contains('vivaldi') ||
+        lowerPkg.contains('browser') ||
+        lowerPkg.contains('webview') ||
+        lowerPkg.contains('htmlviewer') ||
+        lowerPkg.contains('torproject') ||
+        lowerPkg == 'com.google.android.apps.bard' ||
+        lowerPkg == 'com.google.android.googlequicksearchbox' ||
+        lowerPkg == 'com.google.android.apps.googleassistant' ||
+        lowerPkg == 'com.google.ar.lens' ||
+        lowerPkg == 'com.openai.chatgpt' ||
+        lowerPkg == 'com.microsoft.copilot' ||
+        lowerPkg == 'com.microsoft.bing' ||
+        lowerPkg == 'com.anthropic.claude' ||
+        lowerPkg == 'ai.perplexity.app.android' ||
+        lowerPkg == 'com.deepseek.chat' ||
+        lowerPkg == 'ai.x.grok' ||
+        lowerPkg.contains('gemini') ||
+        lowerPkg.contains('chatgpt') ||
+        lowerPkg.contains('perplexity') ||
+        lowerPkg.contains('copilot') ||
+        lowerPkg.contains('youtube') ||
+        lowerPkg.contains('vanced') ||
+        lowerPkg.contains('newpipe') ||
+        lowerPkg.contains('instagram') ||
+        lowerPkg.contains('facebook') ||
+        lowerPkg.contains('katana') ||
+        lowerPkg.contains('orca') ||
+        lowerPkg.contains('mlite') ||
+        lowerPkg.contains('musically') ||
+        lowerPkg.contains('trill') ||
+        lowerPkg.contains('tiktok') ||
+        lowerPkg.contains('aweme') ||
+        lowerPkg.contains('twitter') ||
+        lowerPkg == 'com.x.android' ||
+        lowerPkg.contains('reddit') ||
+        lowerPkg.contains('snapchat') ||
+        lowerPkg.contains('threads') ||
+        lowerPkg.contains('barcelona') ||
+        lowerPkg.contains('pinterest') ||
+        lowerPkg.contains('linkedin') ||
+        lowerPkg.contains('tumblr') ||
+        lowerPkg.contains('discord') ||
+        lowerPkg.contains('twitch') ||
+        lowerPkg.contains('netflix') ||
+        lowerPkg.contains('primevideo') ||
+        lowerPkg.contains('disney') ||
+        lowerPkg.contains('hulu') ||
+        lowerPkg.contains('crunchyroll') ||
+        lowerPkg.contains('bilibili') ||
+        lowerPkg.contains('kwai') ||
+        lowerPkg.contains('likee') ||
+        lowerPkg.contains('bigo') ||
+        lowerPkg.contains('quora') ||
+        lowerPkg.contains('9gag') ||
+        lowerPkg == 'com.android.vending' ||
+        lowerPkg == 'com.sec.android.app.samsungapps' ||
+        lowerPkg == 'com.xiaomi.mipicks' ||
+        lowerPkg == 'com.huawei.appmarket' ||
+        lowerPkg == 'com.heytap.market' ||
+        lowerPkg == 'com.oppo.market' ||
+        lowerPkg == 'com.bbk.appstore';
   }
 
   Future<void> _loadPersistedState() async {
@@ -630,6 +743,8 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
           }
           if (data['apps'] != null) {
             final List<dynamic> list = data['apps'];
+            final bool hasNightGatewayLockV294 =
+                data['nightGatewayLockV294'] == true;
             if (list.isNotEmpty) {
               _apps = list
                   .map((e) => AppItem.fromJson(Map<String, dynamic>.from(e)))
@@ -638,6 +753,44 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                 for (final app in _apps) {
                   if (!app.pinned) {
                     app.profiles = [];
+                  }
+                }
+              }
+              if (!hasNightGatewayLockV294) {
+                if (!_apps.any(
+                    (a) => a.packageName == 'com.google.android.apps.bard')) {
+                  _apps.add(AppItem(
+                    id: 'gemini',
+                    name: 'Google Gemini',
+                    packageName: 'com.google.android.apps.bard',
+                    category: 'Guarded',
+                    tier: 'restricted',
+                    pinned: false,
+                    nightQrLocked: true,
+                    profiles: [],
+                  ));
+                }
+                if (!_apps.any((a) =>
+                    a.packageName ==
+                    'com.google.android.googlequicksearchbox')) {
+                  _apps.add(AppItem(
+                    id: 'googlesearch',
+                    name: 'Google Search & Assistant',
+                    packageName: 'com.google.android.googlequicksearchbox',
+                    category: 'Guarded',
+                    tier: 'restricted',
+                    pinned: false,
+                    nightQrLocked: true,
+                    profiles: [],
+                  ));
+                }
+                for (final app in _apps) {
+                  final String lp = app.packageName.toLowerCase();
+                  if (_isAlwaysNightLockedGatewayOrSocial(lp)) {
+                    app.nightQrLocked = true;
+                    if (lp != 'com.android.vending') {
+                      app.tier = 'restricted';
+                    }
                   }
                 }
               }
@@ -666,8 +819,10 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             );
           }
         });
+        await _syncInstalledAndroidApps(silent: true);
         _syncFortressToNative();
       } else {
+        await _syncInstalledAndroidApps(silent: true);
         _syncFortressToNative();
       }
     } catch (_) {}
@@ -686,6 +841,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'favoriteQuoteCategory': _favoriteQuoteCategory,
         'quoteRotationSeconds': _quoteRotationSeconds,
         'homeListsV23': true,
+        'nightGatewayLockV294': true,
         'dnsProvider': _dnsProvider,
         'dnsHost': _dnsHost,
         'phoneSettingsLocked': _phoneSettingsLocked,
@@ -719,7 +875,18 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
   Future<void> _syncFortressToNative() async {
     try {
       final String nightLockedCsv = _apps
-          .where((a) => a.nightQrLocked || a.tier == 'restricted')
+          .where((a) =>
+              a.nightQrLocked ||
+              a.tier == 'restricted' ||
+              _isAlwaysNightLockedGatewayOrSocial(a.packageName.toLowerCase()))
+          .map((a) => a.packageName)
+          .where((p) => p.isNotEmpty)
+          .join(',');
+      final String nightAllowedCsv = _apps
+          .where((a) =>
+              !a.nightQrLocked &&
+              a.tier != 'restricted' &&
+              !_isAlwaysNightLockedGatewayOrSocial(a.packageName.toLowerCase()))
           .map((a) => a.packageName)
           .where((p) => p.isNotEmpty)
           .join(',');
@@ -735,6 +902,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
         'strictQr247': _strictQrSettingsLock,
         'monkModeUntil': _monkModeUntil,
         'nightLockedPackages': nightLockedCsv,
+        'nightAllowedPackages': nightAllowedCsv,
         'dnsShieldActive': true,
         'dnsHost': _dnsHost,
         'expectedHost': _dnsHost,
@@ -812,7 +980,7 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
     } catch (_) {}
   }
 
-  Future<void> _syncInstalledAndroidApps() async {
+  Future<void> _syncInstalledAndroidApps({bool silent = false}) async {
     try {
       final dynamic raw = await _channel.invokeMethod('getInstalledApps');
       List<dynamic> list = [];
@@ -833,33 +1001,32 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
             final bool exists = _apps.any((a) => a.packageName == pkg);
             if (!exists) {
               final String lowerPkg = pkg.toLowerCase();
-              final bool isBrowserOrSocial = lowerPkg.contains('browser') ||
-                  lowerPkg.contains('chrome') ||
-                  lowerPkg.contains('firefox') ||
-                  lowerPkg.contains('opera') ||
-                  lowerPkg.contains('brave') ||
-                  lowerPkg.contains('instagram') ||
-                  lowerPkg.contains('facebook') ||
-                  lowerPkg.contains('tiktok') ||
-                  lowerPkg.contains('youtube') ||
-                  lowerPkg.contains('twitter') ||
-                  lowerPkg.contains('reddit');
+              final bool isCoreEssential =
+                  _isCoreEssentialUtilityPackage(lowerPkg);
+              final bool isRestrictedGatewayOrSocial =
+                  _isAlwaysNightLockedGatewayOrSocial(lowerPkg);
               _apps.add(AppItem(
                 id: pkg,
                 name: label,
                 packageName: pkg,
-                category: isBrowserOrSocial ? 'Guarded' : 'App',
-                tier: isBrowserOrSocial ? 'restricted' : 'utility',
+                category: isRestrictedGatewayOrSocial
+                    ? 'Guarded'
+                    : (isCoreEssential ? 'Tools' : 'App'),
+                tier: isRestrictedGatewayOrSocial
+                    ? 'restricted'
+                    : (isCoreEssential ? 'essential' : 'utility'),
                 pinned: false,
-                nightQrLocked: isBrowserOrSocial,
+                nightQrLocked: !isCoreEssential,
                 profiles: [],
               ));
               added++;
             }
           }
         });
-        _saveState();
-        if (mounted) {
+        if (added > 0 || !silent) {
+          _saveState();
+        }
+        if (!silent && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('${_tr('syncedAppsToast')} (+$added)'),
@@ -2132,15 +2299,24 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       return;
     }
 
-    // Require Safe Private DNS + Usage Access + Overlay Permission before opening any Browser
+    // Require Safe Private DNS + Usage Access + Overlay Permission before opening any Browser, AI Link Gateway, or Night-guarded app
     final bool isBrowserApp = app.category.toLowerCase() == 'browser' ||
         pkgLower.contains('chrome') ||
         pkgLower.contains('browser') ||
         pkgLower.contains('firefox') ||
         pkgLower.contains('opera') ||
         pkgLower.contains('brave') ||
-        pkgLower.contains('edgemobile');
-    if (isBrowserApp &&
+        pkgLower.contains('sbrowser') ||
+        pkgLower.contains('emmx') ||
+        pkgLower.contains('edgemobile') ||
+        pkgLower.contains('duckduckgo');
+    final bool isAlwaysNightLocked =
+        _isAlwaysNightLockedGatewayOrSocial(pkgLower);
+    final bool isCoreEssential = _isCoreEssentialUtilityPackage(pkgLower);
+
+    if ((isBrowserApp ||
+            isAlwaysNightLocked ||
+            (_isNightWindow && _sleepScheduleEnabled && !isCoreEssential)) &&
         (!_osDnsIsFamilySafe || !_hasUsageAccess || !_hasOverlayPermission)) {
       ScaffoldMessenger.of(ctx).showSnackBar(
         SnackBar(
@@ -2169,7 +2345,9 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
       return;
     }
 
-    if (_isNightWindow && _sleepScheduleEnabled && app.nightQrLocked) {
+    if (_isNightWindow &&
+        _sleepScheduleEnabled &&
+        (app.nightQrLocked || isAlwaysNightLocked || app.tier == 'restricted')) {
       _showQrUnlockDialog(
         ctx,
         targetTitle: app.name,
@@ -5944,6 +6122,17 @@ class _MinimumPhoneAppState extends State<MinimumPhoneApp>
                         const Spacer(),
                         InkWell(
                           onTap: () {
+                            if (_isAlwaysNightLockedGatewayOrSocial(
+                                app.packageName.toLowerCase())) {
+                              setState(() => app.nightQrLocked = true);
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(
+                                  content: Text(_tr('nightOnlyQrNote')),
+                                  backgroundColor: Colors.purple.shade800,
+                                ),
+                              );
+                              return;
+                            }
                             if (app.nightQrLocked) {
                               // Turning OFF Night QR Lock requires Protection Unlock!
                               _requireProtectionUnlock(

@@ -17,8 +17,8 @@ android {
         applicationId = "com.kasbllc.minimumphone"
         minSdk = 24
         targetSdk = 36
-        versionCode = 25
-        versionName = "2.9.3"
+        versionCode = 26
+        versionName = "2.9.4"
     }
 
     signingConfigs {

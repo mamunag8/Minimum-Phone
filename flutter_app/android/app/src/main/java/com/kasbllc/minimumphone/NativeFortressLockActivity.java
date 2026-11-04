@@ -442,8 +442,17 @@ public class NativeFortressLockActivity extends Activity {
         finish();
     }
 
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null) {
+            setIntent(intent);
+        }
+    }
+
     private void attemptUnlockSettings() {
         String reason = getIntent() != null ? getIntent().getStringExtra("intercept_reason") : "settings_locked";
+        String interceptedPkg = getIntent() != null ? getIntent().getStringExtra("intercepted_pkg") : "";
         boolean isNightAppLock = "night_app_locked".equals(reason);
 
         if (cooldownSeconds > 0) {
@@ -462,7 +471,7 @@ public class NativeFortressLockActivity extends Activity {
         }
 
         String qrStr = qrInput.getText() != null ? qrInput.getText().toString().trim() : "";
-        if (needsPhysicalQr) {
+        if (needsPhysicalQr || isNightAppLock) {
             if (!qrVerifiedByCamera || !qrStr.equalsIgnoreCase(expectedQrCode)) {
                 errorView.setText(NativeI18n.tr(this, "errQrRequired"));
                 return;
@@ -472,8 +481,11 @@ public class NativeFortressLockActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
         long now = System.currentTimeMillis();
         if (isNightAppLock) {
+            String cleanPkg = interceptedPkg != null ? interceptedPkg.trim().toLowerCase() : "";
             prefs.edit()
                 .putLong(FortressWatchdogService.KEY_QR_VERIFIED_UNLOCK_UNTIL_MS, now + 600000L)
+                .putString(FortressWatchdogService.KEY_QR_VERIFIED_UNLOCK_PKG, cleanPkg)
+                .putLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, 0L)
                 .putLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L)
                 .apply();
             Toast.makeText(this, NativeI18n.tr(this, "toastAppUnlocked"), Toast.LENGTH_LONG).show();
@@ -536,7 +548,6 @@ public class NativeFortressLockActivity extends Activity {
                     qrVerifiedByCamera = true;
                     SharedPreferences prefs = getSharedPreferences(FortressWatchdogService.PREFS_NAME, Context.MODE_PRIVATE);
                     prefs.edit()
-                        .putLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, System.currentTimeMillis() + 60000L)
                         .putLong(FortressWatchdogService.KEY_CLOCK_TAMPER_UNTIL_MS, 0L)
                         .apply();
                     if (errorView != null) {

@@ -199,6 +199,7 @@ public class MainActivity extends FlutterActivity {
                             Boolean strictQr247 = call.argument("strictQr247");
                             Number monkUntil = call.argument("monkModeUntil");
                             String nightLockedCsv = call.argument("nightLockedPackages");
+                            String nightAllowedCsv = call.argument("nightAllowedPackages");
 
                             String qrCode = call.argument("qrSecret");
                             if (qrCode == null || qrCode.isEmpty()) qrCode = call.argument("qrCode");
@@ -221,6 +222,7 @@ public class MainActivity extends FlutterActivity {
                             if (strictQr247 != null) ed.putBoolean(FortressWatchdogService.KEY_STRICT_QR_247, strictQr247);
                             if (monkUntil != null) ed.putLong(FortressWatchdogService.KEY_MONK_MODE_UNTIL_MS, monkUntil.longValue());
                             if (nightLockedCsv != null) ed.putString(FortressWatchdogService.KEY_NIGHT_LOCKED_PACKAGES, nightLockedCsv);
+                            if (nightAllowedCsv != null) ed.putString(FortressWatchdogService.KEY_NIGHT_ALLOWED_PACKAGES, nightAllowedCsv);
                             if (qrCode != null && !qrCode.isEmpty()) ed.putString(FortressWatchdogService.KEY_QR_CODE, qrCode);
                             if (emergencyUntil != null) ed.putLong(FortressWatchdogService.KEY_EMERGENCY_LOCKDOWN_UNTIL_MS, emergencyUntil.longValue());
                             if (startH != null) ed.putInt(FortressWatchdogService.KEY_NIGHT_START_HOUR, startH);
@@ -1157,6 +1159,13 @@ public class MainActivity extends FlutterActivity {
 
             boolean lockSettings = prefs.getBoolean(FortressWatchdogService.KEY_LOCK_SETTINGS, true);
             boolean osDnsSafe = FortressWatchdogService.isOsPrivateDnsConfigured(ctx);
+            boolean sleepScheduleEnabled = prefs.getBoolean(FortressWatchdogService.KEY_SLEEP_SCHEDULE_ENABLED, true);
+            long monkUntilMs = prefs.getLong(FortressWatchdogService.KEY_MONK_MODE_UNTIL_MS, 0L);
+            boolean isMonkActive = System.currentTimeMillis() < monkUntilMs;
+            boolean isTargetNightLocked = !isSystemSettings
+                && !lowerPkg.isEmpty()
+                && ((isNightNow && sleepScheduleEnabled) || isMonkActive)
+                && FortressWatchdogService.isPackageNightLockedStatic(ctx, lowerPkg, "");
 
             if (isSystemSettings && isNightNow && !isNightQrVerifiedNow(ctx)) {
                 Toast.makeText(
@@ -1176,12 +1185,39 @@ public class MainActivity extends FlutterActivity {
                 prefs.edit()
                     .putLong(FortressWatchdogService.KEY_TEMP_UNLOCK_UNTIL_MS, System.currentTimeMillis() + 25000L)
                     .putString(FortressWatchdogService.KEY_TEMP_UNLOCK_REASON, isNightNow ? "qr_verified" : "daytime_verified")
+                    .putLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, 0L)
                     .apply();
-            } else {
-                // Grant app-level unlock lease for night-locked apps that passed the QR gate in Flutter
+            } else if (isTargetNightLocked) {
+                // CRITICAL: Night-locked apps (Browsers, Social/Video, AI Assistants like Gemini, App Stores, or QR-locked apps)
+                // strictly require a verified Physical Camera QR scan and only grant a package-specific lease!
+                if (!isNightQrVerifiedNow(ctx)) {
+                    Toast.makeText(
+                        ctx,
+                        NativeI18n.tr(ctx, "toastNightQrRequired"),
+                        Toast.LENGTH_LONG
+                    ).show();
+                    Intent lockIntent = new Intent(ctx, NativeFortressLockActivity.class);
+                    lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    lockIntent.putExtra("intercept_reason", "night_app_locked");
+                    lockIntent.putExtra("intercepted_pkg", pkg != null ? pkg : "");
+                    startActivity(lockIntent);
+                    return false;
+                }
                 prefs.edit()
                     .putLong(FortressWatchdogService.KEY_QR_VERIFIED_UNLOCK_UNTIL_MS, System.currentTimeMillis() + (sessionMinutes * 60000L))
+                    .putString(FortressWatchdogService.KEY_QR_VERIFIED_UNLOCK_PKG, lowerPkg)
+                    .putLong(FortressWatchdogService.KEY_NIGHT_QR_VERIFIED_UNTIL_MS, 0L)
                     .apply();
+            } else {
+                // Normal allowed utility/essential app (e.g. Phone, SMS, WhatsApp, Calculator):
+                // NEVER grant a global QR unlock lease! If any previous app lease expired, clear it cleanly.
+                long existingLeaseUntil = prefs.getLong(FortressWatchdogService.KEY_QR_VERIFIED_UNLOCK_UNTIL_MS, 0L);
+                if (System.currentTimeMillis() >= existingLeaseUntil && existingLeaseUntil > 0L) {
+                    prefs.edit()
+                        .putLong(FortressWatchdogService.KEY_QR_VERIFIED_UNLOCK_UNTIL_MS, 0L)
+                        .putString(FortressWatchdogService.KEY_QR_VERIFIED_UNLOCK_PKG, "")
+                        .apply();
+                }
             }
 
             PackageManager pm = ctx.getPackageManager();

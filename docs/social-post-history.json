@@ -1,0 +1,44 @@
+{
+  "posts": [
+    {
+      "id": "tip-002-evening-digital-sunset",
+      "posted_at": "2026-10-31T23:57:40.956494",
+      "channels": [
+        "facebook_page",
+        "facebook_group",
+        "linkedin_page",
+        "linkedin_group"
+      ]
+    },
+    {
+      "id": "tip-001-morning-reflex-loop",
+      "posted_at": "2026-11-01T09:12:52.064321",
+      "channels": [
+        "facebook_page",
+        "facebook_group",
+        "linkedin_page",
+        "linkedin_group"
+      ]
+    },
+    {
+      "id": "tip-004-twice-daily-notification-digest",
+      "posted_at": "2026-11-03T18:15:27.622429",
+      "channels": [
+        "facebook_page",
+        "facebook_group",
+        "linkedin_page",
+        "linkedin_group"
+      ]
+    },
+    {
+      "id": "tip-006-urge-sos-90day-purity",
+      "posted_at": "2026-11-04T18:12:37.501842",
+      "channels": [
+        "facebook_page",
+        "facebook_group",
+        "linkedin_page",
+        "linkedin_group"
+      ]
+    }
+  ]
+}

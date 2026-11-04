@@ -64,7 +64,9 @@ public class FortressWatchdogService extends Service {
     public static final String KEY_STRICT_QR_247 = "strict_qr_247";
     public static final String KEY_MONK_MODE_UNTIL_MS = "monk_mode_until_ms";
     public static final String KEY_NIGHT_LOCKED_PACKAGES = "night_locked_packages";
+    public static final String KEY_NIGHT_ALLOWED_PACKAGES = "night_allowed_packages";
     public static final String KEY_QR_VERIFIED_UNLOCK_UNTIL_MS = "qr_verified_unlock_until_ms";
+    public static final String KEY_QR_VERIFIED_UNLOCK_PKG = "qr_verified_unlock_pkg";
     public static final String KEY_CLOCK_TAMPER_UNTIL_MS = "clock_tamper_until_ms";
     public static final String KEY_USAGE_REMINDER_ENABLED = "usage_reminder_enabled";
     public static final String KEY_USAGE_REMINDER_MINUTES = "usage_reminder_minutes";
@@ -394,60 +396,24 @@ public class FortressWatchdogService extends Service {
             lowerPkg.contains("wirelesssettings") ||
             lowerPkg.endsWith(".settings");
 
-        boolean isBrowserApp =
-            lowerPkg.contains("chrome") ||
-            lowerPkg.contains("firefox") ||
-            lowerPkg.contains("brave") ||
-            lowerPkg.contains("sbrowser") ||
-            lowerPkg.contains("opera") ||
-            lowerPkg.contains("emmx") ||
-            lowerPkg.contains("duckduckgo") ||
-            lowerPkg.contains("ucmobile") ||
-            lowerPkg.contains("kiwi") ||
-            lowerPkg.contains("vivaldi") ||
-            lowerPkg.contains("browser") ||
-            lowerClass.contains("incognito") ||
-            lowerClass.contains("customtab");
+        boolean isBrowserApp = isBrowserPackageOrActivity(lowerPkg, lowerClass);
+        boolean isSocialOrVideoApp = isSocialOrVideoPackage(lowerPkg);
+        boolean isPlayStoreOrAppStore = isPlayStoreOrAppStorePackage(lowerPkg);
+        boolean isAiOrSearchGateway = isAiOrSearchGatewayPackage(lowerPkg);
+        boolean isInAppWebActivity = isInAppBrowserOrCustomTab(lowerClass);
 
-        boolean isSocialOrVideoApp =
-            lowerPkg.contains("youtube") ||
-            lowerPkg.contains("instagram") ||
-            lowerPkg.contains("facebook") ||
-            lowerPkg.contains("musically") ||
-            lowerPkg.contains("trill") ||
-            lowerPkg.contains("tiktok") ||
-            lowerPkg.contains("twitter") ||
-            lowerPkg.contains("reddit") ||
-            lowerPkg.contains("snapchat") ||
-            lowerPkg.contains("threads") ||
-            lowerPkg.contains("pinterest");
-
-        boolean isPlayStoreOrAppStore =
-            lowerPkg.equals("com.android.vending") ||
-            lowerPkg.equals("com.sec.android.app.samsungapps") ||
-            lowerPkg.equals("com.xiaomi.mipicks") ||
-            lowerPkg.equals("com.huawei.appmarket") ||
-            lowerPkg.equals("com.heytap.market") ||
-            lowerPkg.equals("com.oppo.market") ||
-            lowerPkg.equals("com.bbk.appstore");
+        String qrUnlockedPkg = prefs.getString(KEY_QR_VERIFIED_UNLOCK_PKG, "");
+        String qrUnlockedPkgLower = qrUnlockedPkg != null ? qrUnlockedPkg.trim().toLowerCase(Locale.ROOT) : "";
+        boolean unlockedPkgIsBrowser = !qrUnlockedPkgLower.isEmpty() && isBrowserPackageOrActivity(qrUnlockedPkgLower, "");
+        boolean hasValidAppQrLease = (now < qrVerifiedUnlockUntilMs)
+            && !qrUnlockedPkgLower.isEmpty()
+            && lowerPkg.equals(qrUnlockedPkgLower)
+            && (!isInAppWebActivity || unlockedPkgIsBrowser);
 
         boolean isNightLockedApp = false;
         if ((isNightWindow && sleepScheduleEnabled) || isMonkActive) {
-            if (now >= qrVerifiedUnlockUntilMs) {
-                // At night (22:00-06:00), lock Google Play Store / App Stores and night-locked social/video apps
-                // so user cannot search for new apps or launch social apps via Play Store's "Open" button!
-                if (isPlayStoreOrAppStore || isSocialOrVideoApp) {
-                    isNightLockedApp = true;
-                } else if (nightLockedCsv != null && !nightLockedCsv.isEmpty()) {
-                    String[] lockedPkgs = nightLockedCsv.split(",");
-                    for (String p : lockedPkgs) {
-                        String trimmed = p.trim().toLowerCase(Locale.ROOT);
-                        if (!trimmed.isEmpty() && lowerPkg.equals(trimmed)) {
-                            isNightLockedApp = true;
-                            break;
-                        }
-                    }
-                }
+            if (!hasValidAppQrLease) {
+                isNightLockedApp = isPackageNightLockedStatic(ctx, lowerPkg, lowerClass);
             }
         }
 
@@ -456,45 +422,48 @@ public class FortressWatchdogService extends Service {
 
         if (shouldInterceptSettings || shouldInterceptBrowser || isNightLockedApp) {
             hideGentleUsageReminderCard();
-            String reason = "settings_locked";
+            final String reason;
             if (shouldInterceptBrowser) {
                 reason = "dns_removed";
             } else if (isNightLockedApp) {
                 reason = "night_app_locked";
+            } else {
+                reason = "settings_locked";
             }
+            final String interceptedTargetPkg = fgPkg;
 
-            // 1. Instant 0ms Hardware TYPE_APPLICATION_OVERLAY Shield over Settings/Browser
-            showOverlayShield(ctx, reason, fgPkg);
+            // 1. Instant 0ms Hardware TYPE_APPLICATION_OVERLAY Shield over Settings/Browser/Social/AI/DeepLink
+            showOverlayShield(ctx, reason, interceptedTargetPkg);
 
-            // 2. Launch Full NativeFortressLockActivity
+            // 2. Launch Full NativeFortressLockActivity (immediately + 75ms after overlay window commit for Android 14/15 BAL)
             if (now - lastInterceptMs > 500L) {
                 lastInterceptMs = now;
                 try {
                     ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
                     if (am != null) {
-                        am.killBackgroundProcesses(fgPkg);
+                        am.killBackgroundProcesses(interceptedTargetPkg);
                     }
                 } catch (Exception ignored) {}
 
-                Intent lockIntent = new Intent(ctx, NativeFortressLockActivity.class);
-                lockIntent.addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK |
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP |
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-                );
-                lockIntent.putExtra("intercept_reason", reason);
-                lockIntent.putExtra("intercepted_pkg", fgPkg);
-                ctx.startActivity(lockIntent);
+                launchFortressLockActivityNow(ctx, reason, interceptedTargetPkg);
+                watchdogHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (activeOverlayView != null) {
+                            launchFortressLockActivityNow(ctx, reason, interceptedTargetPkg);
+                        }
+                    }
+                }, 75L);
             }
         } else {
             hideOverlayShield();
 
-            // Gentle Continuous Usage Reminder (Default: 10 minutes on Browser / Private Tab / Social / Video apps)
+            // Gentle Continuous Usage Reminder (Default: 10 minutes on Browser / Private Tab / Social / Video / AI apps)
             boolean reminderEnabled = prefs.getBoolean(KEY_USAGE_REMINDER_ENABLED, true);
             int reminderMins = prefs.getInt(KEY_USAGE_REMINDER_MINUTES, 10);
             if (reminderMins < 1) reminderMins = 10;
 
-            boolean isTrackedDistractingApp = isBrowserApp || isSocialOrVideoApp;
+            boolean isTrackedDistractingApp = isBrowserApp || isSocialOrVideoApp || isAiOrSearchGateway;
             if (reminderEnabled && isTrackedDistractingApp) {
                 if (lastSessionTickElapsedMs > 0L) {
                     long delta = elapsed - lastSessionTickElapsedMs;
@@ -790,16 +759,13 @@ public class FortressWatchdogService extends Service {
             qrUnlockBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    hideOverlayShield();
-                    Intent lockIntent = new Intent(ctx, NativeFortressLockActivity.class);
-                    lockIntent.addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK |
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP |
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    );
-                    lockIntent.putExtra("intercept_reason", activeOverlayReason);
-                    lockIntent.putExtra("intercepted_pkg", activeOverlayPkg);
-                    ctx.startActivity(lockIntent);
+                    launchFortressLockActivityNow(ctx, activeOverlayReason, activeOverlayPkg);
+                    watchdogHandler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            hideOverlayShield();
+                        }
+                    }, 220L);
                 }
             });
             root.addView(qrUnlockBtn);
@@ -822,10 +788,15 @@ public class FortressWatchdogService extends Service {
             homeBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    hideOverlayShield();
                     Intent home = new Intent(ctx, MainActivity.class);
                     home.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                     ctx.startActivity(home);
+                    watchdogHandler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            hideOverlayShield();
+                        }
+                    }, 220L);
                 }
             });
             root.addView(homeBtn);
@@ -848,6 +819,231 @@ public class FortressWatchdogService extends Service {
             overlayWindowManager.addView(root, params);
             activeOverlayView = root;
         } catch (Exception ignored) {}
+    }
+
+    private void launchFortressLockActivityNow(Context ctx, String reason, String interceptedPkg) {
+        try {
+            Intent lockIntent = new Intent(ctx, NativeFortressLockActivity.class);
+            lockIntent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK |
+                Intent.FLAG_ACTIVITY_CLEAR_TOP |
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+            );
+            lockIntent.putExtra("intercept_reason", reason != null ? reason : "night_app_locked");
+            lockIntent.putExtra("intercepted_pkg", interceptedPkg != null ? interceptedPkg : "");
+            ctx.startActivity(lockIntent);
+        } catch (Exception ignored) {}
+    }
+
+    public static boolean isInAppBrowserOrCustomTab(String lowerClass) {
+        if (lowerClass == null || lowerClass.isEmpty()) return false;
+        return lowerClass.contains("customtab") ||
+               lowerClass.contains("incognito") ||
+               lowerClass.contains("inappbrowser") ||
+               lowerClass.contains("browseractivity") ||
+               lowerClass.contains("browserlite") ||
+               lowerClass.contains("webviewactivity") ||
+               lowerClass.contains("webactivity") ||
+               lowerClass.contains("webpageactivity") ||
+               lowerClass.contains("internalbrowser") ||
+               lowerClass.contains("authcustomtab");
+    }
+
+    public static boolean isBrowserPackageOrActivity(String lowerPkg, String lowerClass) {
+        if (isInAppBrowserOrCustomTab(lowerClass)) return true;
+        if (lowerPkg == null || lowerPkg.isEmpty()) return false;
+        return lowerPkg.contains("chrome") ||
+               lowerPkg.contains("firefox") ||
+               lowerPkg.contains("brave") ||
+               lowerPkg.contains("sbrowser") ||
+               lowerPkg.contains("opera") ||
+               lowerPkg.contains("emmx") ||
+               lowerPkg.contains("duckduckgo") ||
+               lowerPkg.contains("ucmobile") ||
+               lowerPkg.contains("kiwi") ||
+               lowerPkg.contains("vivaldi") ||
+               lowerPkg.contains("browser") ||
+               lowerPkg.contains("webview") ||
+               lowerPkg.contains("htmlviewer") ||
+               lowerPkg.contains("torproject") ||
+               lowerPkg.contains("bromite") ||
+               lowerPkg.contains("cromite") ||
+               lowerPkg.contains("mulch") ||
+               lowerPkg.contains("iceraven") ||
+               lowerPkg.contains("fenix") ||
+               lowerPkg.contains("focus") ||
+               lowerPkg.contains("ecosia") ||
+               lowerPkg.contains("yandex") ||
+               lowerPkg.contains("whale") ||
+               lowerPkg.contains("aloha") ||
+               lowerPkg.contains("phoenix") ||
+               lowerPkg.contains("puffin") ||
+               lowerPkg.contains("dolphin");
+    }
+
+    public static boolean isAiOrSearchGatewayPackage(String lowerPkg) {
+        if (lowerPkg == null || lowerPkg.isEmpty()) return false;
+        return lowerPkg.equals("com.google.android.apps.bard") ||
+               lowerPkg.equals("com.google.android.googlequicksearchbox") ||
+               lowerPkg.equals("com.google.android.apps.googleassistant") ||
+               lowerPkg.equals("com.google.ar.lens") ||
+               lowerPkg.equals("com.openai.chatgpt") ||
+               lowerPkg.equals("com.microsoft.copilot") ||
+               lowerPkg.equals("com.microsoft.bing") ||
+               lowerPkg.equals("com.anthropic.claude") ||
+               lowerPkg.equals("ai.perplexity.app.android") ||
+               lowerPkg.equals("com.deepseek.chat") ||
+               lowerPkg.equals("ai.x.grok") ||
+               lowerPkg.equals("com.quora.poe") ||
+               lowerPkg.equals("ai.character.app") ||
+               lowerPkg.equals("com.yahoo.mobile.client.android.search") ||
+               lowerPkg.equals("com.yandex.searchplugin") ||
+               lowerPkg.equals("com.baidu.searchbox") ||
+               lowerPkg.contains("gemini") ||
+               lowerPkg.contains("chatgpt") ||
+               lowerPkg.contains("perplexity") ||
+               lowerPkg.contains("copilot");
+    }
+
+    public static boolean isSocialOrVideoPackage(String lowerPkg) {
+        if (lowerPkg == null || lowerPkg.isEmpty()) return false;
+        return lowerPkg.contains("youtube") ||
+               lowerPkg.contains("vanced") ||
+               lowerPkg.contains("newpipe") ||
+               lowerPkg.contains("piped") ||
+               lowerPkg.contains("instagram") ||
+               lowerPkg.contains("facebook") ||
+               lowerPkg.contains("katana") ||
+               lowerPkg.contains("orca") ||
+               lowerPkg.contains("mlite") ||
+               lowerPkg.contains("musically") ||
+               lowerPkg.contains("trill") ||
+               lowerPkg.contains("tiktok") ||
+               lowerPkg.contains("aweme") ||
+               lowerPkg.contains("twitter") ||
+               lowerPkg.equals("com.x.android") ||
+               lowerPkg.contains("reddit") ||
+               lowerPkg.contains("snapchat") ||
+               lowerPkg.contains("threads") ||
+               lowerPkg.contains("barcelona") ||
+               lowerPkg.contains("pinterest") ||
+               lowerPkg.contains("linkedin") ||
+               lowerPkg.contains("tumblr") ||
+               lowerPkg.contains("discord") ||
+               lowerPkg.contains("twitch") ||
+               lowerPkg.equals("com.kick.mobile") ||
+               lowerPkg.contains("netflix") ||
+               lowerPkg.contains("primevideo") ||
+               lowerPkg.contains("avod.thirdpartyclient") ||
+               lowerPkg.contains("disney") ||
+               lowerPkg.contains("hulu") ||
+               lowerPkg.contains("hbo") ||
+               lowerPkg.contains("crunchyroll") ||
+               lowerPkg.contains("bilibili") ||
+               lowerPkg.contains("vimeo") ||
+               lowerPkg.contains("dailymotion") ||
+               lowerPkg.contains("kwai") ||
+               lowerPkg.contains("likee") ||
+               lowerPkg.contains("bigo") ||
+               lowerPkg.contains("quora") ||
+               lowerPkg.contains("9gag") ||
+               lowerPkg.contains("imgur") ||
+               lowerPkg.contains("vkontakte") ||
+               lowerPkg.contains("weibo") ||
+               lowerPkg.contains("bluesky") ||
+               lowerPkg.contains("mastodon");
+    }
+
+    public static boolean isPlayStoreOrAppStorePackage(String lowerPkg) {
+        if (lowerPkg == null || lowerPkg.isEmpty()) return false;
+        return lowerPkg.equals("com.android.vending") ||
+               lowerPkg.equals("com.sec.android.app.samsungapps") ||
+               lowerPkg.equals("com.xiaomi.mipicks") ||
+               lowerPkg.equals("com.xiaomi.market") ||
+               lowerPkg.equals("com.huawei.appmarket") ||
+               lowerPkg.equals("com.heytap.market") ||
+               lowerPkg.equals("com.oppo.market") ||
+               lowerPkg.equals("com.bbk.appstore") ||
+               lowerPkg.equals("com.vivo.appstore") ||
+               lowerPkg.equals("org.fdroid.fdroid") ||
+               lowerPkg.equals("com.aurora.store") ||
+               lowerPkg.equals("com.apkpure.aegon");
+    }
+
+    public static boolean isAlwaysAllowedEmergencyOrCoreUtility(String lowerPkg) {
+        if (lowerPkg == null || lowerPkg.isEmpty()) return false;
+        return lowerPkg.contains("incallui") ||
+               lowerPkg.contains("dialer") ||
+               lowerPkg.equals("com.android.phone") ||
+               lowerPkg.equals("com.android.server.telecom") ||
+               lowerPkg.contains("contacts") ||
+               lowerPkg.contains("deskclock") ||
+               lowerPkg.contains("clockpackage") ||
+               lowerPkg.contains("alarmclock") ||
+               lowerPkg.contains("calculator") ||
+               lowerPkg.equals("com.google.android.apps.messaging") ||
+               lowerPkg.equals("com.samsung.android.messaging") ||
+               lowerPkg.equals("com.android.mms") ||
+               lowerPkg.equals("com.google.android.apps.maps") ||
+               lowerPkg.equals("com.google.android.calendar") ||
+               lowerPkg.equals("com.samsung.android.calendar");
+    }
+
+    /**
+     * Unified Night & Monk Mode package/activity lock evaluator.
+     * Blocks all Browsers, Custom Tabs, In-App WebViews, AI Assistants/Search Gateways (Gemini, Google App, ChatGPT),
+     * Social/Video apps, App Stores, explicitly night-locked packages, and any non-whitelisted external package.
+     */
+    public static boolean isPackageNightLockedStatic(Context ctx, String lowerPkg, String lowerClass) {
+        if (lowerPkg == null || lowerPkg.isEmpty()) return false;
+        if (lowerPkg.contains("minimumphone")) return false;
+
+        // 1. Always intercept any In-App Browser, Custom Tab, or WebView activity opened via links inside ANY app
+        if (isInAppBrowserOrCustomTab(lowerClass)) {
+            return true;
+        }
+
+        // 2. Always intercept Browsers, Social/Video apps, AI Assistants/Search link gateways (Gemini/Google/ChatGPT), and App Stores
+        if (isPlayStoreOrAppStorePackage(lowerPkg) ||
+            isSocialOrVideoPackage(lowerPkg) ||
+            isBrowserPackageOrActivity(lowerPkg, lowerClass) ||
+            isAiOrSearchGatewayPackage(lowerPkg)) {
+            return true;
+        }
+
+        SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+
+        // 3. Check explicit night-locked package list configured in Minimum Phone
+        String nightLockedCsv = prefs.getString(KEY_NIGHT_LOCKED_PACKAGES, "");
+        if (nightLockedCsv != null && !nightLockedCsv.isEmpty()) {
+            String[] lockedPkgs = nightLockedCsv.split(",");
+            for (String p : lockedPkgs) {
+                String trimmed = p.trim().toLowerCase(Locale.ROOT);
+                if (!trimmed.isEmpty() && lowerPkg.equals(trimmed)) {
+                    return true;
+                }
+            }
+        }
+
+        // 4. Never block emergency phone calls, SMS, alarm clock, maps, calendar, or calculator
+        if (isAlwaysAllowedEmergencyOrCoreUtility(lowerPkg)) {
+            return false;
+        }
+
+        // 5. If nightAllowedCsv whitelist is populated, block any other non-whitelisted app (e.g. unsynced apps/games opened via Gemini or deep links)
+        String nightAllowedCsv = prefs.getString(KEY_NIGHT_ALLOWED_PACKAGES, "");
+        if (nightAllowedCsv != null && !nightAllowedCsv.isEmpty()) {
+            String[] allowedPkgs = nightAllowedCsv.split(",");
+            for (String p : allowedPkgs) {
+                String trimmed = p.trim().toLowerCase(Locale.ROOT);
+                if (!trimmed.isEmpty() && lowerPkg.equals(trimmed)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        return false;
     }
 
     private void hideOverlayShield() {
@@ -1101,18 +1297,14 @@ public class FortressWatchdogService extends Service {
                         String pkg = event.getPackageName();
                         if (pkg != null && !pkg.isEmpty() && !isTransientSystemUiOrKeyboard(pkg)) {
                             latestMovedToFg = pkg;
-                            if (event.getClassName() != null) {
-                                latestFgClass = event.getClassName();
-                            }
+                            latestFgClass = event.getClassName() != null ? event.getClassName() : "";
                         }
                     }
                 }
             }
             if (latestMovedToFg != null) {
                 lastKnownForegroundPackage = latestMovedToFg;
-                if (latestFgClass != null) {
-                    lastKnownForegroundClass = latestFgClass;
-                }
+                lastKnownForegroundClass = latestFgClass != null ? latestFgClass : "";
                 return lastKnownForegroundPackage;
             }
             if (lastKnownForegroundPackage == null || lastKnownForegroundPackage.isEmpty()) {
